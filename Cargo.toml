@@ -1,0 +1,12 @@
+[package]
+name = "dockertest-rs"
+version = "0.1.0"
+authors = ["Jon Foss Mikalsen <jon@orcalabs.no>"]
+edition = "2018"
+
+[dependencies]
+futures = "0.1.25"
+tokio = "0.1.15"
+shiplift = "0.4.0"
+failure = "0.1.5"
+rand = "0.6.5"
