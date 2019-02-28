@@ -86,6 +86,7 @@ impl DockerTest {
 
         let ops = DockerOperations { containers };
 
+        // TODO: don't clone? or is it necessary?
         let ops_clone = ops.clone();
 
         let res = {
@@ -217,6 +218,7 @@ impl DockerTest {
 
         let relaxed_containers = rt.block_on(
             receiver
+                .take(self.relaxed_instances.len() as u64)
                 .collect()
                 .map_err(|_e| format_err!("failed to collect relaxed containers")),
         )?;
@@ -268,3 +270,6 @@ fn generate_random_string(len: i32) -> String {
 
     random_string
 }
+
+#[cfg(test)]
+mod tests {}

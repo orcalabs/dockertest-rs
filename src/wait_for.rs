@@ -1,4 +1,6 @@
 use crate::container::Container;
+use failure::Error;
+use futures::future::{self, Future};
 
 /// Trait to wait for a container to be ready for service.
 pub trait WaitFor {
@@ -6,7 +8,10 @@ pub trait WaitFor {
     /// service.
     /// When the container is ready the method
     /// should return true.
-    fn wait_for_ready(&self, _container: &Container) -> bool;
+    fn wait_for_ready(
+        &self,
+        container: Container,
+    ) -> Box<dyn Future<Item = Container, Error = Error>>;
 }
 
 /// The default wait implementation for containers.
@@ -15,7 +20,10 @@ pub trait WaitFor {
 pub struct DefaultWait {}
 
 impl WaitFor for DefaultWait {
-    fn wait_for_ready(&self, _container: &Container) -> bool {
-        false
+    fn wait_for_ready(
+        &self,
+        container: Container,
+    ) -> Box<dyn Future<Item = Container, Error = Error>> {
+        Box::new(future::ok(container))
     }
 }
