@@ -27,6 +27,10 @@ impl DockerError {
     pub(crate) fn pull<T: AsRef<str>>(s: T) -> DockerError {
         DockerError::from(DockerErrorKind::Pull(s.as_ref().to_string()))
     }
+
+    pub(crate) fn startup<T: AsRef<str>>(s: T) -> DockerError {
+        DockerError::from(DockerErrorKind::Startup(s.as_ref().to_string()))
+    }
 }
 
 impl fmt::Display for DockerError {
@@ -50,6 +54,7 @@ pub enum DockerErrorKind {
     Recoverable(String),
     Teardown(String),
     Pull(String),
+    Startup(String),
 }
 
 impl fmt::Display for DockerErrorKind {
@@ -60,6 +65,8 @@ impl fmt::Display for DockerErrorKind {
             DockerErrorKind::Teardown(msg) => write!(f, "[teardown] '{}'", msg),
 
             DockerErrorKind::Pull(msg) => write!(f, "[pull] '{}'", msg),
+
+            DockerErrorKind::Startup(msg) => write!(f, "[startup] '{}'", msg),
         }
     }
 }
