@@ -10,10 +10,10 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 /// Specifies the starting policy of an ImageInstance.
-/// A Strict policy will enforce that this image is started
+/// A Strict policy will enforce that the ImageInstance is started
 /// in the order it was added to DockerTest.
 /// A Relaxed policy will not enforce any ordering, all
-/// ImageInstance with a Relaxed policy will be started
+/// ImageInstances with a Relaxed policy will be started
 /// concurrently.
 #[derive(Clone)]
 pub enum StartPolicy {
@@ -103,7 +103,7 @@ impl ImageInstance {
 
     /// Sets the name of the container that will eventually be started.
     /// The container name defaults to the repository name.
-    pub fn container_name(self, container_name: String) -> ImageInstance {
+    pub fn with_container_name(self, container_name: String) -> ImageInstance {
         ImageInstance {
             container_name,
             ..self
@@ -146,7 +146,6 @@ impl ImageInstance {
 
     // Consumes the ImageInstance, starts the container, and returns the
     // Container object if it was succesfully started.
-    // TODO: wait for it to be ready for service.
     pub(crate) fn start<'a>(
         self,
         client: Rc<shiplift::Docker>,
@@ -187,12 +186,11 @@ impl ImageInstance {
 
                 let containers = c1.containers();
                 // TODO fixx unwrap
-                let container_options =
-                    ContainerOptions::builder(&self.image.retrieved_id().unwrap())
-                        .cmd(cmds)
-                        .env(envs)
-                        .name(&self.container_name)
-                        .build();
+                let container_options = ContainerOptions::builder(&self.image.retrieved_id())
+                    .cmd(cmds)
+                    .env(envs)
+                    .name(&self.container_name)
+                    .build();
                 containers
                     .create(&container_options)
                     .map_err(|e| DockerError::daemon(format!("failed to create container: {}", e)))
@@ -205,13 +203,12 @@ impl ImageInstance {
                     .map_err(|e| DockerError::daemon(format!("failed to start container: {}", e)))
                     .map(move |_| id)
             })
-            .map(move |container_id| {
-                Container::new(
-                    container_name_clone,
-                    client.clone(),
-                    wait_for_clone,
-                    container_id,
-                )
+            .and_then(move |id| {
+                let c = Container::new(&container_name_clone, &id, client.clone());
+
+                wait_for_clone.wait_for_ready(c).map_err(|e| {
+                    DockerError::startup(format!("failed to wait for container to be ready: {}", e))
+                })
             })
     }
 
@@ -243,4 +240,393 @@ fn remove_container_if_exists(
             })
         })
         .map(|_| ())
+}
+
+// TODO: Test the with_wait_for method with some form of downcast next lvl strat
+#[cfg(test)]
+mod tests {
+    use crate::container::Container;
+    use crate::error::DockerErrorKind;
+    use crate::image::{Image, PullPolicy, Remote, Source};
+    use crate::image_instance::{remove_container_if_exists, ImageInstance, StartPolicy};
+    use crate::wait_for::WaitFor;
+    use failure::Error;
+    use futures::future::{self, Future};
+    use std::collections::HashMap;
+    use std::rc::Rc;
+    use std::sync::RwLock;
+    use tokio::runtime::current_thread;
+
+    // Tests that the with_repository constructor creates
+    // an ImageInstance with the correct values
+    #[test]
+    fn test_with_repository_constructor() {
+        let repository = "this_is_a_repository".to_string();
+
+        let instance = ImageInstance::with_repository(&repository);
+        assert_eq!(
+            repository,
+            instance.image.repository(),
+            "repository is not set to the correct value"
+        );
+        assert_eq!(
+            repository, instance.container_name,
+            "container_name should default to the repository"
+        );
+        assert_eq!(
+            instance.env.len(),
+            0,
+            "there should be no environmental variables after constructing an ImageInstance"
+        );
+        assert_eq!(
+            instance.cmd.len(),
+            0,
+            "there should be no commands after constructing an ImageInstance"
+        );
+
+        let equal = match instance.start_policy {
+            StartPolicy::Relaxed => true,
+            _ => false,
+        };
+        assert!(equal, "start_policy should default to relaxed");
+    }
+
+    // Tests that the with_image constructor creates
+    // an ImageInstance with the correct values
+    #[test]
+    fn test_with_image_constructor() {
+        let repository = "this_is_a_repository".to_string();
+
+        let image = Image::with_repository(&repository);
+
+        let instance = ImageInstance::with_image(image);
+        assert_eq!(
+            repository,
+            instance.image.repository(),
+            "repository is not set to the correct value"
+        );
+        assert_eq!(
+            repository, instance.container_name,
+            "container_name should default to the repository"
+        );
+        assert_eq!(
+            instance.env.len(),
+            0,
+            "there should be no environmental variables after constructing an ImageInstance"
+        );
+        assert_eq!(
+            instance.cmd.len(),
+            0,
+            "there should be no commands after constructing an ImageInstance"
+        );
+
+        let equal = match instance.start_policy {
+            StartPolicy::Relaxed => true,
+            _ => false,
+        };
+        assert!(equal, "start_policy should default to relaxed");
+    }
+
+    // Tests all methods that consumes the ImageInstance
+    // and mutates a field
+    #[test]
+    fn test_mutators() {
+        let mut env = HashMap::new();
+
+        let env_variable = "GOPATH".to_string();
+        let env_value = "/home/kim/unsafe".to_string();
+
+        env.insert(env_variable, env_value);
+        let expected_env = env.clone();
+
+        let cmd = "this_is_a_command".to_string();
+        let mut cmds = Vec::new();
+        cmds.push(cmd);
+
+        let expected_cmds = cmds.clone();
+
+        let repository = "this_is_a_repository".to_string();
+
+        let namespace = "this_is_a_namespace".to_string();
+        let suffix = "this_suffix_is_awesome".to_string();
+        let expected_container_name = format!("{}-{}-{}", &namespace, &repository, &suffix);
+
+        let instance = ImageInstance::with_repository(&repository)
+            .with_start_policy(StartPolicy::Strict)
+            .with_env(env)
+            .with_cmd(cmds)
+            .configurate_container_name(&namespace, &suffix);
+
+        let equal = match instance.start_policy {
+            StartPolicy::Strict => true,
+            _ => false,
+        };
+
+        assert!(equal, "start_policy was not changed after invoking mutator");
+        assert_eq!(
+            expected_env, instance.env,
+            "environmental variables not set correctly"
+        );
+
+        assert_eq!(expected_cmds, instance.cmd, "commands not set correctly");
+
+        assert_eq!(
+            instance.container_name, expected_container_name,
+            "container_name not set correctly"
+        );
+    }
+
+    // Tests that the env method succesfully
+    // adds the given environment variable to the ImageInstance
+    #[test]
+    fn test_add_env() {
+        let env_variable = "this_is_an_env_var".to_string();
+        let env_value = "this_is_an_env_value".to_string();
+
+        let repository = "this_is_a_repository".to_string();
+        let mut instance = ImageInstance::with_repository(&repository);
+
+        instance.env(env_variable.clone(), env_value.clone());
+
+        assert_eq!(
+            *instance
+                .env
+                .get(&env_variable)
+                .expect("failed to get value from map that should be there"),
+            env_value,
+            "environmental variable not added correctly"
+        );
+    }
+
+    // Tests that the cmd method succesfully
+    // adds the given command to the ImageInstance
+    #[test]
+    fn test_add_cmd() {
+        let cmd = "this_is_a_command".to_string();
+        let expected_cmd = vec![cmd.clone()];
+
+        let repository = "this_is_a_repository".to_string();
+        let mut instance = ImageInstance::with_repository(&repository);
+
+        instance.cmd(cmd);
+
+        assert_eq!(
+            instance.cmd, expected_cmd,
+            "command value not added correctly"
+        );
+    }
+
+    // Tests that we fail to start the ImageInstance if its associated image has
+    // not been pulled yet.
+    // If it exists locally, but the pull process has no been invoked
+    // its id will be empty.
+    #[test]
+    fn test_start_with_non_existing_image() {
+        let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
+        let repository = "this_repo_does_not_exist".to_string();
+        let instance = ImageInstance::with_repository(&repository);
+
+        let client = Rc::new(shiplift::Docker::new());
+        let res = rt.block_on(instance.start(client));
+
+        assert!(
+            res.is_err(),
+            "should fail to start an ImageInstance with non-exisiting image"
+        );
+    }
+
+    // Tests that we can successfully start an ImageInstance,
+    // resulting in a running container with correct values.
+    // Uses the ubuntu image
+    #[test]
+    fn test_start_with_existing_image() {
+        let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
+        let repository = "ubuntu".to_string();
+
+        let remote = Remote::new(&"addr".to_string(), PullPolicy::Always);
+        let source = Source::Remote(remote);
+        let image = Image::with_repository(&repository).source(source);
+        let instance = ImageInstance::with_image(image);
+
+        let client = Rc::new(shiplift::Docker::new());
+
+        let res = rt.block_on(instance.image().pull(client.clone()));
+        assert!(
+            res.is_ok(),
+            format!("failed to pull image: {}", res.unwrap_err())
+        );
+
+        let res = rt.block_on(instance.start(client));
+        assert!(
+            res.is_ok(),
+            format!("failed to start ImageInstance: {}", res.err().unwrap())
+        );
+    }
+
+    // Tests that we can successfully start an ImageInstance,
+    // even if there exists a container
+    // with the same name.
+    // uses the centos image
+    #[test]
+    fn test_start_with_existing_container() {
+        let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
+        let repository = "centos".to_string();
+
+        let container_name = "this_is_a_container".to_string();
+
+        let remote = Remote::new(&"addr".to_string(), PullPolicy::Always);
+        let source = Source::Remote(remote);
+        let image = Image::with_repository(&repository).source(source);
+        let mut instance = ImageInstance::with_image(image);
+        instance.container_name = container_name.clone();
+
+        let client = Rc::new(shiplift::Docker::new());
+
+        let res = rt.block_on(instance.image().pull(client.clone()));
+        assert!(
+            res.is_ok(),
+            format!("failed to pull image: {}", res.unwrap_err())
+        );
+
+        let res = rt.block_on(instance.start(client.clone()));
+        assert!(
+            res.is_ok(),
+            format!("failed to start ImageInstance: {}", res.err().unwrap())
+        );
+
+        let remote = Remote::new(&"addr".to_string(), PullPolicy::IfNotPresent);
+        let source = Source::Remote(remote);
+        let image = Image::with_repository(&repository).source(source);
+        let mut instance = ImageInstance::with_image(image);
+        instance.container_name = container_name.clone();
+
+        let client = Rc::new(shiplift::Docker::new());
+
+        let res = rt.block_on(instance.image().pull(client.clone()));
+        assert!(
+            res.is_ok(),
+            format!("failed to pull image: {}", res.unwrap_err())
+        );
+
+        let res = rt.block_on(instance.start(client));
+        assert!(
+            res.is_ok(),
+            format!("failed to start ImageInstance: {}", res.err().unwrap())
+        );
+    }
+
+    // Tests that we can remove an existing container.
+    // Uses the fedora image
+    #[test]
+    fn test_remove_existing_container() {
+        let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
+        let repository = "fedora".to_string();
+
+        let remote = Remote::new(&"addr".to_string(), PullPolicy::Always);
+        let source = Source::Remote(remote);
+        let image = Image::with_repository(&repository).source(source);
+        let instance = ImageInstance::with_image(image);
+
+        let container_name = instance.container_name.clone();
+
+        let client = Rc::new(shiplift::Docker::new());
+
+        let res = rt.block_on(instance.image().pull(client.clone()));
+        assert!(
+            res.is_ok(),
+            format!("failed to pull image: {}", res.unwrap_err())
+        );
+
+        let res = rt.block_on(instance.start(client.clone()));
+        assert!(
+            res.is_ok(),
+            format!("failed to start ImageInstance: {}", res.err().unwrap())
+        );
+
+        let res = rt.block_on(remove_container_if_exists(client, container_name));
+        assert!(
+            res.is_ok(),
+            format!("failed to remove existing container: {}", res.unwrap_err())
+        );
+    }
+
+    // Tests that we fail when trying to remove a non-existing container.
+    #[test]
+    fn test_remove_non_existing_container() {
+        let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
+        let client = Rc::new(shiplift::Docker::new());
+
+        let res = rt.block_on(remove_container_if_exists(
+            client,
+            "non_existing_container".to_string(),
+        ));
+
+        let res = match res {
+            Ok(_) => false,
+            Err(e) => match e.kind() {
+                DockerErrorKind::Recoverable(_) => true,
+                _ => false,
+            },
+        };
+        assert!(res, format!("should fail to remove non-existing container"));
+    }
+
+    struct TestWaitFor {
+        invoked: Rc<RwLock<bool>>,
+    }
+
+    impl WaitFor for TestWaitFor {
+        fn wait_for_ready(
+            &self,
+            container: Container,
+        ) -> Box<dyn Future<Item = Container, Error = Error>> {
+            let mut invoked = self.invoked.write().expect("failed to take invoked lock");
+            *invoked = true;
+            Box::new(future::ok(container))
+        }
+    }
+
+    // Tests that the provided WaitFor trait object is invoked
+    // during the start method of ImageInstance
+    // uses the clearlinux image
+    #[test]
+    fn test_wait_for_invoked_during_start() {
+        let wait_for = TestWaitFor {
+            invoked: Rc::new(RwLock::new(false)),
+        };
+
+        let wrapped_wait_for = Rc::new(wait_for);
+
+        let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
+        let repository = "clearlinux".to_string();
+
+        let remote = Remote::new(&"addr".to_string(), PullPolicy::IfNotPresent);
+        let source = Source::Remote(remote);
+        let image = Image::with_repository(&repository).source(source);
+        let instance = ImageInstance::with_image(image).wait_for(wrapped_wait_for.clone());
+
+        let client = Rc::new(shiplift::Docker::new());
+
+        let res = rt.block_on(instance.image().pull(client.clone()));
+        assert!(
+            res.is_ok(),
+            format!("failed to pull image: {}", res.unwrap_err())
+        );
+
+        let res = rt.block_on(instance.start(client));
+        assert!(
+            res.is_ok(),
+            format!("failed to start ImageInstance: {}", res.err().unwrap())
+        );
+
+        let was_invoked = wrapped_wait_for
+            .invoked
+            .read()
+            .expect("failed to get read lock");
+
+        assert!(
+            *was_invoked,
+            "wait_for trait object was not invoked during startup"
+        );
+    }
 }
