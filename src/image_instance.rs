@@ -242,7 +242,6 @@ fn remove_container_if_exists(
         .map(|_| ())
 }
 
-// TODO: Test the with_wait_for method with some form of downcast next lvl strat
 #[cfg(test)]
 mod tests {
     use crate::container::Container;
