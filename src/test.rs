@@ -236,16 +236,20 @@ impl DockerTest {
         mut rt: current_thread::Runtime,
         ops: DockerOperations,
     ) -> Result<(), DockerError> {
+        let mut future_vec = Vec::new();
+
         for (_name, container) in ops.containers {
-            rt.spawn(
+            future_vec.push(
                 container
                     .remove()
                     .map_err(|e| eprintln!("failed to cleanup container instance: {}", e)),
             );
         }
+        let teardown_fut = future::join_all(future_vec);
 
-        rt.run()
-            .map_err(|e| DockerError::teardown(format!("failed to run teardown routines: {}", e)))
+        rt.block_on(teardown_fut)
+            .map(|_| ())
+            .map_err(|e| DockerError::teardown(format!("failed to run teardown routines: {:?}", e)))
     }
 }
 
