@@ -67,9 +67,9 @@ impl DockerTest {
         }
     }
 
-    pub fn namespace(self, name: String) -> DockerTest {
+    pub fn namespace<T: ToString>(self, name: &T) -> DockerTest {
         DockerTest {
-            namespace: name,
+            namespace: name.to_string(),
             ..self
         }
     }
