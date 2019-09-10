@@ -218,11 +218,8 @@ impl Remote {
 #[cfg(test)]
 mod tests {
     use crate::image::{Image, PullPolicy, Remote, Source};
-    use failure::{format_err, Error};
-    use futures::future::{self, Future};
-    use futures::stream::Stream;
+    use crate::test_utils;
     use shiplift;
-    use shiplift::builder::{ContainerListOptions, PullOptions, RmContainerOptions};
     use std::rc::Rc;
     use tokio::runtime::current_thread;
 
@@ -233,19 +230,18 @@ mod tests {
     #[test]
     fn test_pull_succeeds_with_valid_local_source() {
         let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
+        let client = Rc::new(shiplift::Docker::new());
+        let client_clone = client.clone();
 
         let tag = "latest".to_string();
         let repository = "hello-world".to_string();
         let image = Image::with_repository(&repository).tag(&tag);
 
-        let exists =
-            image_exists_local(&mut rt, &repository).expect("failed to query docker deamon");
-
-        if !exists {
-            pull_image(&repository, &tag, &mut rt).expect("failed to pull image");
-        }
-
-        let client = Rc::new(shiplift::Docker::new());
+        let res = rt.block_on(test_utils::pull_if_not_present(&repository, &tag, &client));
+        assert!(
+            res.is_ok(),
+            format!("failed to pull image: {}", res.unwrap_err())
+        );
 
         assert_eq!(
             image.retrieved_id(),
@@ -261,7 +257,9 @@ mod tests {
                 res.unwrap_err()
             )
         );
-        let expected_id = image_id(&repository, &tag, &mut rt).expect("failed to get image_id");
+        let expected_id = rt
+            .block_on(test_utils::image_id(&repository, &tag, &client_clone))
+            .expect("failed to get image_id");
 
         assert_eq!(
             image.retrieved_id(),
@@ -277,19 +275,21 @@ mod tests {
     #[test]
     fn test_pull_fails_with_invalid_local_source() {
         let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
+        let client = Rc::new(shiplift::Docker::new());
 
         let tag = "latest".to_string();
         let repository = "hello-world".to_string();
         let image = Image::with_repository(&repository).tag(&tag);
 
-        let exists =
-            image_exists_local(&mut rt, &repository).expect("failed to query docker deamon");
-
-        if exists {
-            delete_image(&repository, &tag, &mut rt).expect("failed to delete image");
-        }
-
-        let client = Rc::new(shiplift::Docker::new());
+        let res = rt.block_on(test_utils::delete_image_if_present(
+            &repository,
+            &tag,
+            &client,
+        ));
+        assert!(
+            res.is_ok(),
+            format!("failed to delete image: {}", res.unwrap_err())
+        );
 
         let res = rt.block_on(image.pull(client));
         assert!(
@@ -303,6 +303,8 @@ mod tests {
     #[test]
     fn test_pull_succeeds_with_valid_remote_source() {
         let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
+        let client = Rc::new(shiplift::Docker::new());
+        let client_clone = client.clone();
 
         let tag = "latest".to_string();
         let remote = Remote::new(&"".to_string(), PullPolicy::Always);
@@ -311,14 +313,15 @@ mod tests {
             .source(Source::Remote(remote))
             .tag(&tag);
 
-        let exists =
-            image_exists_local(&mut rt, &repository).expect("failed to query docker deamon");
-
-        if exists {
-            delete_image(&repository, &tag, &mut rt).expect("failed to pull image");
-        }
-
-        let client = Rc::new(shiplift::Docker::new());
+        let res = rt.block_on(test_utils::delete_image_if_present(
+            &repository,
+            &tag,
+            &client,
+        ));
+        assert!(
+            res.is_ok(),
+            format!("failed to delete image: {}", res.unwrap_err())
+        );
 
         assert_eq!(
             image.retrieved_id(),
@@ -334,7 +337,9 @@ mod tests {
                 res.unwrap_err()
             )
         );
-        let expected_id = image_id(&repository, &tag, &mut rt).expect("failed to get image_id");
+        let expected_id = rt
+            .block_on(test_utils::image_id(&repository, &tag, &client_clone))
+            .expect("failed to get image_id");
 
         assert_eq!(
             image.retrieved_id(),
@@ -375,6 +380,7 @@ mod tests {
     #[test]
     fn test_set_image_id() {
         let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
+        let client = Rc::new(shiplift::Docker::new());
 
         let tag = "latest".to_string();
         let remote = Remote::new(&"".to_string(), PullPolicy::Always);
@@ -389,15 +395,15 @@ mod tests {
             "image id should be empty before pulling"
         );
 
-        let exists =
-            image_exists_local(&mut rt, &repository).expect("failed to query docker deamon");
-
-        if !exists {
-            pull_image(&repository, &tag, &mut rt).expect("failed to pull image");
-        }
-
-        let expected_id = image_id(&repository, &tag, &mut rt).expect("failed to get image_id");
-        let client = Rc::new(shiplift::Docker::new());
+        let image_id = rt.block_on(test_utils::pull_if_not_present(&repository, &tag, &client));
+        assert!(
+            image_id.is_ok(),
+            format!(
+                "failed to pull image: {}",
+                image_id.err().expect("failed to get error")
+            )
+        );
+        let image_id = image_id.expect("failed to get image id");
 
         let res = rt.block_on(image.retrieve_and_set_id(client));
         assert!(
@@ -407,7 +413,7 @@ mod tests {
 
         assert_eq!(
             image.retrieved_id(),
-            expected_id,
+            image_id,
             "the id set for image does not equal the expected value"
         );
     }
@@ -417,6 +423,7 @@ mod tests {
     #[test]
     fn test_image_existence() {
         let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
+        let client = Rc::new(shiplift::Docker::new());
 
         let tag = "latest".to_string();
         let remote = Remote::new(&"".to_string(), PullPolicy::Always);
@@ -425,14 +432,15 @@ mod tests {
             .source(Source::Remote(remote))
             .tag(&tag);
 
-        let exists =
-            image_exists_local(&mut rt, &repository).expect("failed to query docker deamon");
-
-        if exists {
-            delete_image(&repository, &tag, &mut rt).expect("failed to delete image");
-        }
-
-        let client = Rc::new(shiplift::Docker::new());
+        let res = rt.block_on(test_utils::delete_image_if_present(
+            &repository,
+            &tag,
+            &client,
+        ));
+        assert!(
+            res.is_ok(),
+            format!("failed to delete image: {}", res.unwrap_err())
+        );
 
         let client_clone = client.clone();
 
@@ -444,7 +452,11 @@ mod tests {
             "should return false when image does not exist locally"
         );
 
-        pull_image(&repository, &tag, &mut rt).expect("failed to pull image");
+        let res = rt.block_on(test_utils::pull_image(&repository, &tag, &client_clone));
+        assert!(
+            res.is_ok(),
+            format!("failed to pull image: {}", res.unwrap_err())
+        );
 
         let res = rt
             .block_on(image.does_image_exist(client_clone))
@@ -470,6 +482,7 @@ mod tests {
     #[test]
     fn test_pull_remote_image() {
         let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
+        let client = Rc::new(shiplift::Docker::new());
 
         let tag = "latest".to_string();
         let remote = Remote::new(&"".to_string(), PullPolicy::Always);
@@ -478,21 +491,29 @@ mod tests {
             .source(Source::Remote(remote))
             .tag(&tag);
 
-        let exists =
-            image_exists_local(&mut rt, &repository).expect("failed to query docker deamon");
+        let res = rt.block_on(test_utils::delete_image_if_present(
+            &repository,
+            &tag,
+            &client,
+        ));
+        assert!(
+            res.is_ok(),
+            format!("failed to delete image: {}", res.unwrap_err())
+        );
 
-        if exists {
-            delete_image(&repository, &tag, &mut rt).expect("failed to delete image");
-        }
+        let res = rt.block_on(image.do_pull(&client));
+        assert!(
+            res.is_ok(),
+            format!("failed to pull image: {}", res.err().unwrap())
+        );
 
-        let client = Rc::new(shiplift::Docker::new());
-        let pull_fut = image.do_pull(&client);
-
-        let res = rt.block_on(pull_fut);
-        assert!(res.is_ok(), format!("{}", res.err().unwrap()));
-
-        let exists =
-            image_exists_local(&mut rt, &repository).expect("failed to query docker daemon");
+        let res = rt.block_on(test_utils::image_exists_locally(&repository, &tag, &client));
+        assert!(
+            res.is_ok(),
+            "failed to check image existence: {}",
+            res.err().expect("failed to get error")
+        );
+        let exists = res.expect("failed to get existence result");
         assert!(
             exists,
             "image still exists on the local host after removing it"
