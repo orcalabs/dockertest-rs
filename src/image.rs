@@ -215,10 +215,6 @@ impl Remote {
 // TODO: Maybe use the docker cli to perform existence checks, deletion,
 // and pulling of images instead of using shiplift to not have cyclic
 // dependencies in our tests.
-// TODO: As of now, we rely on all tests involving pulling/deleting images to
-// use different images,
-// so if you wanna add a test you need to find a different image.
-// This is gonna become hell if we dont figure out a better way to do this
 #[cfg(test)]
 mod tests {
     use crate::image::{Image, PullPolicy, Remote, Source};
@@ -234,13 +230,12 @@ mod tests {
     // with a valid local source.
     // A valid local source is just that the image
     // exists locally.
-    // Uses the bash image
     #[test]
     fn test_pull_succeeds_with_valid_local_source() {
         let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
 
         let tag = "latest".to_string();
-        let repository = "bash".to_string();
+        let repository = "hello-world".to_string();
         let image = Image::with_repository(&repository).tag(&tag);
 
         let exists =
@@ -279,13 +274,12 @@ mod tests {
     // invalid local source.
     // An invalid local source is just that the
     // image does not exist locally.
-    // This test does not pull any images.
     #[test]
     fn test_pull_fails_with_invalid_local_source() {
         let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
 
         let tag = "latest".to_string();
-        let repository = "bash".to_string();
+        let repository = "hello-world".to_string();
         let image = Image::with_repository(&repository).tag(&tag);
 
         let exists =
@@ -306,14 +300,13 @@ mod tests {
 
     // Tests that our exposed pull method succeeds
     // with a valid remote source
-    // Uses the registry image.
     #[test]
     fn test_pull_succeeds_with_valid_remote_source() {
         let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
 
         let tag = "latest".to_string();
         let remote = Remote::new(&"".to_string(), PullPolicy::Always);
-        let repository = "registry".to_string();
+        let repository = "hello-world".to_string();
         let image = Image::with_repository(&repository)
             .source(Source::Remote(remote))
             .tag(&tag);
@@ -352,7 +345,6 @@ mod tests {
 
     // Tests that our exposed pull method fails
     // with an invalid remote source
-    // This test pulls no images.
     #[test]
     fn test_pull_fails_with_invalid_remote_source() {
         let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
@@ -380,14 +372,13 @@ mod tests {
     }
 
     // Tests that the retrieve_and_set_id method sets the image id
-    // Uses the busybox image.
     #[test]
     fn test_set_image_id() {
         let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
 
         let tag = "latest".to_string();
         let remote = Remote::new(&"".to_string(), PullPolicy::Always);
-        let repository = "busybox".to_string();
+        let repository = "hello-world".to_string();
         let image = Image::with_repository(&repository)
             .source(Source::Remote(remote))
             .tag(&tag);
@@ -423,14 +414,13 @@ mod tests {
 
     // Tests that we can check if an image exists locally with
     // the does_image_exist method.
-    // Uses the alpine image.
     #[test]
     fn test_image_existence() {
         let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
 
         let tag = "latest".to_string();
         let remote = Remote::new(&"".to_string(), PullPolicy::Always);
-        let repository = "alpine".to_string();
+        let repository = "hello-world".to_string();
         let image = Image::with_repository(&repository)
             .source(Source::Remote(remote))
             .tag(&tag);
@@ -477,7 +467,6 @@ mod tests {
         assert!(res.is_err(), "should fail when pulling non-existing image");
     }
     // Tests that the do_pull method succesfully pulls a remote image
-    // Uses the hello-world image.
     #[test]
     fn test_pull_remote_image() {
         let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
