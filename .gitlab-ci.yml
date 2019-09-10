@@ -1,0 +1,33 @@
+image: 'rust:latest'
+
+stages:
+  - build
+  - test
+
+variables:
+  CARGO_HOME: $CI_PROJECT_DIR/cargo
+  RUST_BACKTRACE: full
+
+.setup_rust: &setup_rust |
+  rustup component add clippy
+  rustup component add rustfmt
+
+rust_precheck:
+  stage: build
+  tags:
+    - rust:latest
+  only:
+    - merge_requests
+  script:
+    - *setup_rust
+    - cargo clippy
+    - cargo fmt -- --check
+
+test_dockertest:
+  stage: test
+  tags:
+    - dockertest
+  only:
+    - merge_requests
+  script:
+    - cargo test --verbose -- --test-threads=1
