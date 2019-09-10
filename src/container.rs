@@ -40,6 +40,12 @@ impl Container {
         &self.name
     }
 
+    /// Returns the id of container
+    #[cfg(test)]
+    pub(crate) fn id(&self) -> &str {
+        &self.id
+    }
+
     /// Forcefully removes the container and consumes self.
     pub(crate) fn remove(self) -> impl Future<Item = (), Error = DockerError> {
         let ops = RmContainerOptions::builder().force(true).build();
