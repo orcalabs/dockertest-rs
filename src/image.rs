@@ -24,7 +24,7 @@ pub enum Source {
 }
 
 /// Represents a remote registry,
-/// currently only describes by an address.
+/// currently only described by an address.
 // TODO: Add possibility for credentials, either here
 // or in another abstraction
 #[derive(Clone)]
@@ -123,7 +123,7 @@ impl Image {
             .map_err(|e| DockerError::pull(format!("failed to retrieve id of image: {}", e)))
     }
 
-    // Checks wether the image exists locally, will nreturn false
+    // Checks wether the image exists locally, will return false
     // if it does not exists, but will also return false if we
     // fail to contact the docker daemon.
     // TODO: Return error if docker daemon is unavailable.

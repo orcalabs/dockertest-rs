@@ -120,7 +120,7 @@ impl ImageInstance {
 
     /// Adds the given command.
     /// Note, if with_cmd is called after a call to cmd,
-    /// all commands added with cmd will be overwritenn.
+    /// all commands added with cmd will be overwritten.
     pub fn cmd(&mut self, cmd: String) -> &mut ImageInstance {
         self.cmd.push(cmd);
         self
@@ -128,7 +128,7 @@ impl ImageInstance {
 
     /// Sets the wait_for trait object, this object will be
     /// invoked repeatedly when we are waiting for the container to start.
-    /// Defaults to waitinf for the container to appear as running.
+    /// Defaults to waiting for the container to appear as running.
     pub fn wait_for(self, wait: Rc<dyn WaitFor>) -> ImageInstance {
         ImageInstance { wait, ..self }
     }

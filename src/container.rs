@@ -11,7 +11,7 @@ pub struct Container {
     /// The docker client
     client: Rc<shiplift::Docker>,
 
-    /// Name of the containers, defaults to the
+    /// Name of the container, defaults to the
     /// repository name of the image.
     name: String,
 
