@@ -222,14 +222,6 @@ impl Remote {
         }
     }
 
-    /// Creates a remote for docker_hub with the given PullPolicy
-    pub fn docker_hub(pull_policy: PullPolicy) -> Remote {
-        Remote {
-            address: "addr".to_string(),
-            pull_policy,
-        }
-    }
-
     // Returns this remote's PullPolicy.
     pub(crate) fn pull_policy(&self) -> &PullPolicy {
         &self.pull_policy
