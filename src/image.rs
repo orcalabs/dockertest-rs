@@ -11,7 +11,7 @@ use std::sync::RwLock;
 pub struct Image {
     repository: String,
     tag: String,
-    source: Source,
+    source: Option<Source>,
     id: Rc<RwLock<String>>,
 }
 
@@ -20,6 +20,7 @@ pub struct Image {
 #[derive(Clone)]
 pub enum Source {
     Local,
+    DockerHub(PullPolicy),
     Remote(Remote),
 }
 
@@ -48,7 +49,7 @@ impl Image {
         Image {
             repository: repository.to_string(),
             tag: "latest".to_string(),
-            source: Source::Local,
+            source: None,
             id: Rc::new(RwLock::new("".to_string())),
         }
     }
@@ -65,7 +66,10 @@ impl Image {
     /// Sets the source for this image,
     /// default value is local.
     pub fn source(self, source: Source) -> Image {
-        Image { source, ..self }
+        Image {
+            source: Some(source),
+            ..self
+        }
     }
 
     // Returns the repository
@@ -140,13 +144,20 @@ impl Image {
 
     /// Pulls the image if neccessary, the pulling decision
     /// is decided by the image's Source and PullPolicy.
+    /// If the image has a specified pulling source
     pub(crate) fn pull<'a>(
         &'a self,
         client: Rc<shiplift::Docker>,
+        default_source: &'a Source,
     ) -> impl Future<Item = (), Error = DockerError> + 'a {
+        let pull_source = match &self.source {
+            None => default_source,
+            Some(r) => r,
+        };
+
         let client_clone = client.clone();
         self.does_image_exist(client.clone())
-            .and_then(move |exists| match self.should_pull(exists) {
+            .and_then(move |exists| match self.should_pull(exists, &pull_source) {
                 Ok(do_pull) => {
                     if do_pull {
                         future::Either::A(self.do_pull(&client))
@@ -163,27 +174,10 @@ impl Image {
 
     // Decides wether we should pull the image based on its
     // Source, PullPolicy, and if it exists locally.
-    fn should_pull(&self, exists: bool) -> Result<bool, DockerError> {
-        match &self.source {
-            Source::Remote(r) => match r.pull_policy() {
-                PullPolicy::Never => {
-                    if exists {
-                        Ok(false)
-                    } else {
-                        Err(DockerError::pull("image source was set to remote and pull_policy to never, but the provided image does not exists on the local host"))
-                    }
-                }
-
-                PullPolicy::Always => Ok(true),
-
-                PullPolicy::IfNotPresent => {
-                    if exists {
-                        Ok(false)
-                    } else {
-                        Ok(true)
-                    }
-                }
-            },
+    fn should_pull(&self, exists: bool, source: &Source) -> Result<bool, DockerError> {
+        match source {
+            Source::Remote(r) => is_valid_pull_policy(exists, r.pull_policy()),
+            Source::DockerHub(p) => is_valid_pull_policy(exists, p),
             Source::Local => {
                 if exists {
                     Ok(false)
@@ -195,13 +189,43 @@ impl Image {
     }
 }
 
-// TODO: Use the address to contact a remote repository.
-// As of now we always default to docker hub.
+fn is_valid_pull_policy(exists: bool, pull_policy: &PullPolicy) -> Result<bool, DockerError> {
+    match pull_policy {
+        PullPolicy::Never => {
+            if exists {
+                Ok(false)
+            } else {
+                Err(DockerError::pull("image source was set to remote and pull_policy to never, but the provided image does not exists on the local host"))
+            }
+        }
+
+        PullPolicy::Always => Ok(true),
+
+        PullPolicy::IfNotPresent => {
+            if exists {
+                Ok(false)
+            } else {
+                Ok(true)
+            }
+        }
+    }
+}
+
+// TODO: Use the address to contact a remote repository. As of now we always default to docker hub.
+// We also have to be able to add credentials somewhere.
 impl Remote {
     /// Creates a new remote with the given address and PullPolicy.
     pub fn new<T: ToString>(address: &T, pull_policy: PullPolicy) -> Remote {
         Remote {
             address: address.to_string(),
+            pull_policy,
+        }
+    }
+
+    /// Creates a remote for docker_hub with the given PullPolicy
+    pub fn docker_hub(pull_policy: PullPolicy) -> Remote {
+        Remote {
+            address: "addr".to_string(),
             pull_policy,
         }
     }

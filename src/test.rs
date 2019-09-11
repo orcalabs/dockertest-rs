@@ -1,5 +1,6 @@
 use crate::container::Container;
 use crate::error::DockerError;
+use crate::image::Source;
 use crate::image_instance::{ImageInstance, StartPolicy};
 use failure::{format_err, Error};
 use futures::future::{self, Future};
@@ -31,6 +32,9 @@ pub struct DockerTest {
     namespace: String,
     /// The docker client to interact with the docker daemon with.
     client: Rc<shiplift::Docker>,
+    /// The default pull source to use for all images.
+    /// Images with a specified source will override this default.
+    default_source: Source,
 }
 
 /// Represents all operations that can be performed
@@ -67,7 +71,20 @@ impl DockerTest {
         }
     }
 
-    pub fn namespace<T: ToString>(self, name: &T) -> DockerTest {
+    /// Sets the default source for all images.
+    /// All images without a specified source will be pulled from the default source.
+    /// DockerTest will default to Local if no default source is provided.
+    pub fn with_default_source(self, default_source: Source) -> DockerTest {
+        DockerTest {
+            default_source,
+            ..self
+        }
+    }
+
+    /// Sets the namespace for all containers created by dockerTest.
+    /// All container names will be prefixed with this namespace.
+    /// DockerTest defaults to the namespace "dockertest-rs".
+    pub fn with_namespace<T: ToString>(self, name: &T) -> DockerTest {
         DockerTest {
             namespace: name.to_string(),
             ..self
@@ -115,6 +132,11 @@ impl DockerTest {
         };
     }
 
+    #[cfg(test)]
+    pub(crate) fn source(&self) -> &Source {
+        &self.default_source
+    }
+
     fn setup(&self, mut rt: current_thread::Runtime) -> Result<HashMap<String, Container>, Error> {
         self.pull_images(&mut rt)?;
 
@@ -137,14 +159,14 @@ impl DockerTest {
 
         for instance in self.strict_instances.iter() {
             let client_clone = self.client.clone();
-            let fut = instance.image().pull(client_clone);
+            let fut = instance.image().pull(client_clone, &self.default_source);
 
             future_vec.push(fut);
         }
 
         for instance in self.relaxed_instances.iter() {
             let client_clone = self.client.clone();
-            let fut = instance.image().pull(client_clone);
+            let fut = instance.image().pull(client_clone, &self.default_source);
 
             future_vec.push(fut);
         }
@@ -256,6 +278,7 @@ impl DockerTest {
 impl Default for DockerTest {
     fn default() -> DockerTest {
         DockerTest {
+            default_source: Source::Local,
             strict_instances: Vec::new(),
             relaxed_instances: Vec::new(),
             namespace: "dockertest-rs".to_string(),
