@@ -1,5 +1,6 @@
 use crate::container::Container;
 use crate::error::DockerError;
+use crate::image::Source;
 use crate::image_instance::{ImageInstance, StartPolicy};
 use failure::{format_err, Error};
 use futures::future::{self, Future};
@@ -31,6 +32,9 @@ pub struct DockerTest {
     namespace: String,
     /// The docker client to interact with the docker daemon with.
     client: Rc<shiplift::Docker>,
+    /// The default pull source to use for all images.
+    /// Images with a specified source will override this default.
+    default_source: Source,
 }
 
 /// Represents all operations that can be performed
@@ -67,7 +71,20 @@ impl DockerTest {
         }
     }
 
-    pub fn namespace<T: ToString>(self, name: &T) -> DockerTest {
+    /// Sets the default source for all images.
+    /// All images without a specified source will be pulled from the default source.
+    /// DockerTest will default to Local if no default source is provided.
+    pub fn with_default_source(self, default_source: Source) -> DockerTest {
+        DockerTest {
+            default_source,
+            ..self
+        }
+    }
+
+    /// Sets the namespace for all containers created by dockerTest.
+    /// All container names will be prefixed with this namespace.
+    /// DockerTest defaults to the namespace "dockertest-rs".
+    pub fn with_namespace<T: ToString>(self, name: T) -> DockerTest {
         DockerTest {
             namespace: name.to_string(),
             ..self
@@ -115,6 +132,11 @@ impl DockerTest {
         };
     }
 
+    #[cfg(test)]
+    pub(crate) fn source(&self) -> &Source {
+        &self.default_source
+    }
+
     fn setup(&self, mut rt: current_thread::Runtime) -> Result<HashMap<String, Container>, Error> {
         self.pull_images(&mut rt)?;
 
@@ -137,14 +159,14 @@ impl DockerTest {
 
         for instance in self.strict_instances.iter() {
             let client_clone = self.client.clone();
-            let fut = instance.image().pull(client_clone);
+            let fut = instance.image().pull(client_clone, &self.default_source);
 
             future_vec.push(fut);
         }
 
         for instance in self.relaxed_instances.iter() {
             let client_clone = self.client.clone();
-            let fut = instance.image().pull(client_clone);
+            let fut = instance.image().pull(client_clone, &self.default_source);
 
             future_vec.push(fut);
         }
@@ -256,6 +278,7 @@ impl DockerTest {
 impl Default for DockerTest {
     fn default() -> DockerTest {
         DockerTest {
+            default_source: Source::Local,
             strict_instances: Vec::new(),
             relaxed_instances: Vec::new(),
             namespace: "dockertest-rs".to_string(),
@@ -277,7 +300,7 @@ fn generate_random_string(len: i32) -> String {
 
 #[cfg(test)]
 mod tests {
-    use crate::image::{Image, PullPolicy, Remote, Source};
+    use crate::image::{Image, PullPolicy, Source};
     use crate::image_instance::{ImageInstance, StartPolicy};
     use crate::test::DockerOperations;
     use crate::test_utils;
@@ -288,10 +311,9 @@ mod tests {
     use std::rc::Rc;
     use tokio::runtime::current_thread;
 
-    // Tests that the DockerTest constructor produces a valid
-    // instance with the correct values set
+    // Tests that the default DockerTest constructor produces a valid instance with the correct values set
     #[test]
-    fn test_constructor() {
+    fn test_default_constructor() {
         let test = DockerTest::new();
         assert_eq!(
             test.strict_instances.len(),
@@ -311,9 +333,40 @@ mod tests {
             "default namespace was not set correctly"
         );
 
-        let namespace = "this_is_a_namespace".to_string();
-        let test = test.namespace(&namespace);
-        assert_eq!(test.namespace, namespace, "namespace not set correctly");
+        let equal = match *test.source() {
+            Source::Local => true,
+            _ => false,
+        };
+
+        assert!(equal, "source not set to local by default");
+    }
+
+    // Tests that the with_namespace builder method sets the namespace correctly
+    #[test]
+    fn test_with_namespace() {
+        let namespace = "this_is_a_test_namespace".to_string();
+        let test = DockerTest::new().with_namespace(&namespace);
+
+        assert_eq!(
+            test.namespace, namespace,
+            "default namespace was not set correctly"
+        );
+    }
+
+    // Tests that the with_default_source builder method sets the default_source_correctly
+    #[test]
+    fn test_with_default_source() {
+        let test = DockerTest::new().with_default_source(Source::DockerHub(PullPolicy::Always));
+
+        let equal = match test.default_source {
+            Source::DockerHub(p) => match p {
+                PullPolicy::Always => true,
+                _ => false,
+            },
+            _ => false,
+        };
+
+        assert!(equal, "default_source was not set correctly");
     }
 
     // Tests that the setup method returns Container representations for both strict and relaxed
@@ -324,7 +377,9 @@ mod tests {
         let client = Rc::new(shiplift::Docker::new());
 
         let image_name = "hello-world".to_string();
-        let mut test = DockerTest::new();
+
+        let mut test =
+            DockerTest::new().with_default_source(Source::DockerHub(PullPolicy::IfNotPresent));
 
         let image_instance = ImageInstance::with_repository(&image_name);
         let image_instance2 =
@@ -369,12 +424,13 @@ mod tests {
         let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
         let client = Rc::new(shiplift::Docker::new());
 
+        let mut test =
+            DockerTest::new().with_default_source(Source::DockerHub(PullPolicy::IfNotPresent));
+
         let repository = "hello-world".to_string();
         let tag = "latest".to_string();
-        let mut test = DockerTest::new();
 
-        let source = Source::Remote(Remote::new(&"addr".to_string(), PullPolicy::Always));
-        let image = Image::with_repository(&repository).source(source);
+        let image = Image::with_repository(&repository);
         let image_instance =
             ImageInstance::with_image(image).with_start_policy(StartPolicy::Strict);
 
@@ -409,12 +465,13 @@ mod tests {
         let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
         let client = Rc::new(shiplift::Docker::new());
 
+        let mut test =
+            DockerTest::new().with_default_source(Source::DockerHub(PullPolicy::IfNotPresent));
+
         let repository = "hello-world".to_string();
         let tag = "latest".to_string();
-        let mut test = DockerTest::new();
 
-        let source = Source::Remote(Remote::new(&"addr".to_string(), PullPolicy::Always));
-        let image = Image::with_repository(&repository).source(source);
+        let image = Image::with_repository(&repository);
         let image_instance =
             ImageInstance::with_image(image).with_start_policy(StartPolicy::Relaxed);
 
@@ -449,13 +506,13 @@ mod tests {
         let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
         let client = Rc::new(shiplift::Docker::new());
 
+        let mut test =
+            DockerTest::new().with_default_source(Source::DockerHub(PullPolicy::IfNotPresent));
+
         let repository = "hello-world".to_string();
-        let mut test = DockerTest::new();
+        let image = Image::with_repository(&repository);
 
-        let source = Source::Remote(Remote::new(&"addr".to_string(), PullPolicy::IfNotPresent));
-        let image = Image::with_repository(&repository).source(source);
-
-        let res = rt.block_on(image.pull(client.clone()));
+        let res = rt.block_on(image.pull(client.clone(), test.source()));
         assert!(
             res.is_ok(),
             "failed to pull relaxed container image: {}",
@@ -519,13 +576,13 @@ mod tests {
         let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
         let client = Rc::new(shiplift::Docker::new());
 
+        let mut test =
+            DockerTest::new().with_default_source(Source::DockerHub(PullPolicy::IfNotPresent));
+
         let repository = "hello-world".to_string();
-        let mut test = DockerTest::new();
+        let image = Image::with_repository(&repository);
 
-        let source = Source::Remote(Remote::new(&"addr".to_string(), PullPolicy::IfNotPresent));
-        let image = Image::with_repository(&repository).source(source);
-
-        let res = rt.block_on(image.pull(client.clone()));
+        let res = rt.block_on(image.pull(client.clone(), test.source()));
         assert!(
             res.is_ok(),
             "failed to pull relaxed container image: {}",
@@ -580,13 +637,13 @@ mod tests {
         let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
         let client = Rc::new(shiplift::Docker::new());
 
+        let mut test =
+            DockerTest::new().with_default_source(Source::DockerHub(PullPolicy::IfNotPresent));
+
         let repository = "hello-world".to_string();
-        let mut test = DockerTest::new();
+        let image = Image::with_repository(&repository);
 
-        let source = Source::Remote(Remote::new(&"addr".to_string(), PullPolicy::IfNotPresent));
-        let image = Image::with_repository(&repository).source(source);
-
-        let res = rt.block_on(image.pull(client.clone()));
+        let res = rt.block_on(image.pull(client.clone(), test.source()));
         assert!(
             res.is_ok(),
             "failed to pull relaxed container image: {}",
@@ -596,10 +653,9 @@ mod tests {
         let image_instance =
             ImageInstance::with_image(image).with_start_policy(StartPolicy::Relaxed);
 
-        let source2 = Source::Remote(Remote::new(&"addr".to_string(), PullPolicy::IfNotPresent));
-        let image2 = Image::with_repository(&repository).source(source2);
+        let image2 = Image::with_repository(&repository);
 
-        let res = rt.block_on(image2.pull(client.clone()));
+        let res = rt.block_on(image2.pull(client.clone(), test.source()));
         assert!(
             res.is_ok(),
             "failed to pull relaxed container image: {}",
@@ -669,13 +725,13 @@ mod tests {
         let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
         let client = Rc::new(shiplift::Docker::new());
 
+        let mut test =
+            DockerTest::new().with_default_source(Source::DockerHub(PullPolicy::IfNotPresent));
+
         let repository = "hello-world".to_string();
-        let mut test = DockerTest::new();
+        let image = Image::with_repository(&repository);
 
-        let source = Source::Remote(Remote::new(&"addr".to_string(), PullPolicy::IfNotPresent));
-        let image = Image::with_repository(&repository).source(source);
-
-        let res = rt.block_on(image.pull(client.clone()));
+        let res = rt.block_on(image.pull(client.clone(), test.source()));
         assert!(
             res.is_ok(),
             "failed to pull relaxed container image: {}",

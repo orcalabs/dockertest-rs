@@ -11,7 +11,7 @@ use std::sync::RwLock;
 pub struct Image {
     repository: String,
     tag: String,
-    source: Source,
+    source: Option<Source>,
     id: Rc<RwLock<String>>,
 }
 
@@ -20,6 +20,7 @@ pub struct Image {
 #[derive(Clone)]
 pub enum Source {
     Local,
+    DockerHub(PullPolicy),
     Remote(Remote),
 }
 
@@ -44,18 +45,18 @@ pub enum PullPolicy {
 impl Image {
     /// Creates an Image with the given repository, will default
     /// to the latest tag and local source.
-    pub fn with_repository<T: ToString>(repository: &T) -> Image {
+    pub fn with_repository<T: ToString>(repository: T) -> Image {
         Image {
             repository: repository.to_string(),
             tag: "latest".to_string(),
-            source: Source::Local,
+            source: None,
             id: Rc::new(RwLock::new("".to_string())),
         }
     }
 
     /// Sets the tag for this image,
     /// default value is latest.
-    pub fn tag<T: ToString>(self, tag: &T) -> Image {
+    pub fn tag<T: ToString>(self, tag: T) -> Image {
         Image {
             tag: tag.to_string(),
             ..self
@@ -65,7 +66,10 @@ impl Image {
     /// Sets the source for this image,
     /// default value is local.
     pub fn source(self, source: Source) -> Image {
-        Image { source, ..self }
+        Image {
+            source: Some(source),
+            ..self
+        }
     }
 
     // Returns the repository
@@ -140,13 +144,20 @@ impl Image {
 
     /// Pulls the image if neccessary, the pulling decision
     /// is decided by the image's Source and PullPolicy.
+    /// If the image has a specified pulling source
     pub(crate) fn pull<'a>(
         &'a self,
         client: Rc<shiplift::Docker>,
+        default_source: &'a Source,
     ) -> impl Future<Item = (), Error = DockerError> + 'a {
+        let pull_source = match &self.source {
+            None => default_source,
+            Some(r) => r,
+        };
+
         let client_clone = client.clone();
         self.does_image_exist(client.clone())
-            .and_then(move |exists| match self.should_pull(exists) {
+            .and_then(move |exists| match self.should_pull(exists, &pull_source) {
                 Ok(do_pull) => {
                     if do_pull {
                         future::Either::A(self.do_pull(&client))
@@ -163,27 +174,10 @@ impl Image {
 
     // Decides wether we should pull the image based on its
     // Source, PullPolicy, and if it exists locally.
-    fn should_pull(&self, exists: bool) -> Result<bool, DockerError> {
-        match &self.source {
-            Source::Remote(r) => match r.pull_policy() {
-                PullPolicy::Never => {
-                    if exists {
-                        Ok(false)
-                    } else {
-                        Err(DockerError::pull("image source was set to remote and pull_policy to never, but the provided image does not exists on the local host"))
-                    }
-                }
-
-                PullPolicy::Always => Ok(true),
-
-                PullPolicy::IfNotPresent => {
-                    if exists {
-                        Ok(false)
-                    } else {
-                        Ok(true)
-                    }
-                }
-            },
+    fn should_pull(&self, exists: bool, source: &Source) -> Result<bool, DockerError> {
+        match source {
+            Source::Remote(r) => is_valid_pull_policy(exists, r.pull_policy()),
+            Source::DockerHub(p) => is_valid_pull_policy(exists, p),
             Source::Local => {
                 if exists {
                     Ok(false)
@@ -195,8 +189,30 @@ impl Image {
     }
 }
 
-// TODO: Use the address to contact a remote repository.
-// As of now we always default to docker hub.
+fn is_valid_pull_policy(exists: bool, pull_policy: &PullPolicy) -> Result<bool, DockerError> {
+    match pull_policy {
+        PullPolicy::Never => {
+            if exists {
+                Ok(false)
+            } else {
+                Err(DockerError::pull("image source was set to remote and pull_policy to never, but the provided image does not exists on the local host"))
+            }
+        }
+
+        PullPolicy::Always => Ok(true),
+
+        PullPolicy::IfNotPresent => {
+            if exists {
+                Ok(false)
+            } else {
+                Ok(true)
+            }
+        }
+    }
+}
+
+// TODO: Use the address to contact a remote repository. As of now we always default to docker hub.
+// We also have to be able to add credentials somewhere.
 impl Remote {
     /// Creates a new remote with the given address and PullPolicy.
     pub fn new<T: ToString>(address: &T, pull_policy: PullPolicy) -> Remote {
@@ -249,7 +265,7 @@ mod tests {
             "image id should not be set before pulling"
         );
 
-        let res = rt.block_on(image.pull(client));
+        let res = rt.block_on(image.pull(client, &Source::Local));
         assert!(
             res.is_ok(),
             format!(
@@ -291,7 +307,7 @@ mod tests {
             format!("failed to delete image: {}", res.unwrap_err())
         );
 
-        let res = rt.block_on(image.pull(client));
+        let res = rt.block_on(image.pull(client, &Source::Local));
         assert!(
             res.is_err(),
             "should fail pull process with local source and non-existing image"
@@ -307,11 +323,9 @@ mod tests {
         let client_clone = client.clone();
 
         let tag = "latest".to_string();
-        let remote = Remote::new(&"".to_string(), PullPolicy::Always);
+        let source = Source::DockerHub(PullPolicy::Always);
         let repository = "hello-world".to_string();
-        let image = Image::with_repository(&repository)
-            .source(Source::Remote(remote))
-            .tag(&tag);
+        let image = Image::with_repository(&repository).tag(&tag);
 
         let res = rt.block_on(test_utils::delete_image_if_present(
             &repository,
@@ -329,7 +343,7 @@ mod tests {
             "image id should not be set before pulling"
         );
 
-        let res = rt.block_on(image.pull(client));
+        let res = rt.block_on(image.pull(client, &source));
         assert!(
             res.is_ok(),
             format!(
@@ -354,12 +368,12 @@ mod tests {
     fn test_pull_fails_with_invalid_remote_source() {
         let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
 
-        let tag = "this_is_not_a_tag".to_string();
         let remote = Remote::new(&"".to_string(), PullPolicy::Always);
+        let source = Source::Remote(remote);
+
+        let tag = "this_is_not_a_tag".to_string();
         let repository = "non_existing_repo_yepsi_pepsi".to_string();
-        let image = Image::with_repository(&repository)
-            .source(Source::Remote(remote))
-            .tag(&tag);
+        let image = Image::with_repository(&repository).tag(&tag);
 
         let client = Rc::new(shiplift::Docker::new());
 
@@ -369,7 +383,7 @@ mod tests {
             "image id should not be set before pulling"
         );
 
-        let res = rt.block_on(image.pull(client));
+        let res = rt.block_on(image.pull(client, &source));
         assert!(
             res.is_err(),
             "should fail pull process with an invalid remote source",
@@ -383,11 +397,8 @@ mod tests {
         let client = Rc::new(shiplift::Docker::new());
 
         let tag = "latest".to_string();
-        let remote = Remote::new(&"".to_string(), PullPolicy::Always);
         let repository = "hello-world".to_string();
-        let image = Image::with_repository(&repository)
-            .source(Source::Remote(remote))
-            .tag(&tag);
+        let image = Image::with_repository(&repository).tag(&tag);
 
         assert_eq!(
             image.retrieved_id(),
@@ -426,11 +437,8 @@ mod tests {
         let client = Rc::new(shiplift::Docker::new());
 
         let tag = "latest".to_string();
-        let remote = Remote::new(&"".to_string(), PullPolicy::Always);
         let repository = "hello-world".to_string();
-        let image = Image::with_repository(&repository)
-            .source(Source::Remote(remote))
-            .tag(&tag);
+        let image = Image::with_repository(&repository).tag(&tag);
 
         let res = rt.block_on(test_utils::delete_image_if_present(
             &repository,
@@ -485,11 +493,8 @@ mod tests {
         let client = Rc::new(shiplift::Docker::new());
 
         let tag = "latest".to_string();
-        let remote = Remote::new(&"".to_string(), PullPolicy::Always);
         let repository = "hello-world".to_string();
-        let image = Image::with_repository(&repository)
-            .source(Source::Remote(remote))
-            .tag(&tag);
+        let image = Image::with_repository(&repository).tag(&tag);
 
         let res = rt.block_on(test_utils::delete_image_if_present(
             &repository,
@@ -552,12 +557,13 @@ mod tests {
     // Source set to local.
     #[test]
     fn test_should_pull_local_source() {
+        let source = Source::Local;
         let repository = "hello-world".to_string();
-        let image = Image::with_repository(&repository).source(Source::Local);
+        let image = Image::with_repository(&repository);
 
         let exists_locally = true;
         let res = image
-            .should_pull(exists_locally)
+            .should_pull(exists_locally, &source)
             .expect("returned error with image locally and source set to local");
 
         assert!(
@@ -566,7 +572,7 @@ mod tests {
         );
 
         let exists_locally = false;
-        let res = image.should_pull(exists_locally);
+        let res = image.should_pull(exists_locally, &source);
         assert!(
             res.is_err(),
             "should return an error without image on local host and source set to local"
@@ -577,16 +583,16 @@ mod tests {
     // source set to remote and pull_policy set to always
     #[test]
     fn test_should_pull_remote_source_always() {
-        let remote = Remote::new(&"remote_registry", PullPolicy::Always);
+        let source = Source::DockerHub(PullPolicy::Always);
         let repository = "hello-world".to_string();
-        let image = Image::with_repository(&repository).source(Source::Remote(remote));
+        let image = Image::with_repository(&repository);
 
         let exists_locally = false;
-        let res = image.should_pull(exists_locally).expect("should not return an error when source is remote, pull_policy is always, and image does not exist locally");
+        let res = image.should_pull(exists_locally, &source).expect("should not return an error when source is remote, pull_policy is always, and image does not exist locally");
         assert!(res, "should pull when pull policy is set to always");
 
         let exists_locally = true;
-        let res = image.should_pull(exists_locally).expect("should not return an error when source is remote, pull_policy is always, and image exists locally");
+        let res = image.should_pull(exists_locally, &source).expect("should not return an error when source is remote, pull_policy is always, and image exists locally");
         assert!(res, "should pull when pull policy is set to always");
     }
 
@@ -594,17 +600,17 @@ mod tests {
     // source set to remote and pull_policy set to never
     #[test]
     fn test_should_pull_remote_source_never() {
-        let remote = Remote::new(&"remote_registry", PullPolicy::Never);
+        let source = Source::DockerHub(PullPolicy::Never);
         let repository = "hello-world".to_string();
-        let image = Image::with_repository(&repository).source(Source::Remote(remote));
+        let image = Image::with_repository(&repository);
 
         let exists_locally = false;
-        let res = image.should_pull(exists_locally);
+        let res = image.should_pull(exists_locally, &source);
         assert!(res.is_err(), "should return an error when pull policy is set to never and image does not exist locally");
 
         let exists_locally = true;
         let res = image
-            .should_pull(exists_locally)
+            .should_pull(exists_locally, &source)
             .expect("should not return an error with existing image and pull policy set to never");
         assert!(!res, "should not pull with pull_policy set to never");
     }
@@ -613,18 +619,18 @@ mod tests {
     // source set to remote and pull_policy set to if_not_present
     #[test]
     fn test_should_pull_remote_source_if_not_present() {
-        let remote = Remote::new(&"remote_registry", PullPolicy::IfNotPresent);
+        let source = Source::DockerHub(PullPolicy::IfNotPresent);
         let repository = "hello-world".to_string();
-        let image = Image::with_repository(&repository).source(Source::Remote(remote));
+        let image = Image::with_repository(&repository);
 
         let exists_locally = true;
-        let res = image.should_pull(exists_locally).expect(
+        let res = image.should_pull(exists_locally, &source).expect(
             "should not return an error with IfNotPresent pull policy and image existing locally",
         );
         assert!(!res, "should not pull when the image already exists");
 
         let exists_locally = false;
-        let res = image.should_pull(exists_locally).expect(
+        let res = image.should_pull(exists_locally, &source).expect(
             "should not return an error with IfNotPresent pull policy and image not existing locally",
         );
         assert!(res, "should pull when the image does not exist locally");
@@ -637,10 +643,10 @@ mod tests {
         let image = Image::with_repository(&repository);
 
         let equal = match image.source {
-            Source::Local => true,
-            _ => false,
+            None => true,
+            Some(_) => false,
         };
-        assert!(equal, "should have source set to local as default");
+        assert!(equal, "should not have source set as default");
         assert_eq!(image.tag, "latest", "should have latest as default tag");
         assert_eq!(
             image.repository, repository,
@@ -657,14 +663,17 @@ mod tests {
         let image = image.source(Source::Remote(remote));
 
         let equal = match &image.source {
-            Source::Remote(r) => {
-                assert_eq!(r.address, addr, "wrong address set in remote after change");
-                match r.pull_policy {
-                    PullPolicy::Always => true,
-                    _ => false,
+            Some(r) => match r {
+                Source::Remote(r) => {
+                    assert_eq!(r.address, addr, "wrong address set in remote after change");
+                    match r.pull_policy {
+                        PullPolicy::Always => true,
+                        _ => false,
+                    }
                 }
-            }
-            _ => false,
+                _ => false,
+            },
+            None => false,
         };
 
         assert!(
@@ -675,5 +684,48 @@ mod tests {
         let new_tag = "this_is_a_test_tag";
         let image = image.tag(&new_tag);
         assert_eq!(image.tag, new_tag, "changing tag does not change image tag");
+    }
+
+    // Tests that image with a provided source overrides the default_source that is set.
+    // This is tested by providing an unvalid default_source and trying to override it with a valid source by
+    // providing a source to the image builder.
+    // Then if the pull succeeds the default_source has been overriden by the source provided in
+    // the image builder.
+    // If the pull fails the, the default_source was not overriden and was used in the pull.
+    // A slight downside by this setup is that the test will fail if pulling from the valid source
+    // fails.
+    // Could not come up with a better way to test this scenario.
+    #[test]
+    fn test_image_source_overrides_default_source_in_pull() {
+        let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
+        let client = Rc::new(shiplift::Docker::new());
+
+        let tag = "latest".to_string();
+        let repository = "hello-world".to_string();
+        let image = Image::with_repository(&repository)
+            .tag(&tag)
+            .source(Source::DockerHub(PullPolicy::Always));
+
+        let unvalid_source = Source::Remote(Remote::new(
+            &"this_is_not_a_registry".to_string(),
+            PullPolicy::Always,
+        ));
+
+        let res = rt.block_on(test_utils::delete_image_if_present(
+            &repository,
+            &tag,
+            &client,
+        ));
+        assert!(
+            res.is_ok(),
+            format!("failed to delete image: {}", res.unwrap_err())
+        );
+
+        let res = rt.block_on(image.pull(client, &unvalid_source));
+        assert!(
+            res.is_ok(),
+            "the invalid source should be overriden by the provided valid source,
+            which should result in a successful pull"
+        );
     }
 }

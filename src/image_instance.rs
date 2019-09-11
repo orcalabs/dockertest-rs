@@ -56,10 +56,11 @@ pub struct ImageInstance {
 impl ImageInstance {
     /// Creates an image instance with the given repository.
     /// Will create an Image with the same repository.
-    pub fn with_repository(repository: &str) -> ImageInstance {
+    pub fn with_repository<T: ToString>(repository: T) -> ImageInstance {
+        let copy = repository.to_string();
         ImageInstance {
-            image: Image::with_repository(&repository),
-            container_name: repository.to_string(),
+            image: Image::with_repository(&copy),
+            container_name: copy,
             wait: Rc::new(DefaultWait {}),
             env: HashMap::new(),
             cmd: Vec::new(),
@@ -246,7 +247,7 @@ fn remove_container_if_exists(
 mod tests {
     use crate::container::Container;
     use crate::error::DockerErrorKind;
-    use crate::image::{Image, PullPolicy, Remote, Source};
+    use crate::image::{Image, PullPolicy, Source};
     use crate::image_instance::{remove_container_if_exists, ImageInstance, StartPolicy};
     use crate::wait_for::WaitFor;
     use failure::Error;
@@ -441,14 +442,13 @@ mod tests {
         let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
         let repository = "hello-world".to_string();
 
-        let remote = Remote::new(&"addr".to_string(), PullPolicy::Always);
-        let source = Source::Remote(remote);
-        let image = Image::with_repository(&repository).source(source);
+        let source = Source::DockerHub(PullPolicy::Always);
+        let image = Image::with_repository(&repository);
         let instance = ImageInstance::with_image(image);
 
         let client = Rc::new(shiplift::Docker::new());
 
-        let res = rt.block_on(instance.image().pull(client.clone()));
+        let res = rt.block_on(instance.image().pull(client.clone(), &source));
         assert!(
             res.is_ok(),
             format!("failed to pull image: {}", res.unwrap_err())
@@ -473,15 +473,14 @@ mod tests {
 
         let container_name = "this_is_a_container".to_string();
 
-        let remote = Remote::new(&"addr".to_string(), PullPolicy::Always);
-        let source = Source::Remote(remote);
-        let image = Image::with_repository(&repository).source(source);
+        let source = Source::DockerHub(PullPolicy::IfNotPresent);
+        let image = Image::with_repository(&repository);
         let mut instance = ImageInstance::with_image(image);
         instance.container_name = container_name.clone();
 
         let client = Rc::new(shiplift::Docker::new());
 
-        let res = rt.block_on(instance.image().pull(client.clone()));
+        let res = rt.block_on(instance.image().pull(client.clone(), &source));
         assert!(
             res.is_ok(),
             format!("failed to pull image: {}", res.unwrap_err())
@@ -493,15 +492,14 @@ mod tests {
             format!("failed to start ImageInstance: {}", res.err().unwrap())
         );
 
-        let remote = Remote::new(&"addr".to_string(), PullPolicy::IfNotPresent);
-        let source = Source::Remote(remote);
-        let image = Image::with_repository(&repository).source(source);
+        let source = Source::DockerHub(PullPolicy::IfNotPresent);
+        let image = Image::with_repository(&repository);
         let mut instance = ImageInstance::with_image(image);
         instance.container_name = container_name.clone();
 
         let client = Rc::new(shiplift::Docker::new());
 
-        let res = rt.block_on(instance.image().pull(client.clone()));
+        let res = rt.block_on(instance.image().pull(client.clone(), &source));
         assert!(
             res.is_ok(),
             format!("failed to pull image: {}", res.unwrap_err())
@@ -520,16 +518,15 @@ mod tests {
         let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
         let repository = "hello-world".to_string();
 
-        let remote = Remote::new(&"addr".to_string(), PullPolicy::Always);
-        let source = Source::Remote(remote);
-        let image = Image::with_repository(&repository).source(source);
+        let source = Source::DockerHub(PullPolicy::IfNotPresent);
+        let image = Image::with_repository(&repository);
         let instance = ImageInstance::with_image(image);
 
         let container_name = instance.container_name.clone();
 
         let client = Rc::new(shiplift::Docker::new());
 
-        let res = rt.block_on(instance.image().pull(client.clone()));
+        let res = rt.block_on(instance.image().pull(client.clone(), &source));
         assert!(
             res.is_ok(),
             format!("failed to pull image: {}", res.unwrap_err())
@@ -597,14 +594,13 @@ mod tests {
         let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
         let repository = "hello-world".to_string();
 
-        let remote = Remote::new(&"addr".to_string(), PullPolicy::IfNotPresent);
-        let source = Source::Remote(remote);
-        let image = Image::with_repository(&repository).source(source);
+        let source = Source::DockerHub(PullPolicy::IfNotPresent);
+        let image = Image::with_repository(&repository);
         let instance = ImageInstance::with_image(image).wait_for(wrapped_wait_for.clone());
 
         let client = Rc::new(shiplift::Docker::new());
 
-        let res = rt.block_on(instance.image().pull(client.clone()));
+        let res = rt.block_on(instance.image().pull(client.clone(), &source));
         assert!(
             res.is_ok(),
             format!("failed to pull image: {}", res.unwrap_err())
