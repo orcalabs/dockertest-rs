@@ -120,7 +120,7 @@ impl ImageInstance {
 
     /// Adds the given command.
     /// Note, if with_cmd is called after a call to cmd,
-    /// all commands added with cmd will be overwritenn.
+    /// all commands added with cmd will be overwritten.
     pub fn cmd(&mut self, cmd: String) -> &mut ImageInstance {
         self.cmd.push(cmd);
         self
@@ -128,7 +128,7 @@ impl ImageInstance {
 
     /// Sets the wait_for trait object, this object will be
     /// invoked repeatedly when we are waiting for the container to start.
-    /// Defaults to waitinf for the container to appear as running.
+    /// Defaults to waiting for the container to appear as running.
     pub fn wait_for(self, wait: Rc<dyn WaitFor>) -> ImageInstance {
         ImageInstance { wait, ..self }
     }
@@ -242,7 +242,6 @@ fn remove_container_if_exists(
         .map(|_| ())
 }
 
-// TODO: Test the with_wait_for method with some form of downcast next lvl strat
 #[cfg(test)]
 mod tests {
     use crate::container::Container;
@@ -437,11 +436,10 @@ mod tests {
 
     // Tests that we can successfully start an ImageInstance,
     // resulting in a running container with correct values.
-    // Uses the ubuntu image
     #[test]
     fn test_start_with_existing_image() {
         let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
-        let repository = "ubuntu".to_string();
+        let repository = "hello-world".to_string();
 
         let remote = Remote::new(&"addr".to_string(), PullPolicy::Always);
         let source = Source::Remote(remote);
@@ -464,13 +462,14 @@ mod tests {
     }
 
     // Tests that we can successfully start an ImageInstance,
-    // even if there exists a container
-    // with the same name.
-    // uses the centos image
+    // even if there exists a container with the same name.
+    // The start method should detect that there already
+    // exists a container with the same name,
+    // remove it, and start ours.
     #[test]
     fn test_start_with_existing_container() {
         let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
-        let repository = "centos".to_string();
+        let repository = "hello-world".to_string();
 
         let container_name = "this_is_a_container".to_string();
 
@@ -516,11 +515,10 @@ mod tests {
     }
 
     // Tests that we can remove an existing container.
-    // Uses the fedora image
     #[test]
     fn test_remove_existing_container() {
         let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
-        let repository = "fedora".to_string();
+        let repository = "hello-world".to_string();
 
         let remote = Remote::new(&"addr".to_string(), PullPolicy::Always);
         let source = Source::Remote(remote);
@@ -588,7 +586,6 @@ mod tests {
 
     // Tests that the provided WaitFor trait object is invoked
     // during the start method of ImageInstance
-    // uses the clearlinux image
     #[test]
     fn test_wait_for_invoked_during_start() {
         let wait_for = TestWaitFor {
@@ -598,7 +595,7 @@ mod tests {
         let wrapped_wait_for = Rc::new(wait_for);
 
         let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
-        let repository = "clearlinux".to_string();
+        let repository = "hello-world".to_string();
 
         let remote = Remote::new(&"addr".to_string(), PullPolicy::IfNotPresent);
         let source = Source::Remote(remote);
