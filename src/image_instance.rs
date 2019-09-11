@@ -56,10 +56,11 @@ pub struct ImageInstance {
 impl ImageInstance {
     /// Creates an image instance with the given repository.
     /// Will create an Image with the same repository.
-    pub fn with_repository(repository: &str) -> ImageInstance {
+    pub fn with_repository<T: ToString>(repository: T) -> ImageInstance {
+        let copy = repository.to_string();
         ImageInstance {
-            image: Image::with_repository(&repository),
-            container_name: repository.to_string(),
+            image: Image::with_repository(&copy),
+            container_name: copy,
             wait: Rc::new(DefaultWait {}),
             env: HashMap::new(),
             cmd: Vec::new(),

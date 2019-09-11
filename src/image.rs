@@ -45,7 +45,7 @@ pub enum PullPolicy {
 impl Image {
     /// Creates an Image with the given repository, will default
     /// to the latest tag and local source.
-    pub fn with_repository<T: ToString>(repository: &T) -> Image {
+    pub fn with_repository<T: ToString>(repository: T) -> Image {
         Image {
             repository: repository.to_string(),
             tag: "latest".to_string(),
@@ -56,7 +56,7 @@ impl Image {
 
     /// Sets the tag for this image,
     /// default value is latest.
-    pub fn tag<T: ToString>(self, tag: &T) -> Image {
+    pub fn tag<T: ToString>(self, tag: T) -> Image {
         Image {
             tag: tag.to_string(),
             ..self

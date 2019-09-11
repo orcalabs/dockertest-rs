@@ -84,7 +84,7 @@ impl DockerTest {
     /// Sets the namespace for all containers created by dockerTest.
     /// All container names will be prefixed with this namespace.
     /// DockerTest defaults to the namespace "dockertest-rs".
-    pub fn with_namespace<T: ToString>(self, name: &T) -> DockerTest {
+    pub fn with_namespace<T: ToString>(self, name: T) -> DockerTest {
         DockerTest {
             namespace: name.to_string(),
             ..self
