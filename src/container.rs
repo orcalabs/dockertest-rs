@@ -85,14 +85,24 @@ mod tests {
 
         let id = "this_is_an_id".to_string();
         let name = "this_is_a_container_name".to_string();
+        let handle_key = "this_is_a_handle_key";
 
-        let container = Container::new(&name, &id, client);
+        let container = Container::new(&name, &id, handle_key, client);
         assert_eq!(id, container.id, "wrong id set in container creation");
         assert_eq!(name, container.name, "wrong name set in container creation");
         assert_eq!(
             name,
             container.name(),
             "container name getter returns wrong value"
+        );
+        assert_eq!(
+            handle_key, container.handle_key,
+            "wrong handle_key set in container creation"
+        );
+        assert_eq!(
+            handle_key,
+            container.handle_key(),
+            "handle_key getter returns wrong value"
         );
     }
 }

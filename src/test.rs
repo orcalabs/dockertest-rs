@@ -353,9 +353,10 @@ fn generate_random_string(len: i32) -> String {
 
 #[cfg(test)]
 mod tests {
+    use crate::container::Container;
     use crate::image::{Image, PullPolicy, Source};
     use crate::image_instance::{ImageInstance, StartPolicy};
-    use crate::test::DockerOperations;
+    use crate::test::{resolve_container_handle_key, DockerOperations};
     use crate::test_utils;
     use crate::DockerTest;
     use futures::future::Future;
@@ -442,32 +443,37 @@ mod tests {
         test.add_instance(image_instance2);
 
         let output = test.setup(rt).expect("failed to perform setup");
+        let container_vec = output
+            .get(&image_name)
+            .expect("failed to retrieve containers with repository as handle key");
         assert_eq!(
-            output.len(),
+            container_vec.len(),
             2,
             "setup did not return a map containing containers for all image instances"
         );
 
         let mut rt2 = current_thread::Runtime::new().expect("failed to start tokio runtime");
 
-        for (_, container) in output {
-            let response = rt2.block_on(test_utils::is_container_running(
-                container.id().to_string(),
-                &client,
-            ));
-            assert!(
-                response.is_ok(),
-                format!(
-                    "failed to check for container liveness: {}",
-                    response.unwrap_err()
-                )
-            );
+        for (_, containers) in output {
+            for container in containers {
+                let response = rt2.block_on(test_utils::is_container_running(
+                    container.id().to_string(),
+                    &client,
+                ));
+                assert!(
+                    response.is_ok(),
+                    format!(
+                        "failed to check for container liveness: {}",
+                        response.unwrap_err()
+                    )
+                );
 
-            let is_running = response.expect("failed to unwrap liveness probe");
-            assert!(
-                is_running,
-                "container should be running after setup is complete"
-            );
+                let is_running = response.expect("failed to unwrap liveness probe");
+                assert!(
+                    is_running,
+                    "container should be running after setup is complete"
+                );
+            }
         }
     }
 
@@ -743,8 +749,11 @@ mod tests {
         assert!(res.is_ok(), "failed to collect containers");
 
         let containers = res.expect("failed to unwrap collected containers");
+        let container_vec = containers
+            .get(&repository)
+            .expect("failed to retrieve containers with repository as handle key");
         assert_eq!(
-            containers.len(),
+            container_vec.len(),
             2,
             "should only exist 2 containers, 1 strict, 1 relaxed"
         );
@@ -755,12 +764,12 @@ mod tests {
 
         let strict_container_name = strict_container.name();
 
-        let c1 = containers
+        let c1 = container_vec
             .iter()
-            .find(|c| *c.0 == strict_container_name && c.1.name() == strict_container_name);
+            .find(|c| c.name() == strict_container_name);
         assert!(
             c1.is_some(),
-            "did not find relaxed container in collected containers"
+            "did not find strict container in collected containers"
         );
 
         // FIXME: Assert that the output contains the relaxed container aswell.
@@ -816,17 +825,19 @@ mod tests {
         );
 
         let mut rt3 = current_thread::Runtime::new().expect("failed to start tokio runtime");
-        for (_, c) in containers {
-            let is_running = rt3
-                .block_on(test_utils::is_container_running(
-                    c.id().to_string(),
-                    &client,
-                ))
-                .expect("failed to check for container liveness");
-            assert!(
-                !is_running,
-                "container should not be running after teardown"
-            );
+        for (_, container_vec) in containers {
+            for c in container_vec {
+                let is_running = rt3
+                    .block_on(test_utils::is_container_running(
+                        c.id().to_string(),
+                        &client,
+                    ))
+                    .expect("failed to check for container liveness");
+                assert!(
+                    !is_running,
+                    "container should not be running after teardown"
+                );
+            }
         }
     }
 }

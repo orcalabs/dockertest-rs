@@ -46,8 +46,14 @@ mod tests {
 
         let container_name = "this_is_a_name".to_string();
         let id = "this_is_an_id".to_string();
+        let handle_key = "this_is_a_handle_key";
 
-        let container = Container::new(&container_name, &id, Rc::new(shiplift::Docker::new()));
+        let container = Container::new(
+            &container_name,
+            &id,
+            handle_key,
+            Rc::new(shiplift::Docker::new()),
+        );
 
         let res = rt.block_on(wait.wait_for_ready(container));
         assert!(res.is_ok(), "should always return ok with DefaultWait");

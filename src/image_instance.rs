@@ -368,15 +368,13 @@ mod tests {
 
         let repository = "this_is_a_repository".to_string();
 
-        let namespace = "this_is_a_namespace".to_string();
-        let suffix = "this_suffix_is_awesome".to_string();
-        let expected_container_name = format!("{}-{}-{}", &namespace, &repository, &suffix);
+        let container_name = "this_is_a_container_name";
 
         let instance = ImageInstance::with_repository(&repository)
             .with_start_policy(StartPolicy::Strict)
             .with_env(env)
             .with_cmd(cmds)
-            .configurate_container_name(&namespace, &suffix);
+            .with_container_name(container_name);
 
         let equal = match instance.start_policy {
             StartPolicy::Strict => true,
@@ -391,10 +389,12 @@ mod tests {
 
         assert_eq!(expected_cmds, instance.cmd, "commands not set correctly");
 
-        assert_eq!(
-            instance.container_name, expected_container_name,
-            "container_name not set correctly"
-        );
+        let correct_container_name = match instance.user_provided_container_name {
+            Some(n) => n == container_name,
+            None => false,
+        };
+
+        assert!(correct_container_name, "container_name not set correctly");
     }
 
     // Tests that the env method succesfully
