@@ -643,4 +643,46 @@ mod tests {
             "wait_for trait object was not invoked during startup"
         );
     }
+
+    // Tests that the configurate_container_name method correctly sets the ImageInstance's
+    // container_name when the user has not specified a container_name
+    #[test]
+    fn test_configurate_container_name_without_user_supplied_name() {
+        let repository = "hello-world";
+        let image_instance = ImageInstance::with_repository(&repository);
+
+        let suffix = "test123";
+        let namespace = "namespace";
+
+        let expected_output = format!("{}-{}-{}", namespace, repository, suffix);
+
+        let new_instance = image_instance.configurate_container_name(&namespace, suffix);
+
+        assert_eq!(
+            new_instance.container_name, expected_output,
+            "container_name not configurated correctly"
+        );
+    }
+
+    // Tests that the configurate_container_name method correctly sets the ImageInstance's
+    // container_name when the user has specified a container_name
+    #[test]
+    fn test_configurate_container_name_with_user_supplied_name() {
+        let repository = "hello-world";
+        let container_name = "this_is_a_container";
+        let image_instance =
+            ImageInstance::with_repository(&repository).with_container_name(container_name);
+
+        let suffix = "test123";
+        let namespace = "namespace";
+
+        let expected_output = format!("{}-{}-{}", namespace, container_name, suffix);
+
+        let new_instance = image_instance.configurate_container_name(&namespace, suffix);
+
+        assert_eq!(
+            new_instance.container_name, expected_output,
+            "container_name not configurated correctly"
+        );
+    }
 }

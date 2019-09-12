@@ -840,4 +840,73 @@ mod tests {
             }
         }
     }
+
+    // Tests that the resolve_container_handle_key method successfully resolves a handle_key to a
+    // container with only one container exisiting for that handle.
+    #[test]
+    fn test_resolve_container_handle_key_with_one_container() {
+        let client = Rc::new(shiplift::Docker::new());
+        let name = "this_is_a_name";
+        let id = "this_is_a_id";
+        let handle = "this_is_a_handle_key";
+
+        let container = Container::new(name, id, handle, client);
+        let container_id = container.id().to_string();
+
+        let mut containers = Vec::new();
+        containers.push(container);
+
+        let resolved_container = resolve_container_handle_key(&containers, handle);
+
+        assert!(
+            resolved_container.is_ok(),
+            "failed to retrieve container from vector with only one container"
+        );
+
+        let output = resolved_container.expect("failed to unwrap container");
+        assert_eq!(
+            output.id(),
+            container_id,
+            "resolved container_id does not match original container"
+        );
+    }
+
+    // Tests that the resolve_container_handle_key method fails to resolve a handle_key to a
+    // container when there exists multiple containers with the same handle_key.
+    #[test]
+    fn test_resolve_container_handle_key_with_two_container() {
+        let client = Rc::new(shiplift::Docker::new());
+        let name = "this_is_a_name";
+        let id = "this_is_a_id";
+        let handle = "this_is_a_handle_key";
+
+        let id2 = "this_is_a_id2";
+
+        let container = Container::new(name, id, handle, client.clone());
+        let container2 = Container::new(name, id2, handle, client);
+
+        let mut containers = Vec::new();
+        containers.push(container);
+        containers.push(container2);
+
+        let resolved_container = resolve_container_handle_key(&containers, handle);
+        assert!(
+            resolved_container.is_err(),
+            "should not be able to resolve handle_key with multiple containers with same handle key"
+        );
+    }
+
+    // Tests that the resolve_container_handle_key method fails to resolve a handle_key to a
+    // container when there exists no containers for the given handle_key
+    #[test]
+    fn test_resolve_container_handle_key_with_zero_container() {
+        let handle = "this_is_a_handle_key";
+        let containers = Vec::new();
+
+        let resolved_container = resolve_container_handle_key(&containers, handle);
+        assert!(
+            resolved_container.is_err(),
+            "should not be able to resolve handle_key with no containers"
+        );
+    }
 }
