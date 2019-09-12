@@ -315,15 +315,17 @@ impl Default for DockerTest {
 // If the the provided key has been resolved, but there exists no containers in the value
 // something has gone wrong internally, it should never occur.
 fn resolve_container_handle_key<'a>(
-    containers: &'a Vec<Container>,
+    containers: &'a [Container],
     key: &'a str,
 ) -> Result<&'a Container, DockerError> {
     let number_of_containers = containers.len();
     if number_of_containers == 1 {
-        containers.first().ok_or(DockerError::recoverable(format!(
-            "could not retrieve container with key {}, internal unwrap error",
-            key
-        )))
+        containers.first().ok_or_else(|| {
+            DockerError::recoverable(format!(
+                "could not retrieve container with key {}, internal unwrap error",
+                key
+            ))
+        })
     } else if number_of_containers > 1 {
         Err(DockerError::recoverable(
             format!("could not resolve container key: {}, as there are multiple containers with the same key", key)))
