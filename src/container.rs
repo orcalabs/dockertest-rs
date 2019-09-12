@@ -17,16 +17,27 @@ pub struct Container {
 
     /// Id of the running container.
     id: String,
+
+    /// The key used to retrieve the handle to this container from DockerTest.
+    /// The user can set this directly by specifying container_name in the ImageInstance builder.
+    /// Defaults to the repository name of the container's image.
+    handle_key: String,
 }
 
 impl Container {
     /// Creates a new Container object with the given
     /// values.
-    pub(crate) fn new<T: ToString>(name: &T, id: &T, client: Rc<shiplift::Docker>) -> Container {
+    pub(crate) fn new<T: ToString, R: ToString, S: ToString>(
+        name: T,
+        id: R,
+        handle: S,
+        client: Rc<shiplift::Docker>,
+    ) -> Container {
         Container {
             client,
             name: name.to_string(),
             id: id.to_string(),
+            handle_key: handle.to_string(),
         }
     }
 
@@ -38,6 +49,11 @@ impl Container {
     /// Returns the name of container
     pub(crate) fn name(&self) -> &str {
         &self.name
+    }
+
+    /// Returns the handle_key of this container
+    pub(crate) fn handle_key(&self) -> &str {
+        &self.handle_key
     }
 
     /// Returns the id of container

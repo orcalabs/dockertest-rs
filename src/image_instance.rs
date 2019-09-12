@@ -24,10 +24,18 @@ pub enum StartPolicy {
 /// Represents an instance of an image.
 #[derive(Clone)]
 pub struct ImageInstance {
-    /// The name of the container to be created by
-    /// this image instance.
-    /// Defaults to the repository name given
-    /// to the ImageInstance.
+    /// User provided name of the container.
+    /// This will dictate the final container_name and the container_handle_key of the container
+    /// that will be created from this ImageInstance.
+    user_provided_container_name: Option<String>,
+
+    /// The name of the container to be created by this ImageInstance.
+    /// At ImageInstance creation this field defaults to the repository name of the associated image.
+    /// When adding ImageInstances to DockerTest, the container_name will be transformed to the following:
+    ///     namespace_of_dockerTest - repository_name - random_generated_suffix
+    /// If the user have provided a user_provided_container_name, the container_name will look like
+    /// the following:
+    ///     namespace_of_dockerTest - user_provided_container_name - random_generated_suffix
     container_name: String,
 
     /// Trait object that is responsible for
@@ -59,6 +67,7 @@ impl ImageInstance {
     pub fn with_repository<T: ToString>(repository: T) -> ImageInstance {
         let copy = repository.to_string();
         ImageInstance {
+            user_provided_container_name: None,
             image: Image::with_repository(&copy),
             container_name: copy,
             wait: Rc::new(DefaultWait {}),
@@ -71,6 +80,7 @@ impl ImageInstance {
     /// Creates an ImageInstance with the given instance.
     pub fn with_image(image: Image) -> ImageInstance {
         ImageInstance {
+            user_provided_container_name: None,
             container_name: image.repository().to_string(),
             image,
             wait: Rc::new(DefaultWait {}),
@@ -104,9 +114,9 @@ impl ImageInstance {
 
     /// Sets the name of the container that will eventually be started.
     /// The container name defaults to the repository name.
-    pub fn with_container_name(self, container_name: String) -> ImageInstance {
+    pub fn with_container_name<T: ToString>(self, container_name: T) -> ImageInstance {
         ImageInstance {
-            container_name,
+            user_provided_container_name: Some(container_name.to_string()),
             ..self
         }
     }
@@ -139,8 +149,13 @@ impl ImageInstance {
     // We do this to ensure that we do not have overlapping container names
     // and make it clear which containers are run by DockerTest.
     pub(crate) fn configurate_container_name(self, namespace: &str, suffix: &str) -> ImageInstance {
+        let name = match &self.user_provided_container_name {
+            None => self.image.repository(),
+            Some(n) => n,
+        };
+
         ImageInstance {
-            container_name: format!("{}-{}-{}", namespace, self.container_name, suffix),
+            container_name: format!("{}-{}-{}", namespace, name, suffix),
             ..self
         }
     }
@@ -159,8 +174,14 @@ impl ImageInstance {
         let wait_for_clone = self.wait.clone();
 
         let container_name_clone = self.container_name.clone();
+
         let c1 = client.clone();
         let c2 = client.clone();
+
+        let handle = match &self.user_provided_container_name {
+            None => self.image.repository().to_string(),
+            Some(n) => n.clone(),
+        };
 
         let remove_fut = remove_container_if_exists(client.clone(), self.container_name.clone());
 
@@ -205,7 +226,7 @@ impl ImageInstance {
                     .map(move |_| id)
             })
             .and_then(move |id| {
-                let c = Container::new(&container_name_clone, &id, client.clone());
+                let c = Container::new(&container_name_clone, &id, handle, client.clone());
 
                 wait_for_clone.wait_for_ready(c).map_err(|e| {
                     DockerError::startup(format!("failed to wait for container to be ready: {}", e))
