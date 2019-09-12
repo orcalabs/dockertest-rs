@@ -44,16 +44,23 @@ pub struct DockerTest {
 pub struct DockerOperations {
     /// Map with all started containers,
     /// the key is the container name.
-    containers: HashMap<String, Container>,
+    containers: HashMap<String, Vec<Container>>,
 }
 
 impl DockerOperations {
     /// Returns a handle to the specified container.
-    // TODO: we need to do a mapping between name
-    // and the namespaced/suffixed container name
-    // we've made.
-    pub fn handle(&self, key: &str) -> Option<&Container> {
-        self.containers.get(key)
+    /// If no container_name was specified when creating the ImageInstance, the Image repository
+    /// is the default key for the corresponding container.
+    pub fn handle<'a>(&'a self, key: &'a str) -> Result<&'a Container, DockerError> {
+        let containers = self.containers.get(key);
+
+        match containers {
+            None => Err(DockerError::recoverable(format!(
+                "container with key: {} not found",
+                key
+            ))),
+            Some(c) => resolve_container_handle_key(c, key),
+        }
     }
 
     /// Indicate that this test failed with the accompanied message.
@@ -123,12 +130,9 @@ impl DockerTest {
     }
 
     pub fn add_instance(&mut self, instance: ImageInstance) {
-        let suffix = generate_random_string(20);
-        let namespaced_instance = instance.configurate_container_name(&self.namespace, &suffix);
-
-        match &namespaced_instance.start_policy() {
-            StartPolicy::Relaxed => self.relaxed_instances.push(namespaced_instance),
-            StartPolicy::Strict => self.strict_instances.push(namespaced_instance),
+        match &instance.start_policy() {
+            StartPolicy::Relaxed => self.relaxed_instances.push(instance),
+            StartPolicy::Strict => self.strict_instances.push(instance),
         };
     }
 
@@ -137,7 +141,10 @@ impl DockerTest {
         &self.default_source
     }
 
-    fn setup(&self, mut rt: current_thread::Runtime) -> Result<HashMap<String, Container>, Error> {
+    fn setup(
+        &self,
+        mut rt: current_thread::Runtime,
+    ) -> Result<HashMap<String, Vec<Container>>, Error> {
         self.pull_images(&mut rt)?;
 
         // The bound of the channel is equal to the number of senders
@@ -188,9 +195,12 @@ impl DockerTest {
         let iter = cloned_vec.into_iter();
 
         for instance in iter {
+            let suffix = generate_random_string(20);
+            let namespaced_instance = instance.configurate_container_name(&self.namespace, &suffix);
+
             let sender_clone = sender.clone();
             let client_clone = self.client.clone();
-            let start_fut = instance
+            let start_fut = namespaced_instance
                 .start(client_clone)
                 .map_err(|e| eprintln!("failed to start container: {}", e))
                 .and_then(move |c| {
@@ -217,8 +227,11 @@ impl DockerTest {
         let mut strict_containers: Vec<Container> = Vec::new();
 
         for instance in iter {
+            let suffix = generate_random_string(20);
+            let namespaced_instance = instance.configurate_container_name(&self.namespace, &suffix);
+
             let client_clone = self.client.clone();
-            let container = rt.block_on(instance.start(client_clone))?;
+            let container = rt.block_on(namespaced_instance.start(client_clone))?;
             strict_containers.push(container);
         }
 
@@ -230,12 +243,15 @@ impl DockerTest {
         receiver: mpsc::Receiver<Container>,
         rt: &mut current_thread::Runtime,
         strict_containers: Vec<Container>,
-    ) -> Result<HashMap<String, Container>, Error> {
-        let mut started_containers: HashMap<String, Container> = HashMap::new();
+    ) -> Result<HashMap<String, Vec<Container>>, Error> {
+        let mut started_containers: HashMap<String, Vec<Container>> = HashMap::new();
 
         for c in strict_containers.into_iter() {
             println!("strict: {}", c.name());
-            started_containers.insert(c.name().to_string(), c);
+            started_containers
+                .entry(c.handle_key().to_string())
+                .or_insert_with(Vec::new)
+                .push(c);
         }
 
         let relaxed_containers = rt.block_on(
@@ -247,7 +263,10 @@ impl DockerTest {
 
         for c in relaxed_containers.into_iter() {
             println!("relaxed: {}", c.name());
-            started_containers.insert(c.name().to_string(), c);
+            started_containers
+                .entry(c.handle_key().to_string())
+                .or_insert_with(Vec::new)
+                .push(c);
         }
 
         Ok(started_containers)
@@ -260,12 +279,13 @@ impl DockerTest {
     ) -> Result<(), DockerError> {
         let mut future_vec = Vec::new();
 
-        for (_name, container) in ops.containers {
-            future_vec.push(
-                container
-                    .remove()
-                    .map_err(|e| eprintln!("failed to cleanup container instance: {}", e)),
-            );
+        for (_name, containers) in ops.containers {
+            for c in containers {
+                future_vec.push(
+                    c.remove()
+                        .map_err(|e| eprintln!("failed to cleanup container instance: {}", e)),
+                );
+            }
         }
         let teardown_fut = future::join_all(future_vec);
 
@@ -287,6 +307,41 @@ impl Default for DockerTest {
     }
 }
 
+// If there only exists one container for the given key we can safely return it.
+// If there exists more than one container for the given key, we cannot resolve the key
+// as we do not know which container to return.
+// This occurs if multiple ImageInstances are added with the same Image repository, and
+// without providing a containter_name.
+// If the the provided key has been resolved, but there exists no containers in the value
+// something has gone wrong internally, it should never occur.
+fn resolve_container_handle_key<'a>(
+    containers: &'a [Container],
+    key: &'a str,
+) -> Result<&'a Container, DockerError> {
+    let number_of_containers = containers.len();
+    if number_of_containers == 1 {
+        containers.first().ok_or_else(|| {
+            DockerError::recoverable(format!(
+                "could not retrieve container with key {}, internal unwrap error",
+                key
+            ))
+        })
+    } else if number_of_containers > 1 {
+        Err(DockerError::recoverable(
+            format!("could not resolve container key: {}, as there are multiple containers with the same key", key)))
+    } else if number_of_containers == 0 {
+        Err(DockerError::recoverable(format!(
+            "could not resolve container key: {}, container did not exist",
+            key
+        )))
+    } else {
+        Err(DockerError::recoverable(format!(
+            "could not resolve container key: {}, container key existed, but corresponding container was not found",
+            key
+        )))
+    }
+}
+
 fn generate_random_string(len: i32) -> String {
     let mut random_string = String::new();
     let mut rng = rand::thread_rng();
@@ -300,9 +355,10 @@ fn generate_random_string(len: i32) -> String {
 
 #[cfg(test)]
 mod tests {
+    use crate::container::Container;
     use crate::image::{Image, PullPolicy, Source};
     use crate::image_instance::{ImageInstance, StartPolicy};
-    use crate::test::DockerOperations;
+    use crate::test::{resolve_container_handle_key, DockerOperations};
     use crate::test_utils;
     use crate::DockerTest;
     use futures::future::Future;
@@ -389,32 +445,37 @@ mod tests {
         test.add_instance(image_instance2);
 
         let output = test.setup(rt).expect("failed to perform setup");
+        let container_vec = output
+            .get(&image_name)
+            .expect("failed to retrieve containers with repository as handle key");
         assert_eq!(
-            output.len(),
+            container_vec.len(),
             2,
             "setup did not return a map containing containers for all image instances"
         );
 
         let mut rt2 = current_thread::Runtime::new().expect("failed to start tokio runtime");
 
-        for (_, container) in output {
-            let response = rt2.block_on(test_utils::is_container_running(
-                container.id().to_string(),
-                &client,
-            ));
-            assert!(
-                response.is_ok(),
-                format!(
-                    "failed to check for container liveness: {}",
-                    response.unwrap_err()
-                )
-            );
+        for (_, containers) in output {
+            for container in containers {
+                let response = rt2.block_on(test_utils::is_container_running(
+                    container.id().to_string(),
+                    &client,
+                ));
+                assert!(
+                    response.is_ok(),
+                    format!(
+                        "failed to check for container liveness: {}",
+                        response.unwrap_err()
+                    )
+                );
 
-            let is_running = response.expect("failed to unwrap liveness probe");
-            assert!(
-                is_running,
-                "container should be running after setup is complete"
-            );
+                let is_running = response.expect("failed to unwrap liveness probe");
+                assert!(
+                    is_running,
+                    "container should be running after setup is complete"
+                );
+            }
         }
     }
 
@@ -690,8 +751,11 @@ mod tests {
         assert!(res.is_ok(), "failed to collect containers");
 
         let containers = res.expect("failed to unwrap collected containers");
+        let container_vec = containers
+            .get(&repository)
+            .expect("failed to retrieve containers with repository as handle key");
         assert_eq!(
-            containers.len(),
+            container_vec.len(),
             2,
             "should only exist 2 containers, 1 strict, 1 relaxed"
         );
@@ -702,12 +766,12 @@ mod tests {
 
         let strict_container_name = strict_container.name();
 
-        let c1 = containers
+        let c1 = container_vec
             .iter()
-            .find(|c| *c.0 == strict_container_name && c.1.name() == strict_container_name);
+            .find(|c| c.name() == strict_container_name);
         assert!(
             c1.is_some(),
-            "did not find relaxed container in collected containers"
+            "did not find strict container in collected containers"
         );
 
         // FIXME: Assert that the output contains the relaxed container aswell.
@@ -763,17 +827,88 @@ mod tests {
         );
 
         let mut rt3 = current_thread::Runtime::new().expect("failed to start tokio runtime");
-        for (_, c) in containers {
-            let is_running = rt3
-                .block_on(test_utils::is_container_running(
-                    c.id().to_string(),
-                    &client,
-                ))
-                .expect("failed to check for container liveness");
-            assert!(
-                !is_running,
-                "container should not be running after teardown"
-            );
+        for (_, container_vec) in containers {
+            for c in container_vec {
+                let is_running = rt3
+                    .block_on(test_utils::is_container_running(
+                        c.id().to_string(),
+                        &client,
+                    ))
+                    .expect("failed to check for container liveness");
+                assert!(
+                    !is_running,
+                    "container should not be running after teardown"
+                );
+            }
         }
+    }
+
+    // Tests that the resolve_container_handle_key method successfully resolves a handle_key to a
+    // container with only one container exisiting for that handle.
+    #[test]
+    fn test_resolve_container_handle_key_with_one_container() {
+        let client = Rc::new(shiplift::Docker::new());
+        let name = "this_is_a_name";
+        let id = "this_is_a_id";
+        let handle = "this_is_a_handle_key";
+
+        let container = Container::new(name, id, handle, client);
+        let container_id = container.id().to_string();
+
+        let mut containers = Vec::new();
+        containers.push(container);
+
+        let resolved_container = resolve_container_handle_key(&containers, handle);
+
+        assert!(
+            resolved_container.is_ok(),
+            "failed to retrieve container from vector with only one container"
+        );
+
+        let output = resolved_container.expect("failed to unwrap container");
+        assert_eq!(
+            output.id(),
+            container_id,
+            "resolved container_id does not match original container"
+        );
+    }
+
+    // Tests that the resolve_container_handle_key method fails to resolve a handle_key to a
+    // container when there exists multiple containers with the same handle_key.
+    #[test]
+    fn test_resolve_container_handle_key_with_two_container() {
+        let client = Rc::new(shiplift::Docker::new());
+        let name = "this_is_a_name";
+        let id = "this_is_a_id";
+        let handle = "this_is_a_handle_key";
+
+        let id2 = "this_is_a_id2";
+
+        let container = Container::new(name, id, handle, client.clone());
+        let container2 = Container::new(name, id2, handle, client);
+
+        let mut containers = Vec::new();
+        containers.push(container);
+        containers.push(container2);
+
+        let resolved_container = resolve_container_handle_key(&containers, handle);
+        assert!(
+            resolved_container.is_err(),
+            "should not be able to resolve handle_key with multiple containers with same handle key"
+        );
+    }
+
+    // Tests that the resolve_container_handle_key method fails to resolve a handle_key to a
+    // container when there exists no containers for the given handle_key
+    #[test]
+    fn test_resolve_container_handle_key_with_zero_container() {
+        let handle = "this_is_a_handle_key";
+        let containers = Vec::new();
+
+        let resolved_container = resolve_container_handle_key(&containers, handle);
+        assert!(
+            resolved_container.is_err(),
+            "should not be able to resolve handle_key with no containers"
+        );
     }
 }

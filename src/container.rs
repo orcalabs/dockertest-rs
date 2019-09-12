@@ -17,16 +17,27 @@ pub struct Container {
 
     /// Id of the running container.
     id: String,
+
+    /// The key used to retrieve the handle to this container from DockerTest.
+    /// The user can set this directly by specifying container_name in the ImageInstance builder.
+    /// Defaults to the repository name of the container's image.
+    handle_key: String,
 }
 
 impl Container {
     /// Creates a new Container object with the given
     /// values.
-    pub(crate) fn new<T: ToString>(name: &T, id: &T, client: Rc<shiplift::Docker>) -> Container {
+    pub(crate) fn new<T: ToString, R: ToString, S: ToString>(
+        name: T,
+        id: R,
+        handle: S,
+        client: Rc<shiplift::Docker>,
+    ) -> Container {
         Container {
             client,
             name: name.to_string(),
             id: id.to_string(),
+            handle_key: handle.to_string(),
         }
     }
 
@@ -38,6 +49,11 @@ impl Container {
     /// Returns the name of container
     pub(crate) fn name(&self) -> &str {
         &self.name
+    }
+
+    /// Returns the handle_key of this container
+    pub(crate) fn handle_key(&self) -> &str {
+        &self.handle_key
     }
 
     /// Returns the id of container
@@ -69,14 +85,24 @@ mod tests {
 
         let id = "this_is_an_id".to_string();
         let name = "this_is_a_container_name".to_string();
+        let handle_key = "this_is_a_handle_key";
 
-        let container = Container::new(&name, &id, client);
+        let container = Container::new(&name, &id, handle_key, client);
         assert_eq!(id, container.id, "wrong id set in container creation");
         assert_eq!(name, container.name, "wrong name set in container creation");
         assert_eq!(
             name,
             container.name(),
             "container name getter returns wrong value"
+        );
+        assert_eq!(
+            handle_key, container.handle_key,
+            "wrong handle_key set in container creation"
+        );
+        assert_eq!(
+            handle_key,
+            container.handle_key(),
+            "handle_key getter returns wrong value"
         );
     }
 }

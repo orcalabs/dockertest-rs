@@ -24,10 +24,18 @@ pub enum StartPolicy {
 /// Represents an instance of an image.
 #[derive(Clone)]
 pub struct ImageInstance {
-    /// The name of the container to be created by
-    /// this image instance.
-    /// Defaults to the repository name given
-    /// to the ImageInstance.
+    /// User provided name of the container.
+    /// This will dictate the final container_name and the container_handle_key of the container
+    /// that will be created from this ImageInstance.
+    user_provided_container_name: Option<String>,
+
+    /// The name of the container to be created by this ImageInstance.
+    /// At ImageInstance creation this field defaults to the repository name of the associated image.
+    /// When adding ImageInstances to DockerTest, the container_name will be transformed to the following:
+    ///     namespace_of_dockerTest - repository_name - random_generated_suffix
+    /// If the user have provided a user_provided_container_name, the container_name will look like
+    /// the following:
+    ///     namespace_of_dockerTest - user_provided_container_name - random_generated_suffix
     container_name: String,
 
     /// Trait object that is responsible for
@@ -59,6 +67,7 @@ impl ImageInstance {
     pub fn with_repository<T: ToString>(repository: T) -> ImageInstance {
         let copy = repository.to_string();
         ImageInstance {
+            user_provided_container_name: None,
             image: Image::with_repository(&copy),
             container_name: copy,
             wait: Rc::new(DefaultWait {}),
@@ -71,6 +80,7 @@ impl ImageInstance {
     /// Creates an ImageInstance with the given instance.
     pub fn with_image(image: Image) -> ImageInstance {
         ImageInstance {
+            user_provided_container_name: None,
             container_name: image.repository().to_string(),
             image,
             wait: Rc::new(DefaultWait {}),
@@ -104,9 +114,9 @@ impl ImageInstance {
 
     /// Sets the name of the container that will eventually be started.
     /// The container name defaults to the repository name.
-    pub fn with_container_name(self, container_name: String) -> ImageInstance {
+    pub fn with_container_name<T: ToString>(self, container_name: T) -> ImageInstance {
         ImageInstance {
-            container_name,
+            user_provided_container_name: Some(container_name.to_string()),
             ..self
         }
     }
@@ -114,16 +124,16 @@ impl ImageInstance {
     /// Sets the given environment variable to given value.
     /// Note, if with_env is called after a call to env, all values
     /// added by env will be overwritten.
-    pub fn env(&mut self, name: String, value: String) -> &mut ImageInstance {
-        self.env.insert(name, value);
+    pub fn env<T: ToString, S: ToString>(&mut self, name: T, value: S) -> &mut ImageInstance {
+        self.env.insert(name.to_string(), value.to_string());
         self
     }
 
     /// Adds the given command.
     /// Note, if with_cmd is called after a call to cmd,
     /// all commands added with cmd will be overwritten.
-    pub fn cmd(&mut self, cmd: String) -> &mut ImageInstance {
-        self.cmd.push(cmd);
+    pub fn cmd<T: ToString>(&mut self, cmd: T) -> &mut ImageInstance {
+        self.cmd.push(cmd.to_string());
         self
     }
 
@@ -139,8 +149,13 @@ impl ImageInstance {
     // We do this to ensure that we do not have overlapping container names
     // and make it clear which containers are run by DockerTest.
     pub(crate) fn configurate_container_name(self, namespace: &str, suffix: &str) -> ImageInstance {
+        let name = match &self.user_provided_container_name {
+            None => self.image.repository(),
+            Some(n) => n,
+        };
+
         ImageInstance {
-            container_name: format!("{}-{}-{}", namespace, self.container_name, suffix),
+            container_name: format!("{}-{}-{}", namespace, name, suffix),
             ..self
         }
     }
@@ -159,8 +174,14 @@ impl ImageInstance {
         let wait_for_clone = self.wait.clone();
 
         let container_name_clone = self.container_name.clone();
+
         let c1 = client.clone();
         let c2 = client.clone();
+
+        let handle = match &self.user_provided_container_name {
+            None => self.image.repository().to_string(),
+            Some(n) => n.clone(),
+        };
 
         let remove_fut = remove_container_if_exists(client.clone(), self.container_name.clone());
 
@@ -205,7 +226,7 @@ impl ImageInstance {
                     .map(move |_| id)
             })
             .and_then(move |id| {
-                let c = Container::new(&container_name_clone, &id, client.clone());
+                let c = Container::new(&container_name_clone, &id, handle, client.clone());
 
                 wait_for_clone.wait_for_ready(c).map_err(|e| {
                     DockerError::startup(format!("failed to wait for container to be ready: {}", e))
@@ -347,15 +368,13 @@ mod tests {
 
         let repository = "this_is_a_repository".to_string();
 
-        let namespace = "this_is_a_namespace".to_string();
-        let suffix = "this_suffix_is_awesome".to_string();
-        let expected_container_name = format!("{}-{}-{}", &namespace, &repository, &suffix);
+        let container_name = "this_is_a_container_name";
 
         let instance = ImageInstance::with_repository(&repository)
             .with_start_policy(StartPolicy::Strict)
             .with_env(env)
             .with_cmd(cmds)
-            .configurate_container_name(&namespace, &suffix);
+            .with_container_name(container_name);
 
         let equal = match instance.start_policy {
             StartPolicy::Strict => true,
@@ -370,10 +389,12 @@ mod tests {
 
         assert_eq!(expected_cmds, instance.cmd, "commands not set correctly");
 
-        assert_eq!(
-            instance.container_name, expected_container_name,
-            "container_name not set correctly"
-        );
+        let correct_container_name = match instance.user_provided_container_name {
+            Some(n) => n == container_name,
+            None => false,
+        };
+
+        assert!(correct_container_name, "container_name not set correctly");
     }
 
     // Tests that the env method succesfully
@@ -620,6 +641,48 @@ mod tests {
         assert!(
             *was_invoked,
             "wait_for trait object was not invoked during startup"
+        );
+    }
+
+    // Tests that the configurate_container_name method correctly sets the ImageInstance's
+    // container_name when the user has not specified a container_name
+    #[test]
+    fn test_configurate_container_name_without_user_supplied_name() {
+        let repository = "hello-world";
+        let image_instance = ImageInstance::with_repository(&repository);
+
+        let suffix = "test123";
+        let namespace = "namespace";
+
+        let expected_output = format!("{}-{}-{}", namespace, repository, suffix);
+
+        let new_instance = image_instance.configurate_container_name(&namespace, suffix);
+
+        assert_eq!(
+            new_instance.container_name, expected_output,
+            "container_name not configurated correctly"
+        );
+    }
+
+    // Tests that the configurate_container_name method correctly sets the ImageInstance's
+    // container_name when the user has specified a container_name
+    #[test]
+    fn test_configurate_container_name_with_user_supplied_name() {
+        let repository = "hello-world";
+        let container_name = "this_is_a_container";
+        let image_instance =
+            ImageInstance::with_repository(&repository).with_container_name(container_name);
+
+        let suffix = "test123";
+        let namespace = "namespace";
+
+        let expected_output = format!("{}-{}-{}", namespace, container_name, suffix);
+
+        let new_instance = image_instance.configurate_container_name(&namespace, suffix);
+
+        assert_eq!(
+            new_instance.container_name, expected_output,
+            "container_name not configurated correctly"
         );
     }
 }
