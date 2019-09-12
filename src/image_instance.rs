@@ -114,16 +114,16 @@ impl ImageInstance {
     /// Sets the given environment variable to given value.
     /// Note, if with_env is called after a call to env, all values
     /// added by env will be overwritten.
-    pub fn env(&mut self, name: String, value: String) -> &mut ImageInstance {
-        self.env.insert(name, value);
+    pub fn env<T: ToString, S: ToString>(&mut self, name: T, value: S) -> &mut ImageInstance {
+        self.env.insert(name.to_string(), value.to_string());
         self
     }
 
     /// Adds the given command.
     /// Note, if with_cmd is called after a call to cmd,
     /// all commands added with cmd will be overwritten.
-    pub fn cmd(&mut self, cmd: String) -> &mut ImageInstance {
-        self.cmd.push(cmd);
+    pub fn cmd<T: ToString>(&mut self, cmd: T) -> &mut ImageInstance {
+        self.cmd.push(cmd.to_string());
         self
     }
 
