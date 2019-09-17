@@ -791,8 +791,7 @@ mod tests {
         // there can only be one receiver.
     }
 
-    // Tests that the teardown method removes all
-    // containers
+    // Tests that the teardown method removes all containers
     #[test]
     fn test_teardown_with_exited_containers() {
         let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
