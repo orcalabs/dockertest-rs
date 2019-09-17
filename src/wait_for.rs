@@ -2,7 +2,8 @@ use crate::container::Container;
 use failure::{format_err, Error};
 use futures::future::{self, Future};
 use futures::stream::Stream;
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{self, AtomicBool};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::timer::Interval;
 
@@ -83,7 +84,7 @@ fn wait_for_container_state(
     let client = shiplift::Docker::new();
     let container_name = container.name().to_string();
 
-    let desired_state = Arc::new(Mutex::new(false));
+    let desired_state = Arc::new(AtomicBool::new(false));
 
     let desired_state_clone = desired_state.clone();
     let desired_state_clone2 = desired_state.clone();
@@ -95,8 +96,8 @@ fn wait_for_container_state(
         // While continue checking container status untill the desired state is reached.
         // If the desired state is reached we return false to stop the stream.
         .take_while(move |_| {
-            let s = desired_state_clone.lock().unwrap();
-            if *s {
+            let s = desired_state_clone.load(atomic::Ordering::SeqCst);
+            if s {
                 future::ok(false)
             } else {
                 future::ok(true)
@@ -111,8 +112,7 @@ fn wait_for_container_state(
                 .map_err(|e| format_err!("failed to inspect container: {}", e))
                 .and_then(move |c| {
                     if container_state_compare(&c.state) {
-                        let mut s = desired_state_clone3.lock().unwrap();
-                        *s = true;
+                        desired_state_clone3.store(true, atomic::Ordering::SeqCst);
                     }
 
                     future::ok(())
@@ -123,9 +123,9 @@ fn wait_for_container_state(
             if r.is_err() {
                 future::Either::B(future::err(format_err!("{}", r.unwrap_err())))
             } else {
-                let s = desired_state_clone2.lock().unwrap();
+                let s = desired_state_clone2.load(atomic::Ordering::SeqCst);
                 // The desired status has been reached and we can return Ok
-                if *s {
+                if s {
                     future::Either::A(future::ok(container))
                 } else {
                     // The desired status was not reached and we return an error
