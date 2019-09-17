@@ -66,7 +66,6 @@ impl WaitFor for ExitedWait {
 }
 
 impl WaitFor for NoWait {
->>>>>>> 30d6eaf... tmp
     fn wait_for_ready(
         &self,
         container: Container,
