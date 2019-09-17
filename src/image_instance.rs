@@ -154,8 +154,11 @@ impl ImageInstance {
             Some(n) => n,
         };
 
+        // The docker daemon does not like '/' or '\' in container names
+        let stripped_name = name.replace("/", "_");
+
         ImageInstance {
-            container_name: format!("{}-{}-{}", namespace, name, suffix),
+            container_name: format!("{}-{}-{}", namespace, stripped_name, suffix),
             ..self
         }
     }
