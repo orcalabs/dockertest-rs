@@ -98,6 +98,7 @@ impl DockerTest {
         }
     }
 
+    // TODO: teardown if the setup fails
     pub fn run<T>(&self, test: T)
     where
         T: FnOnce(&DockerOperations) -> () + panic::UnwindSafe,
@@ -185,7 +186,7 @@ impl DockerTest {
 
     fn start_relaxed_containers(
         &self,
-        sender: &mpsc::Sender<Container>,
+        sender: &mpsc::Sender<Result<Container, Error>>,
         rt: &mut current_thread::Runtime,
     ) {
         // we clone the vector such that users can run multiple
@@ -202,8 +203,8 @@ impl DockerTest {
             let client_clone = self.client.clone();
             let start_fut = namespaced_instance
                 .start(client_clone)
-                .map_err(|e| eprintln!("failed to start container: {}", e))
-                .and_then(move |c| {
+                .map_err(|e| format_err!("failed to start container: {}", e))
+                .then(move |c| {
                     sender_clone
                         .send(c)
                         .map_err(|e| eprintln!("failed to send container in channel: {}", e))
@@ -240,7 +241,7 @@ impl DockerTest {
 
     fn collect_containers(
         &self,
-        receiver: mpsc::Receiver<Container>,
+        receiver: mpsc::Receiver<Result<Container, Error>>,
         rt: &mut current_thread::Runtime,
         strict_containers: Vec<Container>,
     ) -> Result<HashMap<String, Vec<Container>>, Error> {
@@ -262,11 +263,19 @@ impl DockerTest {
         )?;
 
         for c in relaxed_containers.into_iter() {
-            println!("relaxed: {}", c.name());
-            started_containers
-                .entry(c.handle_key().to_string())
-                .or_insert_with(Vec::new)
-                .push(c);
+            if c.is_err() {
+                return Err(format_err!(
+                    "failed to start relaxed containers: {:?}",
+                    c.err().expect("failed to unwrap error")
+                ));
+            } else {
+                let c = c.expect("failed to unwrap container");
+                println!("relaxed: {}", c.name());
+                started_containers
+                    .entry(c.handle_key().to_string())
+                    .or_insert_with(Vec::new)
+                    .push(c);
+            }
         }
 
         Ok(started_containers)
@@ -608,9 +617,9 @@ mod tests {
         let mut containers = res.expect("failed to unwrap relaxed container");
         assert_eq!(1, containers.len(), "should only start 1 relaxed container");
 
-        let container = containers
-            .pop()
-            .expect("failed to unwrap relaxed container");
+        let container_result = containers.pop().expect("failed to pop relaxed container");
+
+        let container = container_result.expect("failed to unwrap container");
 
         let res = rt.block_on(test_utils::is_container_running(
             container.id().to_string(),
