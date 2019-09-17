@@ -1,7 +1,7 @@
 use crate::container::Container;
 use crate::error::{DockerError, DockerErrorKind};
 use crate::image::Image;
-use crate::wait_for::{DefaultWait, WaitFor};
+use crate::wait_for::{NoWait, WaitFor};
 use futures;
 use futures::future::Future;
 use shiplift;
@@ -70,7 +70,7 @@ impl ImageInstance {
             user_provided_container_name: None,
             image: Image::with_repository(&copy),
             container_name: copy,
-            wait: Rc::new(DefaultWait {}),
+            wait: Rc::new(NoWait {}),
             env: HashMap::new(),
             cmd: Vec::new(),
             start_policy: StartPolicy::Relaxed,
@@ -83,7 +83,7 @@ impl ImageInstance {
             user_provided_container_name: None,
             container_name: image.repository().to_string(),
             image,
-            wait: Rc::new(DefaultWait {}),
+            wait: Rc::new(NoWait {}),
             env: HashMap::new(),
             cmd: Vec::new(),
             start_policy: StartPolicy::Relaxed,
@@ -154,8 +154,11 @@ impl ImageInstance {
             Some(n) => n,
         };
 
+        // The docker daemon does not like '/' or '\' in container names
+        let stripped_name = name.replace("/", "_");
+
         ImageInstance {
-            container_name: format!("{}-{}-{}", namespace, name, suffix),
+            container_name: format!("{}-{}-{}", namespace, stripped_name, suffix),
             ..self
         }
     }
@@ -677,6 +680,54 @@ mod tests {
         let namespace = "namespace";
 
         let expected_output = format!("{}-{}-{}", namespace, container_name, suffix);
+
+        let new_instance = image_instance.configurate_container_name(&namespace, suffix);
+
+        assert_eq!(
+            new_instance.container_name, expected_output,
+            "container_name not configurated correctly"
+        );
+    }
+
+    // Tests that the configurate_container_name method replaces forward slashes with underscore
+    // when a user provided name is given.
+    // The docker daemon does not like forward slashes in container names.
+    #[test]
+    fn test_configurate_container_name_with_user_supplied_name_containing_slashes() {
+        let repository = "hello-world";
+        let container_name = "this/is/a_container";
+        let expected_container_name = "this_is_a_container";
+
+        let image_instance =
+            ImageInstance::with_repository(&repository).with_container_name(container_name);
+
+        let suffix = "test123";
+        let namespace = "namespace";
+
+        let expected_output = format!("{}-{}-{}", namespace, expected_container_name, suffix);
+
+        let new_instance = image_instance.configurate_container_name(&namespace, suffix);
+
+        assert_eq!(
+            new_instance.container_name, expected_output,
+            "container_name not configurated correctly"
+        );
+    }
+
+    // Tests that the configurate_container_name method replaces forward slashes with underscore
+    // when no user provided container name is provided.
+    // The docker daemon does not like forward slashes in container names.
+    #[test]
+    fn test_configurate_container_name_without_user_supplied_name_containing_slashes() {
+        let repository = "hello/world";
+        let expected_container_name = "hello_world";
+
+        let image_instance = ImageInstance::with_repository(&repository);
+
+        let suffix = "test123";
+        let namespace = "namespace";
+
+        let expected_output = format!("{}-{}-{}", namespace, expected_container_name, suffix);
 
         let new_instance = image_instance.configurate_container_name(&namespace, suffix);
 
