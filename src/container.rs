@@ -1,5 +1,5 @@
 use crate::error::DockerError;
-use futures::future::Future;
+use futures::future::{self, Future};
 use shiplift;
 use shiplift::builder::RmContainerOptions;
 use std::rc::Rc;
@@ -44,6 +44,18 @@ impl Container {
     /// Returns which host port the given container port is mapped to.
     pub fn host_port(&self, _container_port: u32) -> u32 {
         0
+    }
+
+    /// Returns whether the container is in a running state
+    pub fn is_running(&self) -> impl Future<Item = bool, Error = DockerError> {
+        self.client
+            .containers()
+            .get(&self.name)
+            .inspect()
+            .map_err(|e| {
+                DockerError::daemon(format!("failed to get container state from daemon: {}", e))
+            })
+            .and_then(|c| future::ok(c.state.running))
     }
 
     /// Returns the name of container
