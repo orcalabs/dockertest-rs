@@ -1,7 +1,7 @@
 use crate::container::Container;
 use crate::error::{DockerError, DockerErrorKind};
 use crate::image::Image;
-use crate::wait_for::{DefaultWait, WaitFor};
+use crate::wait_for::{NoWait, WaitFor};
 use futures;
 use futures::future::Future;
 use shiplift;
@@ -70,7 +70,7 @@ impl ImageInstance {
             user_provided_container_name: None,
             image: Image::with_repository(&copy),
             container_name: copy,
-            wait: Rc::new(DefaultWait {}),
+            wait: Rc::new(NoWait {}),
             env: HashMap::new(),
             cmd: Vec::new(),
             start_policy: StartPolicy::Relaxed,
@@ -83,7 +83,7 @@ impl ImageInstance {
             user_provided_container_name: None,
             container_name: image.repository().to_string(),
             image,
-            wait: Rc::new(DefaultWait {}),
+            wait: Rc::new(NoWait {}),
             env: HashMap::new(),
             cmd: Vec::new(),
             start_policy: StartPolicy::Relaxed,

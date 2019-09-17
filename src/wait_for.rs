@@ -141,18 +141,17 @@ fn wait_for_container_state(
 #[cfg(test)]
 mod tests {
     use crate::container::Container;
-    use crate::wait_for::{DefaultWait, WaitFor};
+    use crate::wait_for::{NoWait, WaitFor};
     use shiplift;
     use std::rc::Rc;
     use tokio::runtime::current_thread;
 
-    // Tests that WaitFor implementation for
-    // DefaultWait returns ok
+    // Tests that WaitFor implementation for NoWait
     #[test]
-    fn test_default_returns_ok() {
+    fn test_no_wait_returns_ok() {
         let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
 
-        let wait = DefaultWait {};
+        let wait = NoWait {};
 
         let container_name = "this_is_a_name".to_string();
         let id = "this_is_an_id".to_string();
