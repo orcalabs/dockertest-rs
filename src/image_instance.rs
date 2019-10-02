@@ -3,7 +3,7 @@ use crate::error::{DockerError, DockerErrorKind};
 use crate::image::Image;
 use crate::wait_for::{NoWait, WaitFor};
 use futures;
-use futures::future::Future;
+use futures::future::{self, Future};
 use shiplift;
 use shiplift::builder::{ContainerOptions, RmContainerOptions};
 use std::collections::HashMap;
@@ -163,23 +163,20 @@ impl ImageInstance {
         }
     }
 
-    // Consumes the ImageInstance, starts the container, and returns the
-    // Container object if it was succesfully started.
-    pub(crate) fn start<'a>(
+    // Consumes the ImageInstance, creates the container and returns the Container object if it
+    // was succesfully created.
+    pub(crate) fn create<'a>(
         self,
         client: Rc<shiplift::Docker>,
     ) -> impl Future<Item = Container, Error = DockerError> + 'a {
         println!("starting container: {}", self.container_name);
 
-        // TODO don't clone, do something else?
-        // no idea how to have each closure share a
-        // client without cloning
         let wait_for_clone = self.wait.clone();
+        let start_policy_clone = self.start_policy.clone();
 
         let container_name_clone = self.container_name.clone();
 
         let c1 = client.clone();
-        let c2 = client.clone();
 
         let handle = match &self.user_provided_container_name {
             None => self.image.repository().to_string(),
@@ -221,19 +218,16 @@ impl ImageInstance {
                     .map_err(|e| DockerError::daemon(format!("failed to create container: {}", e)))
             })
             .and_then(move |container_info| {
-                let new_container = shiplift::Container::new(&c2, container_info.id);
-                let id = new_container.id().to_string();
-                new_container
-                    .start()
-                    .map_err(|e| DockerError::daemon(format!("failed to start container: {}", e)))
-                    .map(move |_| id)
-            })
-            .and_then(move |id| {
-                let c = Container::new(&container_name_clone, &id, handle, client.clone());
+                let container = Container::new(
+                    &container_name_clone,
+                    &container_info.id,
+                    handle,
+                    start_policy_clone,
+                    wait_for_clone,
+                    client.clone(),
+                );
 
-                wait_for_clone.wait_for_ready(c).map_err(|e| {
-                    DockerError::startup(format!("failed to wait for container to be ready: {}", e))
-                })
+                future::ok(container)
             })
     }
 

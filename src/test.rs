@@ -98,20 +98,31 @@ impl DockerTest {
         }
     }
 
-    // TODO: teardown if the setup fails
     pub fn run<T>(&self, test: T)
     where
         T: FnOnce(&DockerOperations) -> () + panic::UnwindSafe,
     {
-        let rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
+        let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
 
-        let containers = self.setup(rt).unwrap_or_else(|e| {
-            panic!(format!("failed to setup environment: {}", e));
-        });
+        let mut containers: HashMap<String, Vec<Container>> = HashMap::new();
+
+        self.create_containers(&mut containers, &mut rt)
+            .unwrap_or_else(|e| {
+                self.teardown(&mut rt, &containers).unwrap_or_else(|_e| {
+                    eprintln!("failed to teardown docker environment");
+                });
+                panic!(DockerError::startup(format!(
+                    "failed to setup environment: {}",
+                    e
+                )));
+            });
+
+        self.start_containers(&containers, &mut rt)
+            .unwrap_or_else(|e| {
+                panic!(format!("failed to setup environment: {}", e));
+            });
 
         let ops = DockerOperations { containers };
-
-        // TODO: don't clone? or is it necessary?
         let ops_clone = ops.clone();
 
         let res = {
@@ -120,10 +131,10 @@ impl DockerTest {
             panic::catch_unwind(move || test(&ops_wrapper))
         };
 
-        let rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
-        self.teardown(rt, ops_clone).unwrap_or_else(|_e| {
-            eprintln!("failed to teardown docker environment");
-        });
+        self.teardown(&mut rt, &ops_clone.containers)
+            .unwrap_or_else(|_e| {
+                eprintln!("failed to teardown docker environment");
+            });
 
         if res.is_err() {
             ops.failure("see panic above");
@@ -142,24 +153,70 @@ impl DockerTest {
         &self.default_source
     }
 
-    fn setup(
+    fn create_containers(
         &self,
-        mut rt: current_thread::Runtime,
-    ) -> Result<HashMap<String, Vec<Container>>, Error> {
-        self.pull_images(&mut rt)?;
+        containers: &mut HashMap<String, Vec<Container>>,
+        rt: &mut current_thread::Runtime,
+    ) -> Result<(), Error> {
+        self.pull_images(rt)?;
+
+        let mut all_image_instances: Vec<ImageInstance> = Vec::new();
+
+        all_image_instances.append(&mut self.strict_instances.to_vec());
+        all_image_instances.append(&mut self.relaxed_instances.to_vec());
+
+        for instance in all_image_instances {
+            let suffix = generate_random_string(20);
+            let namespaced_instance = instance.configurate_container_name(&self.namespace, &suffix);
+
+            let create_fut = namespaced_instance.create(self.client.clone());
+            let container = rt.block_on(create_fut)?;
+            containers
+                .entry(container.handle_key().to_string())
+                .or_insert_with(Vec::new)
+                .push(container);
+        }
+
+        Ok(())
+    }
+
+    fn start_containers(
+        &self,
+        created_containers: &HashMap<String, Vec<Container>>,
+        rt: &mut current_thread::Runtime,
+    ) -> Result<(), Error> {
+        let relaxed_containers: Vec<&Container> = created_containers
+            .values()
+            .flatten()
+            .filter(|c| match c.start_policy() {
+                StartPolicy::Relaxed => true,
+                _ => false,
+            })
+            .collect();
+
+        let strict_containers: Vec<&Container> = created_containers
+            .values()
+            .flatten()
+            .filter(|c| match c.start_policy() {
+                StartPolicy::Strict => true,
+                _ => false,
+            })
+            .collect();
+
+        let num_relaxed_containers = relaxed_containers.len() as i32;
 
         // The bound of the channel is equal to the number of senders
         // (how many times the sender is cloned) + input argument.
         // We dont need more slots than num_senders, so we pass 0.
         let (sender, receiver) = mpsc::channel(0);
 
-        self.start_relaxed_containers(&sender, &mut rt);
+        start_relaxed_containers(&sender, rt, relaxed_containers);
 
-        let strict_containers = self.start_strict_containers(&mut rt)?;
+        start_strict_containers(strict_containers, rt)?;
 
-        let all_containers = self.collect_containers(receiver, &mut rt, strict_containers)?;
+        wait_for_relaxed_containers(receiver, rt, num_relaxed_containers)?;
 
-        Ok(all_containers)
+        Ok(())
     }
 
     fn pull_images(&self, rt: &mut current_thread::Runtime) -> Result<(), DockerError> {
@@ -184,111 +241,14 @@ impl DockerTest {
         rt.block_on(pull_fut).map(|_| ())
     }
 
-    fn start_relaxed_containers(
-        &self,
-        sender: &mpsc::Sender<Result<Container, Error>>,
-        rt: &mut current_thread::Runtime,
-    ) {
-        // we clone the vector such that users can run multiple
-        // dockertest runs without needing to add ImageInstances
-        // for each time
-        let cloned_vec = self.relaxed_instances.to_vec();
-        let iter = cloned_vec.into_iter();
-
-        for instance in iter {
-            let suffix = generate_random_string(20);
-            let namespaced_instance = instance.configurate_container_name(&self.namespace, &suffix);
-
-            let sender_clone = sender.clone();
-            let client_clone = self.client.clone();
-            let start_fut = namespaced_instance
-                .start(client_clone)
-                .map_err(|e| format_err!("failed to start container: {}", e))
-                .then(move |c| {
-                    sender_clone
-                        .send(c)
-                        .map_err(|e| eprintln!("failed to send container in channel: {}", e))
-                })
-                .and_then(|_| Ok(()));
-
-            rt.spawn(start_fut);
-        }
-    }
-
-    fn start_strict_containers(
-        &self,
-        rt: &mut current_thread::Runtime,
-    ) -> Result<Vec<Container>, Error> {
-        // we clone the vector such that users can run multiple
-        // dockertest runs without needing to add ImageInstances
-        // for each time
-        let cloned_vec = self.strict_instances.to_vec();
-        let iter = cloned_vec.into_iter();
-
-        let mut strict_containers: Vec<Container> = Vec::new();
-
-        for instance in iter {
-            let suffix = generate_random_string(20);
-            let namespaced_instance = instance.configurate_container_name(&self.namespace, &suffix);
-
-            let client_clone = self.client.clone();
-            let container = rt.block_on(namespaced_instance.start(client_clone))?;
-            strict_containers.push(container);
-        }
-
-        Ok(strict_containers)
-    }
-
-    fn collect_containers(
-        &self,
-        receiver: mpsc::Receiver<Result<Container, Error>>,
-        rt: &mut current_thread::Runtime,
-        strict_containers: Vec<Container>,
-    ) -> Result<HashMap<String, Vec<Container>>, Error> {
-        let mut started_containers: HashMap<String, Vec<Container>> = HashMap::new();
-
-        for c in strict_containers.into_iter() {
-            println!("strict: {}", c.name());
-            started_containers
-                .entry(c.handle_key().to_string())
-                .or_insert_with(Vec::new)
-                .push(c);
-        }
-
-        let relaxed_containers = rt.block_on(
-            receiver
-                .take(self.relaxed_instances.len() as u64)
-                .collect()
-                .map_err(|_e| format_err!("failed to collect relaxed containers")),
-        )?;
-
-        for c in relaxed_containers.into_iter() {
-            if c.is_err() {
-                return Err(format_err!(
-                    "failed to start relaxed containers: {:?}",
-                    c.err().expect("failed to unwrap error")
-                ));
-            } else {
-                let c = c.expect("failed to unwrap container");
-                println!("relaxed: {}", c.name());
-                started_containers
-                    .entry(c.handle_key().to_string())
-                    .or_insert_with(Vec::new)
-                    .push(c);
-            }
-        }
-
-        Ok(started_containers)
-    }
-
     fn teardown(
         &self,
-        mut rt: current_thread::Runtime,
-        ops: DockerOperations,
+        rt: &mut current_thread::Runtime,
+        all_containers: &HashMap<String, Vec<Container>>,
     ) -> Result<(), DockerError> {
         let mut future_vec = Vec::new();
 
-        for (_name, containers) in ops.containers {
+        for containers in all_containers.values() {
             for c in containers {
                 future_vec.push(
                     c.remove()
@@ -349,6 +309,62 @@ fn resolve_container_handle_key<'a>(
             key
         )))
     }
+}
+
+fn start_relaxed_containers(
+    sender: &mpsc::Sender<Result<(), Error>>,
+    rt: &mut current_thread::Runtime,
+    containers: Vec<&Container>,
+) {
+    for c in containers {
+        let sender_clone = sender.clone();
+        let start_fut = c
+            .start()
+            .map_err(|e| format_err!("failed to start container: {}", e))
+            .then(move |_| {
+                sender_clone
+                    .send(Ok(()))
+                    .map_err(|e| eprintln!("failed to send container in channel: {}", e))
+            })
+            .and_then(|_| Ok(()));
+
+        rt.spawn(start_fut);
+    }
+}
+
+fn start_strict_containers(
+    containers: Vec<&Container>,
+    rt: &mut current_thread::Runtime,
+) -> Result<(), Error> {
+    for c in containers {
+        rt.block_on(c.start())?;
+    }
+
+    Ok(())
+}
+
+fn wait_for_relaxed_containers(
+    receiver: mpsc::Receiver<Result<(), Error>>,
+    rt: &mut current_thread::Runtime,
+    num_relaxed_containers: i32,
+) -> Result<(), Error> {
+    let relaxed_containers = rt.block_on(
+        receiver
+            .take(num_relaxed_containers as u64)
+            .collect()
+            .map_err(|_e| format_err!("failed to collect relaxed containers")),
+    )?;
+
+    for c in relaxed_containers.into_iter() {
+        if c.is_err() {
+            return Err(format_err!(
+                "failed to start relaxed containers: {:?}",
+                c.err().expect("failed to unwrap error")
+            ));
+        }
+    }
+
+    Ok(())
 }
 
 fn generate_random_string(len: i32) -> String {
