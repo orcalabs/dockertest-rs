@@ -383,12 +383,18 @@ mod tests {
     use crate::container::Container;
     use crate::image::{Image, PullPolicy, Source};
     use crate::image_instance::{ImageInstance, StartPolicy};
-    use crate::test::{resolve_container_handle_key, DockerOperations};
+    use crate::test::resolve_container_handle_key;
+    use crate::test::{
+        start_relaxed_containers, start_strict_containers, wait_for_relaxed_containers,
+    };
     use crate::test_utils;
+    use crate::wait_for::NoWait;
     use crate::DockerTest;
     use futures::future::Future;
+    use futures::sink::Sink;
     use futures::stream::Stream;
     use futures::sync::mpsc;
+    use std::collections::HashMap;
     use std::rc::Rc;
     use tokio::runtime::current_thread;
 
@@ -448,60 +454,6 @@ mod tests {
         };
 
         assert!(equal, "default_source was not set correctly");
-    }
-
-    // Tests that the setup method returns Container representations for both strict and relaxed
-    // startup policies
-    #[test]
-    fn test_setup() {
-        let rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
-        let client = Rc::new(shiplift::Docker::new());
-
-        let image_name = "hello-world".to_string();
-
-        let mut test =
-            DockerTest::new().with_default_source(Source::DockerHub(PullPolicy::IfNotPresent));
-
-        let image_instance = ImageInstance::with_repository(&image_name);
-        let image_instance2 =
-            ImageInstance::with_repository(&image_name).with_start_policy(StartPolicy::Strict);
-
-        test.add_instance(image_instance);
-        test.add_instance(image_instance2);
-
-        let output = test.setup(rt).expect("failed to perform setup");
-        let container_vec = output
-            .get(&image_name)
-            .expect("failed to retrieve containers with repository as handle key");
-        assert_eq!(
-            container_vec.len(),
-            2,
-            "setup did not return a map containing containers for all image instances"
-        );
-
-        let mut rt2 = current_thread::Runtime::new().expect("failed to start tokio runtime");
-
-        for (_, containers) in output {
-            for container in containers {
-                let response = rt2.block_on(test_utils::is_container_running(
-                    container.id().to_string(),
-                    &client,
-                ));
-                assert!(
-                    response.is_ok(),
-                    format!(
-                        "failed to check for container liveness: {}",
-                        response.unwrap_err()
-                    )
-                );
-
-                let is_running = response.expect("failed to unwrap liveness probe");
-                assert!(
-                    is_running,
-                    "container should be running after setup is complete"
-                );
-            }
-        }
     }
 
     // Tests that the pull_images method pulls images with strict startup policy
@@ -586,7 +538,7 @@ mod tests {
         );
     }
 
-    // Tests that the start_relaxed_containers method starts all the relaxed containers
+    // Tests that the start_relaxed_containers function starts all the relaxed containers
     #[test]
     fn test_start_relaxed_containers() {
         let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
@@ -612,43 +564,44 @@ mod tests {
 
         test.add_instance(image_instance);
 
-        let res = rt.block_on(test_utils::remove_containers(image_id, &client));
-        assert!(
-            res.is_ok(),
-            format!("failed to remove existing containers {}", res.unwrap_err())
-        );
+        rt.block_on(test_utils::remove_containers(image_id, &client))
+            .expect("failed to remove existing containers");
+
+        let mut containers: HashMap<String, Vec<Container>> = HashMap::new();
+
+        test.create_containers(&mut containers, &mut rt)
+            .expect("failed to create containers");
+
+        let created_containers: Vec<&Container> = containers.values().flatten().collect();
+
+        let container_id = created_containers
+            .first()
+            .expect("failed to get container from vector")
+            .id()
+            .to_string();
 
         let (sender, receiver) = mpsc::channel(0);
 
-        test.start_relaxed_containers(&sender, &mut rt);
+        start_relaxed_containers(&sender, &mut rt, created_containers);
 
-        let res = rt.block_on(
-            receiver
-                .take(1)
-                .collect()
-                .map_err(|e| format!("failed to retrieve started relaxed container: {:?}", e)),
-        );
-
-        assert!(res.is_ok(), format!("failed to start relaxed container"));
-        let mut containers = res.expect("failed to unwrap relaxed container");
-        assert_eq!(1, containers.len(), "should only start 1 relaxed container");
-
-        let container_result = containers.pop().expect("failed to pop relaxed container");
-
-        let container = container_result.expect("failed to unwrap container");
-
-        let res = rt.block_on(test_utils::is_container_running(
-            container.id().to_string(),
-            &client,
-        ));
-        assert!(
-            res.is_ok(),
-            format!(
-                "failed to check liveness of relaxed container: {}",
-                res.unwrap_err()
+        let mut res = rt
+            .block_on(
+                receiver
+                    .take(1)
+                    .collect()
+                    .map_err(|e| format!("failed to retrieve started relaxed container: {:?}", e)),
             )
-        );
-        let is_running = res.expect("failed to unwrap liveness check");
+            .expect("failed to retrieve result of startup procedure");
+
+        let result = res
+            .pop()
+            .expect("failed to retrieve the first result from vector");
+
+        assert!(result.is_ok(), format!("failed to start relaxed container"));
+
+        let is_running = rt
+            .block_on(test_utils::is_container_running(container_id, &client))
+            .expect("failed to check liveness of relaxed container");
 
         assert!(
             is_running,
@@ -668,12 +621,8 @@ mod tests {
         let repository = "hello-world".to_string();
         let image = Image::with_repository(&repository);
 
-        let res = rt.block_on(image.pull(client.clone(), test.source()));
-        assert!(
-            res.is_ok(),
-            "failed to pull relaxed container image: {}",
-            res.unwrap_err()
-        );
+        rt.block_on(image.pull(client.clone(), test.source()))
+            .expect("failed to pull relaxed container image");
 
         let image_id = image.retrieved_id();
 
@@ -682,34 +631,29 @@ mod tests {
 
         test.add_instance(image_instance);
 
-        let res = rt.block_on(test_utils::remove_containers(image_id, &client));
-        assert!(
-            res.is_ok(),
-            format!("failed to remove existing containers {}", res.unwrap_err())
-        );
+        rt.block_on(test_utils::remove_containers(image_id, &client))
+            .expect("failed to remove existing containers");
 
-        let res = test.start_strict_containers(&mut rt);
+        let mut containers: HashMap<String, Vec<Container>> = HashMap::new();
+
+        test.create_containers(&mut containers, &mut rt)
+            .expect("failed to create containers");
+
+        let created_containers: Vec<&Container> = containers.values().flatten().collect();
+
+        let container_id = created_containers
+            .first()
+            .expect("failed to get container from vector")
+            .id()
+            .to_string();
+
+        let res = start_strict_containers(created_containers, &mut rt);
 
         assert!(res.is_ok(), format!("failed to start relaxed container"));
-        let mut containers = res.expect("failed to unwrap relaxed container");
-        assert_eq!(1, containers.len(), "should only start 1 relaxed container");
 
-        let container = containers
-            .pop()
-            .expect("failed to unwrap relaxed container");
-
-        let res = rt.block_on(test_utils::is_container_running(
-            container.id().to_string(),
-            &client,
-        ));
-        assert!(
-            res.is_ok(),
-            format!(
-                "failed to check liveness of relaxed container: {}",
-                res.unwrap_err()
-            )
-        );
-        let is_running = res.expect("failed to unwrap liveness check");
+        let is_running = rt
+            .block_on(test_utils::is_container_running(container_id, &client))
+            .expect("failed to check liveness of relaxed container");
 
         assert!(
             is_running,
@@ -717,94 +661,23 @@ mod tests {
         );
     }
 
-    // Tests that the collect_containers method returns both strict and relaxed containers
+    // Tests that the wait_for_relaxed_containers function waits for the results send through its
+    // input channel
     #[test]
-    fn test_collect_containers() {
+    fn test_wait_for_relaxed_container() {
         let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
-        let client = Rc::new(shiplift::Docker::new());
-
-        let mut test =
-            DockerTest::new().with_default_source(Source::DockerHub(PullPolicy::IfNotPresent));
-
-        let repository = "hello-world".to_string();
-        let image = Image::with_repository(&repository);
-
-        let res = rt.block_on(image.pull(client.clone(), test.source()));
-        assert!(
-            res.is_ok(),
-            "failed to pull relaxed container image: {}",
-            res.unwrap_err()
-        );
-
-        let image_instance =
-            ImageInstance::with_image(image).with_start_policy(StartPolicy::Relaxed);
-
-        let image2 = Image::with_repository(&repository);
-
-        let res = rt.block_on(image2.pull(client.clone(), test.source()));
-        assert!(
-            res.is_ok(),
-            "failed to pull relaxed container image: {}",
-            res.unwrap_err()
-        );
-
-        let image_id = image2.retrieved_id();
-
-        let image_instance2 =
-            ImageInstance::with_image(image2).with_start_policy(StartPolicy::Strict);
-
-        test.add_instance(image_instance);
-        test.add_instance(image_instance2);
-
-        let res = rt.block_on(test_utils::remove_containers(image_id, &client));
-        assert!(
-            res.is_ok(),
-            format!("failed to remove existing containers {}", res.unwrap_err())
-        );
-
-        let strict_containers = test
-            .start_strict_containers(&mut rt)
-            .expect("failed to start strict containers");
 
         let (sender, receiver) = mpsc::channel(0);
 
-        test.start_relaxed_containers(&sender, &mut rt);
+        let send_fut = sender
+            .send(Ok(()))
+            .map_err(|e| eprintln!("failed to send empty OK through channel {}", e))
+            .map(|_| ());
 
-        let mut strict_containers_copy = strict_containers.clone();
+        rt.spawn(send_fut);
 
-        let res = test.collect_containers(receiver, &mut rt, strict_containers);
-        assert!(res.is_ok(), "failed to collect containers");
-
-        let containers = res.expect("failed to unwrap collected containers");
-        let container_vec = containers
-            .get(&repository)
-            .expect("failed to retrieve containers with repository as handle key");
-        assert_eq!(
-            container_vec.len(),
-            2,
-            "should only exist 2 containers, 1 strict, 1 relaxed"
-        );
-
-        let strict_container = strict_containers_copy
-            .pop()
-            .expect("failed to pop strict container vector");
-
-        let strict_container_name = strict_container.name();
-
-        let c1 = container_vec
-            .iter()
-            .find(|c| c.name() == strict_container_name);
-        assert!(
-            c1.is_some(),
-            "did not find strict container in collected containers"
-        );
-
-        // FIXME: Assert that the output contains the relaxed container aswell.
-        // As of now, there is no way to retrieve the container name of the
-        // relaxed container since the start_relaxed_container method returns
-        // the container through a channel.
-        // And that channel is used by the collect containers method, and
-        // there can only be one receiver.
+        let res = wait_for_relaxed_containers(receiver, &mut rt, 1);
+        assert!(res.is_ok(), "failed to receive results through channel");
     }
 
     // Tests that the teardown method removes all containers
@@ -831,29 +704,24 @@ mod tests {
 
         test.add_instance(image_instance);
 
-        let res = test.setup(rt);
-        assert!(res.is_ok(), "failed to perform setup");
+        let mut containers: HashMap<String, Vec<Container>> = HashMap::new();
 
-        let containers = res.expect("failed to unwrap containers");
+        test.create_containers(&mut containers, &mut rt)
+            .expect("failed to create containers");
 
-        let containers_copy = containers.clone();
+        test.start_containers(&containers, &mut rt)
+            .expect("failed to start containers");
 
-        let ops = DockerOperations {
-            containers: containers_copy,
-        };
-
-        let rt2 = current_thread::Runtime::new().expect("failed to start tokio runtime");
-        let res = test.teardown(rt2, ops);
+        let res = test.teardown(&mut rt, &containers);
         assert!(
             res.is_ok(),
             "failed to teardown environment: {}",
             res.unwrap_err()
         );
 
-        let mut rt3 = current_thread::Runtime::new().expect("failed to start tokio runtime");
         for (_, container_vec) in containers {
             for c in container_vec {
-                let is_running = rt3
+                let is_running = rt
                     .block_on(test_utils::is_container_running(
                         c.id().to_string(),
                         &client,
@@ -876,7 +744,14 @@ mod tests {
         let id = "this_is_a_id";
         let handle = "this_is_a_handle_key";
 
-        let container = Container::new(name, id, handle, client);
+        let container = Container::new(
+            name,
+            id,
+            handle,
+            StartPolicy::Relaxed,
+            Rc::new(NoWait {}),
+            client,
+        );
         let container_id = container.id().to_string();
 
         let mut containers = Vec::new();
@@ -908,8 +783,22 @@ mod tests {
 
         let id2 = "this_is_a_id2";
 
-        let container = Container::new(name, id, handle, client.clone());
-        let container2 = Container::new(name, id2, handle, client);
+        let container = Container::new(
+            name,
+            id,
+            handle,
+            StartPolicy::Relaxed,
+            Rc::new(NoWait {}),
+            client.clone(),
+        );
+        let container2 = Container::new(
+            name,
+            id2,
+            handle,
+            StartPolicy::Relaxed,
+            Rc::new(NoWait {}),
+            client,
+        );
 
         let mut containers = Vec::new();
         containers.push(container);

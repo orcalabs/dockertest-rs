@@ -263,16 +263,11 @@ fn remove_container_if_exists(
 
 #[cfg(test)]
 mod tests {
-    use crate::container::Container;
     use crate::error::DockerErrorKind;
     use crate::image::{Image, PullPolicy, Source};
     use crate::image_instance::{remove_container_if_exists, ImageInstance, StartPolicy};
-    use crate::wait_for::WaitFor;
-    use failure::Error;
-    use futures::future::{self, Future};
     use std::collections::HashMap;
     use std::rc::Rc;
-    use std::sync::RwLock;
     use tokio::runtime::current_thread;
 
     // Tests that the with_repository constructor creates
@@ -434,18 +429,18 @@ mod tests {
         );
     }
 
-    // Tests that we fail to start the ImageInstance if its associated image has
+    // Tests that we fail to create the Container if its associated image has
     // not been pulled yet.
     // If it exists locally, but the pull process has no been invoked
     // its id will be empty.
     #[test]
-    fn test_start_with_non_existing_image() {
+    fn test_create_with_non_existing_image() {
         let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
         let repository = "this_repo_does_not_exist".to_string();
         let instance = ImageInstance::with_repository(&repository);
 
         let client = Rc::new(shiplift::Docker::new());
-        let res = rt.block_on(instance.start(client));
+        let res = rt.block_on(instance.create(client));
 
         assert!(
             res.is_err(),
@@ -453,10 +448,10 @@ mod tests {
         );
     }
 
-    // Tests that we can successfully start an ImageInstance,
-    // resulting in a running container with correct values.
+    // Tests that we can successfully create a Container from an ImageInstance
+    // resulting in a Container with correct values.
     #[test]
-    fn test_start_with_existing_image() {
+    fn test_create_with_existing_image() {
         let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
         let repository = "hello-world".to_string();
 
@@ -472,20 +467,20 @@ mod tests {
             format!("failed to pull image: {}", res.unwrap_err())
         );
 
-        let res = rt.block_on(instance.start(client));
+        let res = rt.block_on(instance.create(client));
         assert!(
             res.is_ok(),
             format!("failed to start ImageInstance: {}", res.err().unwrap())
         );
     }
 
-    // Tests that we can successfully start an ImageInstance,
+    // Tests that we can successfully create a Contaienr from an ImageInstance,
     // even if there exists a container with the same name.
     // The start method should detect that there already
     // exists a container with the same name,
-    // remove it, and start ours.
+    // remove it, and create ours.
     #[test]
-    fn test_start_with_existing_container() {
+    fn test_create_with_existing_container() {
         let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
         let repository = "hello-world".to_string();
 
@@ -504,7 +499,7 @@ mod tests {
             format!("failed to pull image: {}", res.unwrap_err())
         );
 
-        let res = rt.block_on(instance.start(client.clone()));
+        let res = rt.block_on(instance.create(client.clone()));
         assert!(
             res.is_ok(),
             format!("failed to start ImageInstance: {}", res.err().unwrap())
@@ -523,7 +518,7 @@ mod tests {
             format!("failed to pull image: {}", res.unwrap_err())
         );
 
-        let res = rt.block_on(instance.start(client));
+        let res = rt.block_on(instance.create(client));
         assert!(
             res.is_ok(),
             format!("failed to start ImageInstance: {}", res.err().unwrap())
@@ -550,7 +545,7 @@ mod tests {
             format!("failed to pull image: {}", res.unwrap_err())
         );
 
-        let res = rt.block_on(instance.start(client.clone()));
+        let res = rt.block_on(instance.create(client.clone()));
         assert!(
             res.is_ok(),
             format!("failed to start ImageInstance: {}", res.err().unwrap())
@@ -582,63 +577,6 @@ mod tests {
             },
         };
         assert!(res, format!("should fail to remove non-existing container"));
-    }
-
-    struct TestWaitFor {
-        invoked: Rc<RwLock<bool>>,
-    }
-
-    impl WaitFor for TestWaitFor {
-        fn wait_for_ready(
-            &self,
-            container: Container,
-        ) -> Box<dyn Future<Item = Container, Error = Error>> {
-            let mut invoked = self.invoked.write().expect("failed to take invoked lock");
-            *invoked = true;
-            Box::new(future::ok(container))
-        }
-    }
-
-    // Tests that the provided WaitFor trait object is invoked
-    // during the start method of ImageInstance
-    #[test]
-    fn test_wait_for_invoked_during_start() {
-        let wait_for = TestWaitFor {
-            invoked: Rc::new(RwLock::new(false)),
-        };
-
-        let wrapped_wait_for = Rc::new(wait_for);
-
-        let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
-        let repository = "hello-world".to_string();
-
-        let source = Source::DockerHub(PullPolicy::IfNotPresent);
-        let image = Image::with_repository(&repository);
-        let instance = ImageInstance::with_image(image).wait_for(wrapped_wait_for.clone());
-
-        let client = Rc::new(shiplift::Docker::new());
-
-        let res = rt.block_on(instance.image().pull(client.clone(), &source));
-        assert!(
-            res.is_ok(),
-            format!("failed to pull image: {}", res.unwrap_err())
-        );
-
-        let res = rt.block_on(instance.start(client));
-        assert!(
-            res.is_ok(),
-            format!("failed to start ImageInstance: {}", res.err().unwrap())
-        );
-
-        let was_invoked = wrapped_wait_for
-            .invoked
-            .read()
-            .expect("failed to get read lock");
-
-        assert!(
-            *was_invoked,
-            "wait_for trait object was not invoked during startup"
-        );
     }
 
     // Tests that the configurate_container_name method correctly sets the ImageInstance's

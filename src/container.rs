@@ -124,8 +124,16 @@ impl Container {
 #[cfg(test)]
 mod tests {
     use crate::container::Container;
+    use crate::image::{Image, PullPolicy, Source};
+    use crate::image_instance::ImageInstance;
+    use crate::image_instance::StartPolicy;
+    use crate::wait_for::{NoWait, WaitFor};
+    use failure::Error;
+    use futures::future::{self, Future};
     use shiplift;
     use std::rc::Rc;
+    use std::sync::RwLock;
+    use tokio::runtime::current_thread;
 
     // Tests that we can create a new container with the new method, and
     // that the correct struct members are set.
@@ -137,7 +145,14 @@ mod tests {
         let name = "this_is_a_container_name".to_string();
         let handle_key = "this_is_a_handle_key";
 
-        let container = Container::new(&name, &id, handle_key, client);
+        let container = Container::new(
+            &name,
+            &id,
+            handle_key,
+            StartPolicy::Relaxed,
+            Rc::new(NoWait {}),
+            client,
+        );
         assert_eq!(id, container.id, "wrong id set in container creation");
         assert_eq!(name, container.name, "wrong name set in container creation");
         assert_eq!(
@@ -153,6 +168,63 @@ mod tests {
             handle_key,
             container.handle_key(),
             "handle_key getter returns wrong value"
+        );
+    }
+
+    struct TestWaitFor {
+        invoked: Rc<RwLock<bool>>,
+    }
+
+    impl WaitFor for TestWaitFor {
+        fn wait_for_ready(
+            &self,
+            container: Container,
+        ) -> Box<dyn Future<Item = Container, Error = Error>> {
+            let mut invoked = self.invoked.write().expect("failed to take invoked lock");
+            *invoked = true;
+            Box::new(future::ok(container))
+        }
+    }
+    // Tests that the provided WaitFor trait object is invoked
+    // during the start method of ImageInstance
+    #[test]
+    fn test_wait_for_invoked_during_start() {
+        let wait_for = TestWaitFor {
+            invoked: Rc::new(RwLock::new(false)),
+        };
+
+        let wrapped_wait_for = Rc::new(wait_for);
+
+        let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
+        let repository = "hello-world".to_string();
+
+        let source = Source::DockerHub(PullPolicy::IfNotPresent);
+        let image = Image::with_repository(&repository);
+        let instance = ImageInstance::with_image(image).wait_for(wrapped_wait_for.clone());
+
+        let client = Rc::new(shiplift::Docker::new());
+
+        let res = rt.block_on(instance.image().pull(client.clone(), &source));
+        assert!(
+            res.is_ok(),
+            format!("failed to pull image: {}", res.unwrap_err())
+        );
+
+        let container = rt
+            .block_on(instance.create(client))
+            .expect("failed to create container");
+
+        rt.block_on(container.start())
+            .expect("failed to start container");
+
+        let was_invoked = wrapped_wait_for
+            .invoked
+            .read()
+            .expect("failed to get read lock");
+
+        assert!(
+            *was_invoked,
+            "wait_for trait object was not invoked during startup"
         );
     }
 }

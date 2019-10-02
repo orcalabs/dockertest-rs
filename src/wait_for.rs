@@ -140,6 +140,7 @@ fn wait_for_container_state(
 #[cfg(test)]
 mod tests {
     use crate::container::Container;
+    use crate::image_instance::StartPolicy;
     use crate::wait_for::{NoWait, WaitFor};
     use shiplift;
     use std::rc::Rc;
@@ -150,7 +151,7 @@ mod tests {
     fn test_no_wait_returns_ok() {
         let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
 
-        let wait = NoWait {};
+        let wait = Rc::new(NoWait {});
 
         let container_name = "this_is_a_name".to_string();
         let id = "this_is_an_id".to_string();
@@ -160,6 +161,8 @@ mod tests {
             &container_name,
             &id,
             handle_key,
+            StartPolicy::Relaxed,
+            wait.clone(),
             Rc::new(shiplift::Docker::new()),
         );
 
