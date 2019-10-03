@@ -119,8 +119,8 @@ fn wait_for_container_state(
         })
         .then(move |r| {
             // We failed checking the status of the container
-            if r.is_err() {
-                future::Either::B(future::err(format_err!("{}", r.unwrap_err())))
+            if let Err(e) = r {
+                future::Either::B(future::err(format_err!("{}", e)))
             } else {
                 let s = desired_state_clone2.load(atomic::Ordering::SeqCst);
                 // The desired status has been reached and we can return Ok
