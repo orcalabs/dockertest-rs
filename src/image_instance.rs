@@ -3,7 +3,7 @@ use crate::error::{DockerError, DockerErrorKind};
 use crate::image::Image;
 use crate::wait_for::{NoWait, WaitFor};
 use futures;
-use futures::future::Future;
+use futures::future::{self, Future};
 use shiplift;
 use shiplift::builder::{ContainerOptions, RmContainerOptions};
 use std::collections::HashMap;
@@ -163,23 +163,20 @@ impl ImageInstance {
         }
     }
 
-    // Consumes the ImageInstance, starts the container, and returns the
-    // Container object if it was succesfully started.
-    pub(crate) fn start<'a>(
+    // Consumes the ImageInstance, creates the container and returns the Container object if it
+    // was succesfully created.
+    pub(crate) fn create<'a>(
         self,
         client: Rc<shiplift::Docker>,
     ) -> impl Future<Item = Container, Error = DockerError> + 'a {
         println!("starting container: {}", self.container_name);
 
-        // TODO don't clone, do something else?
-        // no idea how to have each closure share a
-        // client without cloning
         let wait_for_clone = self.wait.clone();
+        let start_policy_clone = self.start_policy.clone();
 
         let container_name_clone = self.container_name.clone();
 
         let c1 = client.clone();
-        let c2 = client.clone();
 
         let handle = match &self.user_provided_container_name {
             None => self.image.repository().to_string(),
@@ -221,19 +218,16 @@ impl ImageInstance {
                     .map_err(|e| DockerError::daemon(format!("failed to create container: {}", e)))
             })
             .and_then(move |container_info| {
-                let new_container = shiplift::Container::new(&c2, container_info.id);
-                let id = new_container.id().to_string();
-                new_container
-                    .start()
-                    .map_err(|e| DockerError::daemon(format!("failed to start container: {}", e)))
-                    .map(move |_| id)
-            })
-            .and_then(move |id| {
-                let c = Container::new(&container_name_clone, &id, handle, client.clone());
+                let container = Container::new(
+                    &container_name_clone,
+                    &container_info.id,
+                    handle,
+                    start_policy_clone,
+                    wait_for_clone,
+                    client.clone(),
+                );
 
-                wait_for_clone.wait_for_ready(c).map_err(|e| {
-                    DockerError::startup(format!("failed to wait for container to be ready: {}", e))
-                })
+                future::ok(container)
             })
     }
 
@@ -269,16 +263,11 @@ fn remove_container_if_exists(
 
 #[cfg(test)]
 mod tests {
-    use crate::container::Container;
     use crate::error::DockerErrorKind;
     use crate::image::{Image, PullPolicy, Source};
     use crate::image_instance::{remove_container_if_exists, ImageInstance, StartPolicy};
-    use crate::wait_for::WaitFor;
-    use failure::Error;
-    use futures::future::{self, Future};
     use std::collections::HashMap;
     use std::rc::Rc;
-    use std::sync::RwLock;
     use tokio::runtime::current_thread;
 
     // Tests that the with_repository constructor creates
@@ -440,18 +429,18 @@ mod tests {
         );
     }
 
-    // Tests that we fail to start the ImageInstance if its associated image has
+    // Tests that we fail to create the Container if its associated image has
     // not been pulled yet.
     // If it exists locally, but the pull process has no been invoked
     // its id will be empty.
     #[test]
-    fn test_start_with_non_existing_image() {
+    fn test_create_with_non_existing_image() {
         let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
         let repository = "this_repo_does_not_exist".to_string();
         let instance = ImageInstance::with_repository(&repository);
 
         let client = Rc::new(shiplift::Docker::new());
-        let res = rt.block_on(instance.start(client));
+        let res = rt.block_on(instance.create(client));
 
         assert!(
             res.is_err(),
@@ -459,10 +448,10 @@ mod tests {
         );
     }
 
-    // Tests that we can successfully start an ImageInstance,
-    // resulting in a running container with correct values.
+    // Tests that we can successfully create a Container from an ImageInstance
+    // resulting in a Container with correct values.
     #[test]
-    fn test_start_with_existing_image() {
+    fn test_create_with_existing_image() {
         let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
         let repository = "hello-world".to_string();
 
@@ -478,20 +467,20 @@ mod tests {
             format!("failed to pull image: {}", res.unwrap_err())
         );
 
-        let res = rt.block_on(instance.start(client));
+        let res = rt.block_on(instance.create(client));
         assert!(
             res.is_ok(),
             format!("failed to start ImageInstance: {}", res.err().unwrap())
         );
     }
 
-    // Tests that we can successfully start an ImageInstance,
+    // Tests that we can successfully create a Contaienr from an ImageInstance,
     // even if there exists a container with the same name.
     // The start method should detect that there already
     // exists a container with the same name,
-    // remove it, and start ours.
+    // remove it, and create ours.
     #[test]
-    fn test_start_with_existing_container() {
+    fn test_create_with_existing_container() {
         let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
         let repository = "hello-world".to_string();
 
@@ -510,7 +499,7 @@ mod tests {
             format!("failed to pull image: {}", res.unwrap_err())
         );
 
-        let res = rt.block_on(instance.start(client.clone()));
+        let res = rt.block_on(instance.create(client.clone()));
         assert!(
             res.is_ok(),
             format!("failed to start ImageInstance: {}", res.err().unwrap())
@@ -529,7 +518,7 @@ mod tests {
             format!("failed to pull image: {}", res.unwrap_err())
         );
 
-        let res = rt.block_on(instance.start(client));
+        let res = rt.block_on(instance.create(client));
         assert!(
             res.is_ok(),
             format!("failed to start ImageInstance: {}", res.err().unwrap())
@@ -556,7 +545,7 @@ mod tests {
             format!("failed to pull image: {}", res.unwrap_err())
         );
 
-        let res = rt.block_on(instance.start(client.clone()));
+        let res = rt.block_on(instance.create(client.clone()));
         assert!(
             res.is_ok(),
             format!("failed to start ImageInstance: {}", res.err().unwrap())
@@ -588,63 +577,6 @@ mod tests {
             },
         };
         assert!(res, format!("should fail to remove non-existing container"));
-    }
-
-    struct TestWaitFor {
-        invoked: Rc<RwLock<bool>>,
-    }
-
-    impl WaitFor for TestWaitFor {
-        fn wait_for_ready(
-            &self,
-            container: Container,
-        ) -> Box<dyn Future<Item = Container, Error = Error>> {
-            let mut invoked = self.invoked.write().expect("failed to take invoked lock");
-            *invoked = true;
-            Box::new(future::ok(container))
-        }
-    }
-
-    // Tests that the provided WaitFor trait object is invoked
-    // during the start method of ImageInstance
-    #[test]
-    fn test_wait_for_invoked_during_start() {
-        let wait_for = TestWaitFor {
-            invoked: Rc::new(RwLock::new(false)),
-        };
-
-        let wrapped_wait_for = Rc::new(wait_for);
-
-        let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
-        let repository = "hello-world".to_string();
-
-        let source = Source::DockerHub(PullPolicy::IfNotPresent);
-        let image = Image::with_repository(&repository);
-        let instance = ImageInstance::with_image(image).wait_for(wrapped_wait_for.clone());
-
-        let client = Rc::new(shiplift::Docker::new());
-
-        let res = rt.block_on(instance.image().pull(client.clone(), &source));
-        assert!(
-            res.is_ok(),
-            format!("failed to pull image: {}", res.unwrap_err())
-        );
-
-        let res = rt.block_on(instance.start(client));
-        assert!(
-            res.is_ok(),
-            format!("failed to start ImageInstance: {}", res.err().unwrap())
-        );
-
-        let was_invoked = wrapped_wait_for
-            .invoked
-            .read()
-            .expect("failed to get read lock");
-
-        assert!(
-            *was_invoked,
-            "wait_for trait object was not invoked during startup"
-        );
     }
 
     // Tests that the configurate_container_name method correctly sets the ImageInstance's

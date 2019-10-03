@@ -119,8 +119,8 @@ fn wait_for_container_state(
         })
         .then(move |r| {
             // We failed checking the status of the container
-            if r.is_err() {
-                future::Either::B(future::err(format_err!("{}", r.unwrap_err())))
+            if let Err(e) = r {
+                future::Either::B(future::err(format_err!("{}", e)))
             } else {
                 let s = desired_state_clone2.load(atomic::Ordering::SeqCst);
                 // The desired status has been reached and we can return Ok
@@ -140,6 +140,7 @@ fn wait_for_container_state(
 #[cfg(test)]
 mod tests {
     use crate::container::Container;
+    use crate::image_instance::StartPolicy;
     use crate::wait_for::{NoWait, WaitFor};
     use shiplift;
     use std::rc::Rc;
@@ -150,7 +151,7 @@ mod tests {
     fn test_no_wait_returns_ok() {
         let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
 
-        let wait = NoWait {};
+        let wait = Rc::new(NoWait {});
 
         let container_name = "this_is_a_name".to_string();
         let id = "this_is_an_id".to_string();
@@ -160,6 +161,8 @@ mod tests {
             &container_name,
             &id,
             handle_key,
+            StartPolicy::Relaxed,
+            wait.clone(),
             Rc::new(shiplift::Docker::new()),
         );
 
