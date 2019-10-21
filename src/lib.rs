@@ -36,7 +36,8 @@
 //!
 //! # Example
 //!
-//! ```rust
+//! ```rust,ignore
+//!
 //! let mut test = DockerTest::new();
 //! test.add_instance(ImageInstace::new("postgres"));
 //!
