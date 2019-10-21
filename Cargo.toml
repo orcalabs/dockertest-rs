@@ -1,7 +1,7 @@
 [package]
-name = "dockertest-rs"
-version = "0.1.0"
-authors = ["Jon Foss Mikalsen <jon@orcalabs.no>"]
+name = "dockertest"
+version = "0.0.1"
+authors = ["Vegard Sandengen <vegard@orcalabs.no", "Jon Foss Mikalsen <jon@orcalabs.no>"]
 edition = "2018"
 
 [dependencies]

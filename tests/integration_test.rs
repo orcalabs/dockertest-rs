@@ -1,7 +1,7 @@
-use dockertest_rs::image::{Image, PullPolicy, Source};
-use dockertest_rs::image_instance::ImageInstance;
-use dockertest_rs::wait_for::{ExitedWait, RunningWait};
-use dockertest_rs::DockerTest;
+use dockertest::image::{Image, PullPolicy, Source};
+use dockertest::image_instance::ImageInstance;
+use dockertest::wait_for::{ExitedWait, RunningWait};
+use dockertest::DockerTest;
 use std::rc::Rc;
 use tokio::runtime::current_thread;
 
