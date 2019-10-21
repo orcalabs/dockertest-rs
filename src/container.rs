@@ -1,3 +1,5 @@
+//! Represents a docker `Container`.
+
 use crate::error::DockerError;
 use crate::image_instance::StartPolicy;
 use crate::wait_for::WaitFor;
@@ -7,14 +9,21 @@ use shiplift::builder::RmContainerOptions;
 use std::rc::Rc;
 
 // TODO: do host_port mapping
-/// Represents a running container
+/// Represents a docker container.
+/// This object lives in two phases:
+/// * Startup -> ensure that the container is ready once its `WaitFor` has successfully completed.
+/// * Test body -> container is active and interactable according to its respective `WaitFor`
+/// clause.
+///
+// The reason the container represents both a pending and running container is that
+// we must ensure that _all_ containers are running, and therefore must be able to teardown
+// existing containers if one fails.
 #[derive(Clone)]
 pub struct Container {
     /// The docker client
     client: Rc<shiplift::Docker>,
 
-    /// Name of the container, defaults to the
-    /// repository name of the image.
+    /// Name of the container, defaults to the repository name of the image.
     name: String,
 
     /// Id of the running container.
@@ -22,19 +31,18 @@ pub struct Container {
 
     /// The key used to retrieve the handle to this container from DockerTest.
     /// The user can set this directly by specifying container_name in the ImageInstance builder.
-    /// Defaults to the repository name of the container's image.
+    /// Defaults to the repository name of the containers image.
     handle_key: String,
 
-    /// The StartPolicy of this Container, is provided from its ImageInstance
+    /// The StartPolicy of this Container, is provided from its ImageInstance.
     start_policy: StartPolicy,
 
-    /// Trait implementing how to wait for the container to startup
+    /// Trait implementing how to wait for the container to startup.
     wait_for: Rc<dyn WaitFor>,
 }
 
 impl Container {
-    /// Creates a new Container object with the given
-    /// values.
+    /// Creates a new Container object with the given values.
     pub(crate) fn new<T: ToString, R: ToString, S: ToString>(
         name: T,
         id: R,
@@ -55,10 +63,12 @@ impl Container {
 
     /// Returns which host port the given container port is mapped to.
     pub fn host_port(&self, _container_port: u32) -> u32 {
+        // TODO: Implement host-port mapping.
         0
     }
 
-    /// Returns whether the container is in a running state
+    // QUESTION: Why is this public?
+    /// Returns whether the container is in a running state.
     pub fn is_running(&self) -> impl Future<Item = bool, Error = DockerError> {
         self.client
             .containers()
@@ -70,6 +80,7 @@ impl Container {
             .and_then(|c| future::ok(c.state.running))
     }
 
+    ///
     pub(crate) fn start(&self) -> impl Future<Item = (), Error = DockerError> {
         let wait_for_clone = self.wait_for.clone();
         let self_clone = self.clone();
@@ -91,28 +102,31 @@ impl Container {
             })
     }
 
-    /// Returns the name of container
+    /// Returns the name of container.
+    // QUESTION: What name?
     pub(crate) fn name(&self) -> &str {
         &self.name
     }
 
-    /// Returns the handle_key of this container
+    /// Returns the handle_key of this container.
     pub(crate) fn handle_key(&self) -> &str {
         &self.handle_key
     }
 
-    /// Returns the name of container
+    /// Returns a copy of the StartPolicy.
     pub(crate) fn start_policy(&self) -> StartPolicy {
         self.start_policy.clone()
     }
 
-    /// Returns the id of container
+    /// Returns the id of container.
     #[cfg(test)]
     pub(crate) fn id(&self) -> &str {
         &self.id
     }
 
-    /// Forcefully removes the container and consumes self.
+    /// Forcefully removes the container.
+    /// This will leave the container object in an invalid state after
+    /// this method is invoked.
     pub(crate) fn remove(&self) -> impl Future<Item = (), Error = DockerError> {
         let ops = RmContainerOptions::builder().force(true).build();
         shiplift::Container::new(&self.client, self.id.clone())

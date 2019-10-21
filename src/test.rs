@@ -1,3 +1,5 @@
+//! The main library structures.
+
 use crate::container::Container;
 use crate::error::DockerError;
 use crate::image::Source;
@@ -98,6 +100,9 @@ impl DockerTest {
         }
     }
 
+    /// Execute the test body within the provided function closure.
+    /// All ImageInstaces added to the DockerTest has successfully completed their WaitFor clause
+    /// once the test body is executed.
     pub fn run<T>(&self, test: T)
     where
         T: FnOnce(&DockerOperations) -> () + panic::UnwindSafe,
@@ -141,6 +146,7 @@ impl DockerTest {
         }
     }
 
+    /// Add an ImageInstance to this DockerTest.
     pub fn add_instance(&mut self, instance: ImageInstance) {
         match &instance.start_policy() {
             StartPolicy::Relaxed => self.relaxed_instances.push(instance),
