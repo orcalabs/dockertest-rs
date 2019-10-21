@@ -3,6 +3,12 @@ name = "dockertest"
 version = "0.0.1"
 authors = ["Vegard Sandengen <vegard@orcalabs.no", "Jon Foss Mikalsen <jon@orcalabs.no>"]
 edition = "2018"
+license = "MIT"
+description = "A library to control docker containers when running your integration tests."
+homepage = "https://www.orcalabs.no"
+repository = "https://gitlab.com/orcalabs/public/dockertest-rs"
+keywords = ["docker", "integration", "test", "container"]
+category = ["development-tools", "development-tools::testing"]
 
 [dependencies]
 futures = "0.1.25"
