@@ -81,4 +81,4 @@ pub mod wait_for;
 #[cfg(test)]
 mod test_utils;
 
-pub use crate::dockertest::DockerTest;
+pub use crate::dockertest::{DockerOperations, DockerTest};
