@@ -71,14 +71,14 @@
 //! [DockerTest]: test/struct.DockerTest.html
 
 pub mod container;
+pub mod dockertest;
 pub mod error;
 pub mod image;
 pub mod image_instance;
-pub mod test;
 pub mod wait_for;
 
 // Private module containing utility functions used for testing purposes
 #[cfg(test)]
 mod test_utils;
 
-pub use crate::test::DockerTest;
+pub use crate::dockertest::DockerTest;
