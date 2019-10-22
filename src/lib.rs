@@ -37,20 +37,25 @@
 //! # Example
 //!
 //! ```rust,ignore
+//! let source = Source::DockerHub(PullPolicy::IfNotPresent);
+//! let mut test = DockerTest::new().with_default_source(source);
 //!
-//! let mut test = DockerTest::new();
-//! test.add_instance(ImageInstace::new("postgres"));
+//! let repo = "postgres";
+//! let postgres = ImageInstance::with_repository(repo);
+//!
+//! test.add_instance(postgres);
 //!
 //! test.run(|ops| {
-//!     // Create connection
-//!     let container = ops.handle("postgres").expect("retrieve postgres container reference");
-//!     let host_port = container.host_port(5432).expect("host port for postgres");
-//!     let conn_string = format!("postgres://postgres::postgres@localhost:{}", host_port);
-//!     let connection = PgConnection::establish().expect("connection to postgres");
+//!     let container = ops.handle("postgres").expect("retrieve postgres container");
+//!     let host_port = container.host_port(5432);
+//!     let conn_string = format!("postgres://postgres:postgres@localhost:{}", host_port);
+//!     let pgconn = PgConnection::establish(&conn_string);
 //!
-//!     // Issue database operation
-//!
-//! })
+//!     assert!(
+//!         pgconn.is_ok(),
+//!         "failed to establish connection to postgres docker"
+//!     );
+//! });
 //! ```
 //!
 //! [Container]: container/struct.Container.html
