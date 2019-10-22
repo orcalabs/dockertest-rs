@@ -11,10 +11,10 @@ use shiplift::builder::{ContainerOptions, RmContainerOptions};
 use std::collections::HashMap;
 use std::rc::Rc;
 
-/// Specifies the starting policy of an ImageInstance.
-/// A Strict policy will enforce that the ImageInstance is started in the order
+/// Specifies the starting policy of an Composition.
+/// A Strict policy will enforce that the Composition is started in the order
 /// it was added to DockerTest. A Relaxed policy will not enforce any ordering,
-/// all ImageInstances with a Relaxed policy will be started concurrently.
+/// all Compositions with a Relaxed policy will be started concurrently.
 #[derive(Clone)]
 pub enum StartPolicy {
     /// Concurrently start the Container with other Relaxed instances.
@@ -25,15 +25,15 @@ pub enum StartPolicy {
 
 /// Represents an instance of an image.
 #[derive(Clone)]
-pub struct ImageInstance {
+pub struct Composition {
     /// User provided name of the container.
     /// This will dictate the final container_name and the container_handle_key of the container
-    /// that will be created from this ImageInstance.
+    /// that will be created from this Composition.
     user_provided_container_name: Option<String>,
 
-    /// The name of the container to be created by this ImageInstance.
-    /// At ImageInstance creation this field defaults to the repository name of the associated image.
-    /// When adding ImageInstances to DockerTest, the container_name will be transformed to the following:
+    /// The name of the container to be created by this Composition.
+    /// At Composition creation this field defaults to the repository name of the associated image.
+    /// When adding Compositions to DockerTest, the container_name will be transformed to the following:
     ///     namespace_of_dockerTest - repository_name - random_generated_suffix
     /// If the user have provided a user_provided_container_name, the container_name will look like
     /// the following:
@@ -54,21 +54,21 @@ pub struct ImageInstance {
     /// The command to pass to the container.
     cmd: Vec<String>,
 
-    /// The StartPolicy of this ImageInstance,
+    /// The StartPolicy of this Composition,
     /// defaults to relaxed.
     start_policy: StartPolicy,
 
-    /// The image that this ImageInstance
+    /// The image that this Composition
     /// stems from.
     image: Image,
 }
 
-impl ImageInstance {
+impl Composition {
     /// Creates an image instance with the given repository.
     /// Will create an Image with the same repository.
-    pub fn with_repository<T: ToString>(repository: T) -> ImageInstance {
+    pub fn with_repository<T: ToString>(repository: T) -> Composition {
         let copy = repository.to_string();
-        ImageInstance {
+        Composition {
             user_provided_container_name: None,
             image: Image::with_repository(&copy),
             container_name: copy,
@@ -79,9 +79,9 @@ impl ImageInstance {
         }
     }
 
-    /// Creates an ImageInstance with the given instance.
-    pub fn with_image(image: Image) -> ImageInstance {
-        ImageInstance {
+    /// Creates an Composition with the given instance.
+    pub fn with_image(image: Image) -> Composition {
+        Composition {
             user_provided_container_name: None,
             container_name: image.repository().to_string(),
             image,
@@ -92,10 +92,10 @@ impl ImageInstance {
         }
     }
 
-    /// Sets the start_policy for this ImageInstance,
+    /// Sets the start_policy for this Composition,
     /// defaults to a relaxed policy.
-    pub fn with_start_policy(self, start_policy: StartPolicy) -> ImageInstance {
-        ImageInstance {
+    pub fn with_start_policy(self, start_policy: StartPolicy) -> Composition {
+        Composition {
             start_policy,
             ..self
         }
@@ -104,20 +104,20 @@ impl ImageInstance {
     /// Sets environmental values for the container.
     /// Each key in the map should be a environmental variable,
     /// and its corresponding value will be set as its value.
-    pub fn with_env(self, env: HashMap<String, String>) -> ImageInstance {
-        ImageInstance { env, ..self }
+    pub fn with_env(self, env: HashMap<String, String>) -> Composition {
+        Composition { env, ..self }
     }
 
     /// Sets the command of the container, if not set
     /// the container will default to the image's command, if any.
-    pub fn with_cmd(self, cmd: Vec<String>) -> ImageInstance {
-        ImageInstance { cmd, ..self }
+    pub fn with_cmd(self, cmd: Vec<String>) -> Composition {
+        Composition { cmd, ..self }
     }
 
     /// Sets the name of the container that will eventually be started.
     /// The container name defaults to the repository name.
-    pub fn with_container_name<T: ToString>(self, container_name: T) -> ImageInstance {
-        ImageInstance {
+    pub fn with_container_name<T: ToString>(self, container_name: T) -> Composition {
+        Composition {
             user_provided_container_name: Some(container_name.to_string()),
             ..self
         }
@@ -126,7 +126,7 @@ impl ImageInstance {
     /// Sets the given environment variable to given value.
     /// Note, if with_env is called after a call to env, all values
     /// added by env will be overwritten.
-    pub fn env<T: ToString, S: ToString>(&mut self, name: T, value: S) -> &mut ImageInstance {
+    pub fn env<T: ToString, S: ToString>(&mut self, name: T, value: S) -> &mut Composition {
         self.env.insert(name.to_string(), value.to_string());
         self
     }
@@ -134,7 +134,7 @@ impl ImageInstance {
     /// Adds the given command.
     /// Note, if with_cmd is called after a call to cmd,
     /// all commands added with cmd will be overwritten.
-    pub fn cmd<T: ToString>(&mut self, cmd: T) -> &mut ImageInstance {
+    pub fn cmd<T: ToString>(&mut self, cmd: T) -> &mut Composition {
         self.cmd.push(cmd.to_string());
         self
     }
@@ -142,15 +142,15 @@ impl ImageInstance {
     /// Sets the wait_for trait object, this object will be
     /// invoked repeatedly when we are waiting for the container to start.
     /// Defaults to waiting for the container to appear as running.
-    pub fn wait_for(self, wait: Rc<dyn WaitFor>) -> ImageInstance {
-        ImageInstance { wait, ..self }
+    pub fn wait_for(self, wait: Rc<dyn WaitFor>) -> Composition {
+        Composition { wait, ..self }
     }
 
     // Configurate the container's name with the given namespace as prefix
     // and suffix.
     // We do this to ensure that we do not have overlapping container names
     // and make it clear which containers are run by DockerTest.
-    pub(crate) fn configurate_container_name(self, namespace: &str, suffix: &str) -> ImageInstance {
+    pub(crate) fn configurate_container_name(self, namespace: &str, suffix: &str) -> Composition {
         let name = match &self.user_provided_container_name {
             None => self.image.repository(),
             Some(n) => n,
@@ -159,13 +159,13 @@ impl ImageInstance {
         // The docker daemon does not like '/' or '\' in container names
         let stripped_name = name.replace("/", "_");
 
-        ImageInstance {
+        Composition {
             container_name: format!("{}-{}-{}", namespace, stripped_name, suffix),
             ..self
         }
     }
 
-    // Consumes the ImageInstance, creates the container and returns the Container object if it
+    // Consumes the Composition, creates the container and returns the Container object if it
     // was succesfully created.
     pub(crate) fn create<'a>(
         self,
@@ -233,12 +233,12 @@ impl ImageInstance {
             })
     }
 
-    // Returns the Image associated with this ImageInstance.
+    // Returns the Image associated with this Composition.
     pub(crate) fn image(&self) -> &Image {
         &self.image
     }
 
-    // Returns the StartPolicy of this ImageInstance.
+    // Returns the StartPolicy of this Composition.
     pub(crate) fn start_policy(&self) -> &StartPolicy {
         &self.start_policy
     }
@@ -265,20 +265,20 @@ fn remove_container_if_exists(
 
 #[cfg(test)]
 mod tests {
+    use crate::composition::{remove_container_if_exists, Composition, StartPolicy};
     use crate::error::DockerErrorKind;
     use crate::image::{Image, PullPolicy, Source};
-    use crate::image_instance::{remove_container_if_exists, ImageInstance, StartPolicy};
     use std::collections::HashMap;
     use std::rc::Rc;
     use tokio::runtime::current_thread;
 
     // Tests that the with_repository constructor creates
-    // an ImageInstance with the correct values
+    // an Composition with the correct values
     #[test]
     fn test_with_repository_constructor() {
         let repository = "this_is_a_repository".to_string();
 
-        let instance = ImageInstance::with_repository(&repository);
+        let instance = Composition::with_repository(&repository);
         assert_eq!(
             repository,
             instance.image.repository(),
@@ -291,12 +291,12 @@ mod tests {
         assert_eq!(
             instance.env.len(),
             0,
-            "there should be no environmental variables after constructing an ImageInstance"
+            "there should be no environmental variables after constructing an Composition"
         );
         assert_eq!(
             instance.cmd.len(),
             0,
-            "there should be no commands after constructing an ImageInstance"
+            "there should be no commands after constructing an Composition"
         );
 
         let equal = match instance.start_policy {
@@ -307,14 +307,14 @@ mod tests {
     }
 
     // Tests that the with_image constructor creates
-    // an ImageInstance with the correct values
+    // an Composition with the correct values
     #[test]
     fn test_with_image_constructor() {
         let repository = "this_is_a_repository".to_string();
 
         let image = Image::with_repository(&repository);
 
-        let instance = ImageInstance::with_image(image);
+        let instance = Composition::with_image(image);
         assert_eq!(
             repository,
             instance.image.repository(),
@@ -327,12 +327,12 @@ mod tests {
         assert_eq!(
             instance.env.len(),
             0,
-            "there should be no environmental variables after constructing an ImageInstance"
+            "there should be no environmental variables after constructing an Composition"
         );
         assert_eq!(
             instance.cmd.len(),
             0,
-            "there should be no commands after constructing an ImageInstance"
+            "there should be no commands after constructing an Composition"
         );
 
         let equal = match instance.start_policy {
@@ -342,7 +342,7 @@ mod tests {
         assert!(equal, "start_policy should default to relaxed");
     }
 
-    // Tests all methods that consumes the ImageInstance
+    // Tests all methods that consumes the Composition
     // and mutates a field
     #[test]
     fn test_mutators() {
@@ -364,7 +364,7 @@ mod tests {
 
         let container_name = "this_is_a_container_name";
 
-        let instance = ImageInstance::with_repository(&repository)
+        let instance = Composition::with_repository(&repository)
             .with_start_policy(StartPolicy::Strict)
             .with_env(env)
             .with_cmd(cmds)
@@ -392,14 +392,14 @@ mod tests {
     }
 
     // Tests that the env method succesfully
-    // adds the given environment variable to the ImageInstance
+    // adds the given environment variable to the Composition
     #[test]
     fn test_add_env() {
         let env_variable = "this_is_an_env_var".to_string();
         let env_value = "this_is_an_env_value".to_string();
 
         let repository = "this_is_a_repository".to_string();
-        let mut instance = ImageInstance::with_repository(&repository);
+        let mut instance = Composition::with_repository(&repository);
 
         instance.env(env_variable.clone(), env_value.clone());
 
@@ -414,14 +414,14 @@ mod tests {
     }
 
     // Tests that the cmd method succesfully
-    // adds the given command to the ImageInstance
+    // adds the given command to the Composition
     #[test]
     fn test_add_cmd() {
         let cmd = "this_is_a_command".to_string();
         let expected_cmd = vec![cmd.clone()];
 
         let repository = "this_is_a_repository".to_string();
-        let mut instance = ImageInstance::with_repository(&repository);
+        let mut instance = Composition::with_repository(&repository);
 
         instance.cmd(cmd);
 
@@ -439,18 +439,18 @@ mod tests {
     fn test_create_with_non_existing_image() {
         let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
         let repository = "this_repo_does_not_exist".to_string();
-        let instance = ImageInstance::with_repository(&repository);
+        let instance = Composition::with_repository(&repository);
 
         let client = Rc::new(shiplift::Docker::new());
         let res = rt.block_on(instance.create(client));
 
         assert!(
             res.is_err(),
-            "should fail to start an ImageInstance with non-exisiting image"
+            "should fail to start an Composition with non-exisiting image"
         );
     }
 
-    // Tests that we can successfully create a Container from an ImageInstance
+    // Tests that we can successfully create a Container from an Composition
     // resulting in a Container with correct values.
     #[test]
     fn test_create_with_existing_image() {
@@ -459,7 +459,7 @@ mod tests {
 
         let source = Source::DockerHub(PullPolicy::Always);
         let image = Image::with_repository(&repository);
-        let instance = ImageInstance::with_image(image);
+        let instance = Composition::with_image(image);
 
         let client = Rc::new(shiplift::Docker::new());
 
@@ -472,11 +472,11 @@ mod tests {
         let res = rt.block_on(instance.create(client));
         assert!(
             res.is_ok(),
-            format!("failed to start ImageInstance: {}", res.err().unwrap())
+            format!("failed to start Composition: {}", res.err().unwrap())
         );
     }
 
-    // Tests that we can successfully create a Contaienr from an ImageInstance,
+    // Tests that we can successfully create a Contaienr from an Composition,
     // even if there exists a container with the same name.
     // The start method should detect that there already
     // exists a container with the same name,
@@ -490,7 +490,7 @@ mod tests {
 
         let source = Source::DockerHub(PullPolicy::IfNotPresent);
         let image = Image::with_repository(&repository);
-        let mut instance = ImageInstance::with_image(image);
+        let mut instance = Composition::with_image(image);
         instance.container_name = container_name.clone();
 
         let client = Rc::new(shiplift::Docker::new());
@@ -504,12 +504,12 @@ mod tests {
         let res = rt.block_on(instance.create(client.clone()));
         assert!(
             res.is_ok(),
-            format!("failed to start ImageInstance: {}", res.err().unwrap())
+            format!("failed to start Composition: {}", res.err().unwrap())
         );
 
         let source = Source::DockerHub(PullPolicy::IfNotPresent);
         let image = Image::with_repository(&repository);
-        let mut instance = ImageInstance::with_image(image);
+        let mut instance = Composition::with_image(image);
         instance.container_name = container_name.clone();
 
         let client = Rc::new(shiplift::Docker::new());
@@ -523,7 +523,7 @@ mod tests {
         let res = rt.block_on(instance.create(client));
         assert!(
             res.is_ok(),
-            format!("failed to start ImageInstance: {}", res.err().unwrap())
+            format!("failed to start Composition: {}", res.err().unwrap())
         );
     }
 
@@ -535,7 +535,7 @@ mod tests {
 
         let source = Source::DockerHub(PullPolicy::IfNotPresent);
         let image = Image::with_repository(&repository);
-        let instance = ImageInstance::with_image(image);
+        let instance = Composition::with_image(image);
 
         let container_name = instance.container_name.clone();
 
@@ -550,7 +550,7 @@ mod tests {
         let res = rt.block_on(instance.create(client.clone()));
         assert!(
             res.is_ok(),
-            format!("failed to start ImageInstance: {}", res.err().unwrap())
+            format!("failed to start Composition: {}", res.err().unwrap())
         );
 
         let res = rt.block_on(remove_container_if_exists(client, container_name));
@@ -581,19 +581,19 @@ mod tests {
         assert!(res, format!("should fail to remove non-existing container"));
     }
 
-    // Tests that the configurate_container_name method correctly sets the ImageInstance's
+    // Tests that the configurate_container_name method correctly sets the Composition's
     // container_name when the user has not specified a container_name
     #[test]
     fn test_configurate_container_name_without_user_supplied_name() {
         let repository = "hello-world";
-        let image_instance = ImageInstance::with_repository(&repository);
+        let composition = Composition::with_repository(&repository);
 
         let suffix = "test123";
         let namespace = "namespace";
 
         let expected_output = format!("{}-{}-{}", namespace, repository, suffix);
 
-        let new_instance = image_instance.configurate_container_name(&namespace, suffix);
+        let new_instance = composition.configurate_container_name(&namespace, suffix);
 
         assert_eq!(
             new_instance.container_name, expected_output,
@@ -601,21 +601,21 @@ mod tests {
         );
     }
 
-    // Tests that the configurate_container_name method correctly sets the ImageInstance's
+    // Tests that the configurate_container_name method correctly sets the Composition's
     // container_name when the user has specified a container_name
     #[test]
     fn test_configurate_container_name_with_user_supplied_name() {
         let repository = "hello-world";
         let container_name = "this_is_a_container";
-        let image_instance =
-            ImageInstance::with_repository(&repository).with_container_name(container_name);
+        let composition =
+            Composition::with_repository(&repository).with_container_name(container_name);
 
         let suffix = "test123";
         let namespace = "namespace";
 
         let expected_output = format!("{}-{}-{}", namespace, container_name, suffix);
 
-        let new_instance = image_instance.configurate_container_name(&namespace, suffix);
+        let new_instance = composition.configurate_container_name(&namespace, suffix);
 
         assert_eq!(
             new_instance.container_name, expected_output,
@@ -632,15 +632,15 @@ mod tests {
         let container_name = "this/is/a_container";
         let expected_container_name = "this_is_a_container";
 
-        let image_instance =
-            ImageInstance::with_repository(&repository).with_container_name(container_name);
+        let composition =
+            Composition::with_repository(&repository).with_container_name(container_name);
 
         let suffix = "test123";
         let namespace = "namespace";
 
         let expected_output = format!("{}-{}-{}", namespace, expected_container_name, suffix);
 
-        let new_instance = image_instance.configurate_container_name(&namespace, suffix);
+        let new_instance = composition.configurate_container_name(&namespace, suffix);
 
         assert_eq!(
             new_instance.container_name, expected_output,
@@ -656,14 +656,14 @@ mod tests {
         let repository = "hello/world";
         let expected_container_name = "hello_world";
 
-        let image_instance = ImageInstance::with_repository(&repository);
+        let composition = Composition::with_repository(&repository);
 
         let suffix = "test123";
         let namespace = "namespace";
 
         let expected_output = format!("{}-{}-{}", namespace, expected_container_name, suffix);
 
-        let new_instance = image_instance.configurate_container_name(&namespace, suffix);
+        let new_instance = composition.configurate_container_name(&namespace, suffix);
 
         assert_eq!(
             new_instance.container_name, expected_output,

@@ -1,7 +1,6 @@
 use dockertest::image::{Image, PullPolicy, Source};
-use dockertest::image_instance::ImageInstance;
 use dockertest::wait_for::{ExitedWait, RunningWait};
-use dockertest::DockerTest;
+use dockertest::{Composition, DockerTest};
 use std::rc::Rc;
 use tokio::runtime::current_thread;
 
@@ -12,9 +11,9 @@ fn test_run_with_no_failure() {
 
     let repo = "hello-world".to_string();
     let img = Image::with_repository(&repo);
-    let hello_world = ImageInstance::with_image(img);
+    let hello_world = Composition::with_image(img);
 
-    test.add_instance(hello_world);
+    test.add_composition(hello_world);
 
     test.run(|_ops| {
         assert!(true);
@@ -29,9 +28,9 @@ fn test_run_with_failure() {
 
     let repo = "hello-world".to_string();
     let img = Image::with_repository(&repo);
-    let hello_world = ImageInstance::with_image(img);
+    let hello_world = Composition::with_image(img);
 
-    test.add_instance(hello_world);
+    test.add_composition(hello_world);
 
     test.run(|_ops| {
         assert!(false);
@@ -45,9 +44,9 @@ fn test_multiple_runs() {
 
     let repo = "hello-world".to_string();
     let img = Image::with_repository(&repo);
-    let hello_world = ImageInstance::with_image(img);
+    let hello_world = Composition::with_image(img);
 
-    test.add_instance(hello_world);
+    test.add_composition(hello_world);
 
     test.run(|_ops| {
         assert!(true);
@@ -66,9 +65,9 @@ fn test_resolve_handle_with_repository_as_key() {
 
     let repo = "hello-world";
     let img = Image::with_repository(&repo);
-    let hello_world = ImageInstance::with_image(img);
+    let hello_world = Composition::with_image(img);
 
-    test.add_instance(hello_world);
+    test.add_composition(hello_world);
 
     test.run(|ops| {
         let handle = ops.handle(repo);
@@ -84,9 +83,9 @@ fn test_resolve_handle_with_invalid_key() {
 
     let repo = "hello-world";
     let img = Image::with_repository(&repo);
-    let hello_world = ImageInstance::with_image(img);
+    let hello_world = Composition::with_image(img);
 
-    test.add_instance(hello_world);
+    test.add_composition(hello_world);
 
     test.run(|ops| {
         let handle = ops.handle("not_an_existing_key");
@@ -107,9 +106,9 @@ fn test_resolve_handle_with_user_provided_container_name_as_key() {
     let repo = "hello-world";
     let container_name = "this_is_a_container_name";
     let img = Image::with_repository(&repo);
-    let hello_world = ImageInstance::with_image(img).with_container_name(container_name);
+    let hello_world = Composition::with_image(img).with_container_name(container_name);
 
-    test.add_instance(hello_world);
+    test.add_composition(hello_world);
 
     test.run(|ops| {
         let handle = ops.handle(container_name);
@@ -126,11 +125,11 @@ fn test_resolve_handle_with_identical_user_provided_container_name() {
 
     let repo = "hello-world";
     let container_name = "this_is_a_container_name";
-    let hello_world = ImageInstance::with_repository(repo).with_container_name(container_name);
-    let hello_world2 = ImageInstance::with_repository(repo).with_container_name(container_name);
+    let hello_world = Composition::with_repository(repo).with_container_name(container_name);
+    let hello_world2 = Composition::with_repository(repo).with_container_name(container_name);
 
-    test.add_instance(hello_world);
-    test.add_instance(hello_world2);
+    test.add_composition(hello_world);
+    test.add_composition(hello_world2);
 
     test.run(|ops| {
         let handle = ops.handle(container_name);
@@ -147,11 +146,11 @@ fn test_resolve_handle_with_identical_repository() {
     let mut test = DockerTest::new().with_default_source(source);
 
     let repo = "hello-world";
-    let hello_world = ImageInstance::with_repository(repo);
-    let hello_world2 = ImageInstance::with_repository(repo);
+    let hello_world = Composition::with_repository(repo);
+    let hello_world2 = Composition::with_repository(repo);
 
-    test.add_instance(hello_world);
-    test.add_instance(hello_world2);
+    test.add_composition(hello_world);
+    test.add_composition(hello_world2);
 
     test.run(|ops| {
         let handle = ops.handle(repo);
@@ -167,12 +166,12 @@ fn test_running_wait_for() {
     let mut test = DockerTest::new().with_default_source(source);
 
     let repo = "luca3m/sleep";
-    let sleep_container = ImageInstance::with_repository(repo).wait_for(Rc::new(RunningWait {
+    let sleep_container = Composition::with_repository(repo).wait_for(Rc::new(RunningWait {
         max_checks: 10,
         check_interval: 1000,
     }));
 
-    test.add_instance(sleep_container);
+    test.add_composition(sleep_container);
 
     test.run(|ops| {
         let handle = ops.handle(repo).expect("failed to get container handle");
@@ -197,12 +196,12 @@ fn test_exit_wait_for() {
     let mut test = DockerTest::new().with_default_source(source);
 
     let repo = "hello-world";
-    let sleep_container = ImageInstance::with_repository(repo).wait_for(Rc::new(ExitedWait {
+    let sleep_container = Composition::with_repository(repo).wait_for(Rc::new(ExitedWait {
         max_checks: 10,
         check_interval: 1000,
     }));
 
-    test.add_instance(sleep_container);
+    test.add_composition(sleep_container);
 
     test.run(|ops| {
         let handle = ops.handle(repo).expect("failed to get container handle");

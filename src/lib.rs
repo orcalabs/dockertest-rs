@@ -12,22 +12,22 @@
 //! * Retrieve [Image] from remote source according to [PullPolicy].
 //! * Support multiple [Remote] registries, which can be individually assigned to [Image].
 //! * Dictate how each [Container] is created and operated from an [Image]
-//!   through an [ImageInstance].
+//!   through an [Composition].
 //!  * This allows us to have muliple containers with the same Image,
 //!    but with different start conditions.
-//! * Control each [ImageInstance] condition for when it is deemed running through [WaitFor].
+//! * Control each [Composition] condition for when it is deemed running through [WaitFor].
 //!  * There exists multiple convenient [WaitFor] implementations, however, user-supplied
 //!    implementations through the trait can be provided.
-//! * Control the [StartPolicy] of each [ImageInstance]. For inter-dependant
+//! * Control the [StartPolicy] of each [Composition]. For inter-dependant
 //!   containers, a Strict policy can be sat, and they will be started in succession until
 //!   their [WaitFor] condition is met, according to the order they where added to [DockerTest].
 //!
 //! Once the [DockerTest] test is `run`, the provided closure will be ran once
-//! all predicates for each supplied [ImageInstance] has successfully been fulfilled.
+//! all predicates for each supplied [Composition] has successfully been fulfilled.
 //! The closure is provided with one [DockerOperations] parameter, allowing the test body
 //! to interact with [DockerTest] and each individual [Container].
 //! The reference to each [Container] is queried through a handle, which is the user provided
-//! container name, specified in [ImageInstance] through [with_container_name].
+//! container name, specified in [Composition] through [with_container_name].
 //!
 //! Once the reference to a [Container] is retrieved, one may call all methods public methods
 //! to interact with it. This includes retrieving the [host_port] that a port in the [Container]
@@ -41,7 +41,7 @@
 //! let mut test = DockerTest::new().with_default_source(source);
 //!
 //! let repo = "postgres";
-//! let postgres = ImageInstance::with_repository(repo);
+//! let postgres = Composition::with_repository(repo);
 //!
 //! test.add_instance(postgres);
 //!
@@ -62,23 +62,24 @@
 //! [host_port]: container/struct.Container.html#method.host_port
 //! [DockerOperations]: test/struct.DockerOperations.html
 //! [Image]: image/struct.Image.html
-//! [ImageInstance]: image_instance/struct.ImageInstance.html
-//! [with_container_name]: image_instance/struct.ImageInstance.html#method.with_container_name
+//! [Composition]: composition/struct.Composition.html
+//! [with_container_name]: composition/struct.Composition.html#method.with_container_name
 //! [PullPolicy]: image/enum.PullPolicy.html
 //! [Remote]: image/struct.Remote.html
-//! [StartPolicy]: image_instance/enum.StartPolicy.html
+//! [StartPolicy]: composition/enum.StartPolicy.html
 //! [WaitFor]: wait_for/trait.WaitFor.html
 //! [DockerTest]: test/struct.DockerTest.html
 
+pub mod composition;
 pub mod container;
 pub mod dockertest;
 pub mod error;
 pub mod image;
-pub mod image_instance;
 pub mod wait_for;
 
 // Private module containing utility functions used for testing purposes
 #[cfg(test)]
 mod test_utils;
 
+pub use crate::composition::{Composition, StartPolicy};
 pub use crate::dockertest::{DockerOperations, DockerTest};
