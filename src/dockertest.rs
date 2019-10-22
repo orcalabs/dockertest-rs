@@ -389,9 +389,9 @@ mod tests {
     use crate::container::Container;
     use crate::image::{Image, PullPolicy, Source};
     use crate::image_instance::{ImageInstance, StartPolicy};
-    use crate::test::resolve_container_handle_key;
-    use crate::test::{
-        start_relaxed_containers, start_strict_containers, wait_for_relaxed_containers,
+    use crate::dockertest::{
+        resolve_container_handle_key, start_relaxed_containers, start_strict_containers,
+        wait_for_relaxed_containers,
     };
     use crate::test_utils;
     use crate::wait_for::NoWait;
