@@ -1,8 +1,14 @@
 [package]
-name = "dockertest-rs"
-version = "0.1.0"
-authors = ["Jon Foss Mikalsen <jon@orcalabs.no>"]
+name = "dockertest"
+version = "0.0.1"
+authors = ["Vegard Sandengen <vegard@orcalabs.no", "Jon Foss Mikalsen <jon@orcalabs.no>"]
 edition = "2018"
+license = "MIT"
+description = "A library to control docker containers when running your integration tests."
+homepage = "https://www.orcalabs.no"
+repository = "https://gitlab.com/orcalabs/public/dockertest-rs"
+keywords = ["docker", "integration", "test", "container"]
+categories = ["development-tools", "development-tools::testing"]
 
 [dependencies]
 futures = "0.1.25"
@@ -10,3 +16,6 @@ tokio = "0.1.15"
 shiplift = "0.4.0"
 failure = "0.1.5"
 rand = "0.6.5"
+
+[dev-dependencies]
+diesel = { version = "1.0", features = ["postgres"] }

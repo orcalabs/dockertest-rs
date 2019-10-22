@@ -1,3 +1,5 @@
+//! Custom error types library.
+
 use failure::{Backtrace, Context, Fail};
 use std::fmt;
 
@@ -8,6 +10,7 @@ pub struct DockerError {
 }
 
 impl DockerError {
+    /// Retrieve the underlying error enum.
     pub fn kind(&self) -> &DockerErrorKind {
         self.ctx.get_context()
     }
@@ -49,11 +52,17 @@ impl Fail for DockerError {
     }
 }
 
+/// The various error conditions that can occur from dockertest.
 pub enum DockerErrorKind {
+    /// Daemon interaction error.
     Daemon(String),
+    /// Error condition is recoverable.
     Recoverable(String),
+    /// Error upon teardown of container.
     Teardown(String),
+    /// Pulling image from remote repository failed.
     Pull(String),
+    /// Startup condition not fulfilled.
     Startup(String),
 }
 

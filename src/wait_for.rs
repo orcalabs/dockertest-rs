@@ -1,3 +1,5 @@
+//! Trait definition representing how we wait for starting containers.
+
 use crate::container::Container;
 use failure::{format_err, Error};
 use futures::future::{self, Future};
@@ -9,32 +11,34 @@ use tokio::timer::Interval;
 
 /// Trait to wait for a container to be ready for service.
 pub trait WaitFor {
-    /// Should wait for the associated container to be ready for
-    /// service.
-    /// When the container is ready the method
-    /// should return true.
+    /// Should wait for the associated container to be ready for service.
+    /// When the container is ready the method should return true.
     fn wait_for_ready(
         &self,
         container: Container,
     ) -> Box<dyn Future<Item = Container, Error = Error>>;
 }
 
-/// The RunningWait implementation for containers.
-/// This implementation will wait untill the docker daemon reports the container as running
+/// The RunningWait `WaitFor` implementation for containers.
+/// This variant will wait until the docker daemon reports the container as running.
 pub struct RunningWait {
+    /// How many seconds shall there be between each check for running state.
     pub check_interval: i32,
+    /// The number of checks to perform before erroring out.
     pub max_checks: i32,
 }
 
-/// The ExitedWait implementation for containers.
-/// This implementation will wait untill the docker daemon reports that the container has exited
+/// The ExitedWait `WaitFor` implementation for containers.
+/// This variant will wait until the docker daemon reports that the container has exited.
 pub struct ExitedWait {
+    /// How many seconds shall there be between each check for running state.
     pub check_interval: i32,
+    /// The number of checks to perform before erroring out.
     pub max_checks: i32,
 }
 
-/// The NoWait implementation for containers.
-/// This implementation does not wait for anything, resolves immediatley.
+/// The NoWait `WaitFor` implementation for containers.
+/// This variant does not wait for anything, resolves immediately.
 pub struct NoWait {}
 
 impl WaitFor for RunningWait {
@@ -92,7 +96,7 @@ fn wait_for_container_state(
         // Limits us to only check status for the given amount of tries
         .take(max_checks as u64)
         .map_err(|e| format_err!("failed to check container liveness: {}", e))
-        // While continue checking container status untill the desired state is reached.
+        // While continue checking container status until the desired state is reached.
         // If the desired state is reached we return false to stop the stream.
         .take_while(move |_| {
             let s = desired_state_clone.load(atomic::Ordering::SeqCst);
@@ -167,7 +171,7 @@ mod tests {
         );
 
         let res = rt.block_on(wait.wait_for_ready(container));
-        assert!(res.is_ok(), "should always return ok with DefaultWait");
+        assert!(res.is_ok(), "should always return ok with NoWait");
 
         let container = res.expect("failed to get container");
 

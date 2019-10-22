@@ -1,3 +1,5 @@
+//! An Image persisted in Docker.
+
 use crate::error::DockerError;
 use futures::future::{self, Future};
 use futures::stream::Stream;
@@ -15,12 +17,14 @@ pub struct Image {
     id: Rc<RwLock<String>>,
 }
 
-/// Represents the source of an Image,
-/// which can either be a remote or local.
+/// Represents the source of an Image.
 #[derive(Clone)]
 pub enum Source {
+    /// Use the local docker daemon storage.
     Local,
+    /// Retrieve from hub.docker.com, the official registry.
     DockerHub(PullPolicy),
+    /// Custom registry address, described by the Remote structure.
     Remote(Remote),
 }
 
@@ -37,8 +41,11 @@ pub struct Remote {
 /// The policy for pulling from remote locations.
 #[derive(Clone)]
 pub enum PullPolicy {
+    /// Never pull - expect image to be present locally.
     Never,
+    /// Always attempt to pull, regardless if it exists locally or not.
     Always,
+    /// Check if image is present locally first, only pull if not present.
     IfNotPresent,
 }
 
@@ -63,8 +70,7 @@ impl Image {
         }
     }
 
-    /// Sets the source for this image,
-    /// default value is local.
+    /// Sets the source for this image. Default value is local.
     pub fn source(self, source: Source) -> Image {
         Image {
             source: Some(source),
@@ -72,19 +78,18 @@ impl Image {
         }
     }
 
-    // Returns the repository
+    /// Returns the repository.
     pub(crate) fn repository(&self) -> &str {
         &self.repository
     }
 
-    // Returns the id of the image
+    /// Returns the id of the image
     pub(crate) fn retrieved_id(&self) -> String {
         let id = self.id.read().expect("failed to get id lock");
         id.clone()
     }
 
-    // Pulls the image from its source with the given
-    // docker client.
+    // Pulls the image from its source with the given docker client.
     fn do_pull<'a>(
         &'a self,
         client: &Rc<shiplift::Docker>,
@@ -142,9 +147,8 @@ impl Image {
             .then(|res| future::ok(res.is_ok()))
     }
 
-    /// Pulls the image if neccessary, the pulling decision
-    /// is decided by the image's Source and PullPolicy.
-    /// If the image has a specified pulling source
+    /// Pulls the image if neccessary.
+    /// The pulling decision is decided by the image's Source and PullPolicy.
     pub(crate) fn pull<'a>(
         &'a self,
         client: Rc<shiplift::Docker>,
@@ -222,7 +226,7 @@ impl Remote {
         }
     }
 
-    // Returns this remote's PullPolicy.
+    /// Returns this remote's PullPolicy.
     pub(crate) fn pull_policy(&self) -> &PullPolicy {
         &self.pull_policy
     }

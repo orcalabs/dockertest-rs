@@ -1,3 +1,5 @@
+//! Represent a concrete instance of an Image, before it is ran as a Container.
+
 use crate::container::Container;
 use crate::error::{DockerError, DockerErrorKind};
 use crate::image::Image;
@@ -10,14 +12,14 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 /// Specifies the starting policy of an ImageInstance.
-/// A Strict policy will enforce that the ImageInstance is started
-/// in the order it was added to DockerTest.
-/// A Relaxed policy will not enforce any ordering, all
-/// ImageInstances with a Relaxed policy will be started
-/// concurrently.
+/// A Strict policy will enforce that the ImageInstance is started in the order
+/// it was added to DockerTest. A Relaxed policy will not enforce any ordering,
+/// all ImageInstances with a Relaxed policy will be started concurrently.
 #[derive(Clone)]
 pub enum StartPolicy {
+    /// Concurrently start the Container with other Relaxed instances.
     Relaxed,
+    /// Start Containers' sequentially in the order added to DockerTest.
     Strict,
 }
 
