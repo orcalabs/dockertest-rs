@@ -22,18 +22,18 @@ pub trait WaitFor {
 /// The RunningWait `WaitFor` implementation for containers.
 /// This variant will wait until the docker daemon reports the container as running.
 pub struct RunningWait {
-    /// How many seconds shall there be between each check for running state?
+    /// How many seconds shall there be between each check for running state.
     pub check_interval: i32,
-    /// The number of checks to perform before erring out.
+    /// The number of checks to perform before erroring out.
     pub max_checks: i32,
 }
 
 /// The ExitedWait `WaitFor` implementation for containers.
 /// This variant will wait until the docker daemon reports that the container has exited.
 pub struct ExitedWait {
-    /// How many seconds shall there be between each check for running state?
+    /// How many seconds shall there be between each check for running state.
     pub check_interval: i32,
-    /// The number of checks to perform before erring out.
+    /// The number of checks to perform before erroring out.
     pub max_checks: i32,
 }
 

@@ -101,7 +101,7 @@ impl DockerTest {
     }
 
     /// Execute the test body within the provided function closure.
-    /// All ImageInstaces added to the DockerTest has successfully completed their WaitFor clause
+    /// All ImageInstances added to the DockerTest has successfully completed their WaitFor clause
     /// once the test body is executed.
     pub fn run<T>(&self, test: T)
     where
