@@ -16,7 +16,9 @@ Supported sources are:
 
 This shows the various stages of components in dockertest-rs.
 
-```Image -> Composition -> PendingContainer -> RunningContainer```
+```
+Image -> Composition -> PendingContainer -> RunningContainer
+```
 
 An `Image` represents a built image from docker that we may attempt to start a container of.
 
@@ -42,7 +44,7 @@ let mut test = DockerTest::new().with_default_source(source);
 let repo = "postgres";
 let postgres = Composition::with_repository(repo);
 
-test.add_instance(postgres);
+test.add_composition(postgres);
 
 test.run(|ops| {
     let container = ops.handle("postgres").expect("retrieve postgres container");
