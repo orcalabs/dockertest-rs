@@ -9,6 +9,8 @@ homepage = "https://www.orcalabs.no"
 repository = "https://gitlab.com/orcalabs/public/dockertest-rs"
 keywords = ["docker", "integration", "test", "container"]
 categories = ["development-tools", "development-tools::testing"]
+readme = "README.MD"
+documentation = "https://docs.rs/dockertest"
 
 [dependencies]
 futures = "0.1.25"
