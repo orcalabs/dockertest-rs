@@ -12,7 +12,7 @@ fn test_connect_to_postgres_through_host_port() {
     let mut test = DockerTest::new().with_default_source(source);
 
     let repo = "postgres";
-    let mut postgres = Composition::with_repository(repo).wait_for(Rc::new(MessageWait {
+    let mut postgres = Composition::with_repository(repo).with_wait_for(Rc::new(MessageWait {
         message: "database system is ready to accept connections".to_string(),
         source: MessageSource::Stderr,
         timeout: 20,

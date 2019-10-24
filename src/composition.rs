@@ -127,6 +127,13 @@ impl Composition {
         }
     }
 
+    /// Sets the wait_for trait object, this object will be
+    /// invoked repeatedly when we are waiting for the container to start.
+    /// Defaults to waiting for the container to appear as running.
+    pub fn with_wait_for(self, wait: Rc<dyn WaitFor>) -> Composition {
+        Composition { wait, ..self }
+    }
+
     /// Sets the given environment variable to given value.
     /// Note, if with_env is called after a call to env, all values
     /// added by env will be overwritten.
@@ -148,13 +155,6 @@ impl Composition {
     pub fn port_map(&mut self, exported: u32, host: u32) -> &mut Composition {
         self.port.insert(exported, host);
         self
-    }
-
-    /// Sets the wait_for trait object, this object will be
-    /// invoked repeatedly when we are waiting for the container to start.
-    /// Defaults to waiting for the container to appear as running.
-    pub fn wait_for(self, wait: Rc<dyn WaitFor>) -> Composition {
-        Composition { wait, ..self }
     }
 
     // Configurate the container's name with the given namespace as prefix

@@ -25,7 +25,7 @@ fn test_running_wait_for() {
     let mut test = DockerTest::new().with_default_source(source);
 
     let repo = "luca3m/sleep";
-    let sleep_container = Composition::with_repository(repo).wait_for(Rc::new(RunningWait {
+    let sleep_container = Composition::with_repository(repo).with_wait_for(Rc::new(RunningWait {
         max_checks: 10,
         check_interval: 1000,
     }));
@@ -55,7 +55,7 @@ fn test_exit_wait_for() {
     let mut test = DockerTest::new().with_default_source(source);
 
     let repo = "hello-world";
-    let sleep_container = Composition::with_repository(repo).wait_for(Rc::new(ExitedWait {
+    let sleep_container = Composition::with_repository(repo).with_wait_for(Rc::new(ExitedWait {
         max_checks: 10,
         check_interval: 1000,
     }));
@@ -87,7 +87,7 @@ fn test_wait_for_relaxed_failed() {
 
     let repo = "hello-world";
     let hello_container = Composition::with_repository(repo)
-        .wait_for(Rc::new(FailWait {}))
+        .with_wait_for(Rc::new(FailWait {}))
         .with_start_policy(StartPolicy::Relaxed);
 
     test.add_composition(hello_container);
@@ -106,7 +106,7 @@ fn test_wait_for_strict_failed() {
 
     let repo = "hello-world";
     let hello_container = Composition::with_repository(repo)
-        .wait_for(Rc::new(FailWait {}))
+        .with_wait_for(Rc::new(FailWait {}))
         .with_start_policy(StartPolicy::Strict);
 
     test.add_composition(hello_container);
@@ -123,7 +123,7 @@ fn test_message_wait_for_success_on_stdout() {
     let mut test = DockerTest::new().with_default_source(source);
 
     let repo = "hello-world";
-    let hello_container = Composition::with_repository(repo).wait_for(Rc::new(MessageWait {
+    let hello_container = Composition::with_repository(repo).with_wait_for(Rc::new(MessageWait {
         message: "Hello from Docker!".to_string(),
         source: MessageSource::Stdout,
         timeout: 5,
@@ -145,7 +145,7 @@ fn test_message_wait_for_not_found_on_stream() {
     let mut test = DockerTest::new().with_default_source(source);
 
     let repo = "hello-world";
-    let hello_container = Composition::with_repository(repo).wait_for(Rc::new(MessageWait {
+    let hello_container = Composition::with_repository(repo).with_wait_for(Rc::new(MessageWait {
         message: "MESSAGE NOT PRESENT IN OUTPUT".to_string(),
         source: MessageSource::Stdout,
         timeout: 5,

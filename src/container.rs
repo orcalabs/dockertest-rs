@@ -212,7 +212,7 @@ mod tests {
 
         let source = Source::DockerHub(PullPolicy::IfNotPresent);
         let image = Image::with_repository(&repository);
-        let instance = Composition::with_image(image).wait_for(wrapped_wait_for.clone());
+        let instance = Composition::with_image(image).with_wait_for(wrapped_wait_for.clone());
 
         let client = Rc::new(shiplift::Docker::new());
 
