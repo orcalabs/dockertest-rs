@@ -78,21 +78,21 @@
 //! });
 //! ```
 //!
-//! [Container]: container/struct.Container.html
-//! [host_port]: container/struct.Container.html#method.host_port
-//! [DockerOperations]: test/struct.DockerOperations.html
-//! [Image]: image/struct.Image.html
-//! [Composition]: composition/struct.Composition.html
-//! [with_container_name]: composition/struct.Composition.html#method.with_container_name
-//! [PendingContainer]: container/struct.Container.html
-//! [PullPolicy]: image/enum.PullPolicy.html
-//! [Remote]: image/struct.Remote.html
-//! [RunningContainer]: container/struct.Container.html
-//! [StartPolicy]: composition/enum.StartPolicy.html
+//! [Container]: struct.Container.html
+//! [host_port]: struct.Container.html#method.host_port
+//! [DockerOperations]: struct.DockerOperations.html
+//! [DockerTest]: struct.DockerTest.html
+//! [Image]: struct.Image.html
+//! [Composition]: struct.Composition.html
+//! [with_container_name]: struct.Composition.html#method.with_container_name
+//! [PendingContainer]: struct.Container.html
+//! [PullPolicy]: enum.PullPolicy.html
+//! [Remote]: struct.Remote.html
+//! [RunningContainer]: struct.Container.html
+//! [StartPolicy]: enum.StartPolicy.html
 //! [WaitFor]: waitfor/trait.WaitFor.html
 //! [wait_for_ready]: waitfor/trait.WaitFor.html#method.wait_for_ready
-//! [with_wait_for]: waitfor/struct.Composition.html#method.with_wait_for
-//! [DockerTest]: test/struct.DockerTest.html
+//! [with_wait_for]: struct.Composition.html#method.with_wait_for
 
 mod composition;
 mod container;
