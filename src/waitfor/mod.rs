@@ -5,9 +5,11 @@ use crate::container::Container;
 use failure::Error;
 use futures::future::Future;
 
+mod message;
 mod nowait;
 mod status;
 
+pub use message::{MessageSource, MessageWait};
 pub use nowait::NoWait;
 pub use status::{ExitedWait, RunningWait};
 
