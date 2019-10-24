@@ -5,6 +5,7 @@ use dockertest::waitfor::{MessageSource, MessageWait};
 use dockertest::{Composition, DockerTest};
 use std::rc::Rc;
 
+#[ignore]
 #[test]
 fn test_connect_to_postgres_through_host_port() {
     let source = Source::DockerHub(PullPolicy::IfNotPresent);
