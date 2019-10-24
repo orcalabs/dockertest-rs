@@ -67,7 +67,7 @@
 //! [PullPolicy]: image/enum.PullPolicy.html
 //! [Remote]: image/struct.Remote.html
 //! [StartPolicy]: composition/enum.StartPolicy.html
-//! [WaitFor]: wait_for/trait.WaitFor.html
+//! [WaitFor]: waitfor/trait.WaitFor.html
 //! [DockerTest]: test/struct.DockerTest.html
 
 pub mod composition;
@@ -75,7 +75,7 @@ pub mod container;
 pub mod dockertest;
 pub mod error;
 pub mod image;
-pub mod wait_for;
+pub mod waitfor;
 
 // Private module containing utility functions used for testing purposes
 #[cfg(test)]

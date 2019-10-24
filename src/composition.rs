@@ -3,7 +3,7 @@
 use crate::container::Container;
 use crate::error::{DockerError, DockerErrorKind};
 use crate::image::Image;
-use crate::wait_for::{NoWait, WaitFor};
+use crate::waitfor::{NoWait, WaitFor};
 use futures;
 use futures::future::{self, Future};
 use shiplift;
@@ -54,6 +54,8 @@ pub struct Composition {
     /// The command to pass to the container.
     cmd: Vec<String>,
 
+    port: HashMap<u32, u32>,
+
     /// The StartPolicy of this Composition,
     /// defaults to relaxed.
     start_policy: StartPolicy,
@@ -75,6 +77,7 @@ impl Composition {
             wait: Rc::new(NoWait {}),
             env: HashMap::new(),
             cmd: Vec::new(),
+            port: HashMap::new(),
             start_policy: StartPolicy::Relaxed,
         }
     }
@@ -88,6 +91,7 @@ impl Composition {
             wait: Rc::new(NoWait {}),
             env: HashMap::new(),
             cmd: Vec::new(),
+            port: HashMap::new(),
             start_policy: StartPolicy::Relaxed,
         }
     }
@@ -136,6 +140,13 @@ impl Composition {
     /// all commands added with cmd will be overwritten.
     pub fn cmd<T: ToString>(&mut self, cmd: T) -> &mut Composition {
         self.cmd.push(cmd.to_string());
+        self
+    }
+
+    /// Adds the exported -> host port mapping.
+    /// If an exported port already exists, it will be overridden.
+    pub fn port_map(&mut self, exported: u32, host: u32) -> &mut Composition {
+        self.port.insert(exported, host);
         self
     }
 
@@ -209,12 +220,25 @@ impl Composition {
                 let cmds = self.cmd.iter().map(|s| s.as_ref()).collect();
 
                 let containers = c1.containers();
-                // TODO fixx unwrap
-                let container_options = ContainerOptions::builder(&self.image.retrieved_id())
+
+                let image_id = self.image.retrieved_id();
+                let mut options_builder = ContainerOptions::builder(&image_id);
+                options_builder
                     .cmd(cmds)
                     .env(envs)
-                    .name(&self.container_name)
-                    .build();
+                    .name(&self.container_name);
+
+                // Handle ports
+                if self.port.is_empty() {
+                    // TODO: export ALL ports
+                } else {
+                    // Export the specific ports
+                    for (export, host) in &self.port {
+                        options_builder.expose(*export, "tcp", *host);
+                    }
+                }
+
+                let container_options = options_builder.build();
                 containers
                     .create(&container_options)
                     .map_err(|e| DockerError::daemon(format!("failed to create container: {}", e)))

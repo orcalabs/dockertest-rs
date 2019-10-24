@@ -1,7 +1,7 @@
 //! Represents a docker `Container`.
 
 use crate::error::DockerError;
-use crate::wait_for::WaitFor;
+use crate::waitfor::WaitFor;
 use crate::StartPolicy;
 use futures::future::{self, Future};
 use shiplift;
@@ -62,9 +62,9 @@ impl Container {
     }
 
     /// Returns which host port the given container port is mapped to.
-    pub fn host_port(&self, _container_port: u32) -> u32 {
+    pub fn host_port(&self, container_port: u32) -> u32 {
         // TODO: Implement host-port mapping.
-        0
+        container_port
     }
 
     // QUESTION: Why is this public?
@@ -119,7 +119,6 @@ impl Container {
     }
 
     /// Returns the id of container.
-    #[cfg(test)]
     pub(crate) fn id(&self) -> &str {
         &self.id
     }
@@ -139,7 +138,7 @@ impl Container {
 mod tests {
     use crate::container::Container;
     use crate::image::{Image, PullPolicy, Source};
-    use crate::wait_for::{NoWait, WaitFor};
+    use crate::waitfor::{NoWait, WaitFor};
     use crate::{Composition, StartPolicy};
     use failure::Error;
     use futures::future::{self, Future};

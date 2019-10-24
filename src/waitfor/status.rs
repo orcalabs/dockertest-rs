@@ -1,6 +1,7 @@
-//! Trait definition representing how we wait for starting containers.
+//! `WaitFor` implementations regarding status changes.
 
 use crate::container::Container;
+use crate::waitfor::WaitFor;
 use failure::{format_err, Error};
 use futures::future::{self, Future};
 use futures::stream::Stream;
@@ -8,16 +9,6 @@ use std::sync::atomic::{self, AtomicBool};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::timer::Interval;
-
-/// Trait to wait for a container to be ready for service.
-pub trait WaitFor {
-    /// Should wait for the associated container to be ready for service.
-    /// When the container is ready the method should return true.
-    fn wait_for_ready(
-        &self,
-        container: Container,
-    ) -> Box<dyn Future<Item = Container, Error = Error>>;
-}
 
 /// The RunningWait `WaitFor` implementation for containers.
 /// This variant will wait until the docker daemon reports the container as running.
@@ -36,10 +27,6 @@ pub struct ExitedWait {
     /// The number of checks to perform before erroring out.
     pub max_checks: i32,
 }
-
-/// The NoWait `WaitFor` implementation for containers.
-/// This variant does not wait for anything, resolves immediately.
-pub struct NoWait {}
 
 impl WaitFor for RunningWait {
     fn wait_for_ready(
@@ -66,15 +53,6 @@ impl WaitFor for ExitedWait {
             });
 
         Box::new(liveness_future)
-    }
-}
-
-impl WaitFor for NoWait {
-    fn wait_for_ready(
-        &self,
-        container: Container,
-    ) -> Box<dyn Future<Item = Container, Error = Error>> {
-        Box::new(future::ok(container))
     }
 }
 
@@ -139,46 +117,4 @@ fn wait_for_container_state(
                 }
             }
         })
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::container::Container;
-    use crate::wait_for::{NoWait, WaitFor};
-    use crate::StartPolicy;
-    use shiplift;
-    use std::rc::Rc;
-    use tokio::runtime::current_thread;
-
-    // Tests that WaitFor implementation for NoWait
-    #[test]
-    fn test_no_wait_returns_ok() {
-        let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
-
-        let wait = Rc::new(NoWait {});
-
-        let container_name = "this_is_a_name".to_string();
-        let id = "this_is_an_id".to_string();
-        let handle_key = "this_is_a_handle_key";
-
-        let container = Container::new(
-            &container_name,
-            &id,
-            handle_key,
-            StartPolicy::Relaxed,
-            wait.clone(),
-            Rc::new(shiplift::Docker::new()),
-        );
-
-        let res = rt.block_on(wait.wait_for_ready(container));
-        assert!(res.is_ok(), "should always return ok with NoWait");
-
-        let container = res.expect("failed to get container");
-
-        assert_eq!(
-            container_name,
-            container.name(),
-            "returned container is not identical"
-        );
-    }
 }

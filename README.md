@@ -63,8 +63,24 @@ test.run(|ops| {
 
 This library is in its initial inception. Breaking changes are to be expected.
 
+## Testing
+
+Testing this library requires the following:
+* docker daemon available on localhost.
+* Capable of compiling `diesel` with the postgres feature.
+
+Run the tests with the following command:
+```
+cargo test -- --test-threads=1
+```
+
+Caveats that may fail tests:
+* Port `5432` is already taken for postgres on the host.
+* Exited `hello-world` containers on the system. This will currently make removing
+old images fail and many tests will fail. This is an area we need to improve.
+
 ## TODO:
 * Document limits when spawning stuff in test body.
 * Document handle concept.
 * Break up Container into PendingContainer and RunningContainer.
-* Document and implement port mapping
+* Document and implement port mapping for random host port assignment.
