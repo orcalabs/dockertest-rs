@@ -94,11 +94,11 @@
 //! [with_wait_for]: waitfor/struct.Composition.html#method.with_wait_for
 //! [DockerTest]: test/struct.DockerTest.html
 
-pub mod composition;
-pub mod container;
-pub mod dockertest;
+mod composition;
+mod container;
+mod dockertest;
 pub mod error;
-pub mod image;
+mod image;
 pub mod waitfor;
 
 // Private module containing utility functions used for testing purposes
@@ -106,4 +106,6 @@ pub mod waitfor;
 mod test_utils;
 
 pub use crate::composition::{Composition, StartPolicy};
+pub use crate::container::Container;
 pub use crate::dockertest::{DockerOperations, DockerTest};
+pub use crate::image::{Image, PullPolicy, Remote, Source};

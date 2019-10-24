@@ -1,7 +1,5 @@
-use dockertest::container::Container;
-use dockertest::image::{PullPolicy, Source};
 use dockertest::waitfor::{ExitedWait, MessageSource, MessageWait, RunningWait, WaitFor};
-use dockertest::{Composition, DockerTest, StartPolicy};
+use dockertest::{Composition, Container, DockerTest, PullPolicy, Source, StartPolicy};
 use failure::{format_err, Error};
 use futures::future::{self, Future};
 use std::rc::Rc;

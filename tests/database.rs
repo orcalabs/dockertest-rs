@@ -1,8 +1,7 @@
 use diesel::pg::PgConnection;
 use diesel::prelude::*;
-use dockertest::image::{PullPolicy, Source};
 use dockertest::waitfor::{MessageSource, MessageWait};
-use dockertest::{Composition, DockerTest};
+use dockertest::{Composition, DockerTest, PullPolicy, Source};
 use std::rc::Rc;
 
 #[ignore]
