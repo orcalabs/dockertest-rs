@@ -3,7 +3,7 @@
 use crate::container::Container;
 use crate::error::DockerError;
 use crate::image::Source;
-use crate::image_instance::{ImageInstance, StartPolicy};
+use crate::{Composition, StartPolicy};
 use failure::{format_err, Error};
 use futures::future::{self, Future};
 use futures::sink::Sink;
@@ -21,12 +21,12 @@ use tokio::runtime::current_thread;
 /// and keep track of all containers
 /// that should be started.
 pub struct DockerTest {
-    /// All ImageInstances that have been added
+    /// All Compositions that have been added
     /// with a strict StartPolicy.
-    strict_instances: Vec<ImageInstance>,
-    /// All ImageInstances that have been added
+    strict_instances: Vec<Composition>,
+    /// All Compositions that have been added
     /// with a relaxed StartPolicy.
-    relaxed_instances: Vec<ImageInstance>,
+    relaxed_instances: Vec<Composition>,
     /// The namespace of all started containers,
     /// this is essentially only a prefix on each container.
     /// Used to more easily identify which containers was
@@ -51,7 +51,7 @@ pub struct DockerOperations {
 
 impl DockerOperations {
     /// Returns a handle to the specified container.
-    /// If no container_name was specified when creating the ImageInstance, the Image repository
+    /// If no container_name was specified when creating the Composition, the Image repository
     /// is the default key for the corresponding container.
     pub fn handle<'a>(&'a self, key: &'a str) -> Result<&'a Container, DockerError> {
         let containers = self.containers.get(key);
@@ -101,7 +101,7 @@ impl DockerTest {
     }
 
     /// Execute the test body within the provided function closure.
-    /// All ImageInstances added to the DockerTest has successfully completed their WaitFor clause
+    /// All Compositions added to the DockerTest has successfully completed their WaitFor clause
     /// once the test body is executed.
     pub fn run<T>(&self, test: T)
     where
@@ -146,8 +146,8 @@ impl DockerTest {
         }
     }
 
-    /// Add an ImageInstance to this DockerTest.
-    pub fn add_instance(&mut self, instance: ImageInstance) {
+    /// Add a Composition to this DockerTest.
+    pub fn add_composition(&mut self, instance: Composition) {
         match &instance.start_policy() {
             StartPolicy::Relaxed => self.relaxed_instances.push(instance),
             StartPolicy::Strict => self.strict_instances.push(instance),
@@ -166,12 +166,12 @@ impl DockerTest {
     ) -> Result<(), Error> {
         self.pull_images(rt)?;
 
-        let mut all_image_instances: Vec<ImageInstance> = Vec::new();
+        let mut all_compositions: Vec<Composition> = Vec::new();
 
-        all_image_instances.append(&mut self.strict_instances.to_vec());
-        all_image_instances.append(&mut self.relaxed_instances.to_vec());
+        all_compositions.append(&mut self.strict_instances.to_vec());
+        all_compositions.append(&mut self.relaxed_instances.to_vec());
 
-        for instance in all_image_instances {
+        for instance in all_compositions {
             let suffix = generate_random_string(20);
             let namespaced_instance = instance.configurate_container_name(&self.namespace, &suffix);
 
@@ -285,7 +285,7 @@ impl Default for DockerTest {
 // If there only exists one container for the given key we can safely return it.
 // If there exists more than one container for the given key, we cannot resolve the key
 // as we do not know which container to return.
-// This occurs if multiple ImageInstances are added with the same Image repository, and
+// This occurs if multiple Compositions are added with the same Image repository, and
 // without providing a containter_name.
 // If the the provided key has been resolved, but there exists no containers in the value
 // something has gone wrong internally, it should never occur.
@@ -387,15 +387,14 @@ fn generate_random_string(len: i32) -> String {
 #[cfg(test)]
 mod tests {
     use crate::container::Container;
-    use crate::image::{Image, PullPolicy, Source};
-    use crate::image_instance::{ImageInstance, StartPolicy};
-    use crate::test::resolve_container_handle_key;
-    use crate::test::{
-        start_relaxed_containers, start_strict_containers, wait_for_relaxed_containers,
+    use crate::dockertest::{
+        resolve_container_handle_key, start_relaxed_containers, start_strict_containers,
+        wait_for_relaxed_containers,
     };
+    use crate::image::{Image, PullPolicy, Source};
     use crate::test_utils;
     use crate::wait_for::NoWait;
-    use crate::DockerTest;
+    use crate::{Composition, DockerTest, StartPolicy};
     use futures::future::Future;
     use futures::sink::Sink;
     use futures::stream::Stream;
@@ -475,10 +474,9 @@ mod tests {
         let tag = "latest".to_string();
 
         let image = Image::with_repository(&repository);
-        let image_instance =
-            ImageInstance::with_image(image).with_start_policy(StartPolicy::Strict);
+        let composition = Composition::with_image(image).with_start_policy(StartPolicy::Strict);
 
-        test.add_instance(image_instance);
+        test.add_composition(composition);
 
         let res = rt.block_on(test_utils::delete_image_if_present(
             &repository,
@@ -516,10 +514,9 @@ mod tests {
         let tag = "latest".to_string();
 
         let image = Image::with_repository(&repository);
-        let image_instance =
-            ImageInstance::with_image(image).with_start_policy(StartPolicy::Relaxed);
+        let composition = Composition::with_image(image).with_start_policy(StartPolicy::Relaxed);
 
-        test.add_instance(image_instance);
+        test.add_composition(composition);
 
         let res = rt.block_on(test_utils::delete_image_if_present(
             &repository,
@@ -565,10 +562,9 @@ mod tests {
 
         let image_id = image.retrieved_id();
 
-        let image_instance =
-            ImageInstance::with_image(image).with_start_policy(StartPolicy::Relaxed);
+        let composition = Composition::with_image(image).with_start_policy(StartPolicy::Relaxed);
 
-        test.add_instance(image_instance);
+        test.add_composition(composition);
 
         rt.block_on(test_utils::remove_containers(image_id, &client))
             .expect("failed to remove existing containers");
@@ -632,10 +628,9 @@ mod tests {
 
         let image_id = image.retrieved_id();
 
-        let image_instance =
-            ImageInstance::with_image(image).with_start_policy(StartPolicy::Strict);
+        let composition = Composition::with_image(image).with_start_policy(StartPolicy::Strict);
 
-        test.add_instance(image_instance);
+        test.add_composition(composition);
 
         rt.block_on(test_utils::remove_containers(image_id, &client))
             .expect("failed to remove existing containers");
@@ -705,10 +700,9 @@ mod tests {
             res.unwrap_err()
         );
 
-        let image_instance =
-            ImageInstance::with_image(image).with_start_policy(StartPolicy::Relaxed);
+        let composition = Composition::with_image(image).with_start_policy(StartPolicy::Relaxed);
 
-        test.add_instance(image_instance);
+        test.add_composition(composition);
 
         let mut containers: HashMap<String, Vec<Container>> = HashMap::new();
 

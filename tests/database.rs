@@ -1,8 +1,7 @@
 use diesel::pg::PgConnection;
 use diesel::prelude::*;
 use dockertest::image::{PullPolicy, Source};
-use dockertest::image_instance::ImageInstance;
-use dockertest::DockerTest;
+use dockertest::{Composition, DockerTest};
 
 #[ignore]
 #[test]
@@ -11,9 +10,9 @@ fn test_connect_to_postgres_through_host_port() {
     let mut test = DockerTest::new().with_default_source(source);
 
     let repo = "postgres";
-    let postgres = ImageInstance::with_repository(repo);
+    let postgres = Composition::with_repository(repo);
 
-    test.add_instance(postgres);
+    test.add_composition(postgres);
 
     test.run(|ops| {
         let container = ops.handle("postgres").expect("retrieve postgres container");

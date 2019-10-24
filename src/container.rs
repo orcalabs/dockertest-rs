@@ -1,8 +1,8 @@
 //! Represents a docker `Container`.
 
 use crate::error::DockerError;
-use crate::image_instance::StartPolicy;
 use crate::wait_for::WaitFor;
+use crate::StartPolicy;
 use futures::future::{self, Future};
 use shiplift;
 use shiplift::builder::RmContainerOptions;
@@ -30,11 +30,11 @@ pub struct Container {
     id: String,
 
     /// The key used to retrieve the handle to this container from DockerTest.
-    /// The user can set this directly by specifying container_name in the ImageInstance builder.
+    /// The user can set this directly by specifying container_name in the Composition builder.
     /// Defaults to the repository name of the containers image.
     handle_key: String,
 
-    /// The StartPolicy of this Container, is provided from its ImageInstance.
+    /// The StartPolicy of this Container, is provided from its Composition.
     start_policy: StartPolicy,
 
     /// Trait implementing how to wait for the container to startup.
@@ -139,9 +139,8 @@ impl Container {
 mod tests {
     use crate::container::Container;
     use crate::image::{Image, PullPolicy, Source};
-    use crate::image_instance::ImageInstance;
-    use crate::image_instance::StartPolicy;
     use crate::wait_for::{NoWait, WaitFor};
+    use crate::{Composition, StartPolicy};
     use failure::Error;
     use futures::future::{self, Future};
     use shiplift;
@@ -200,7 +199,7 @@ mod tests {
         }
     }
     // Tests that the provided WaitFor trait object is invoked
-    // during the start method of ImageInstance
+    // during the start method of Composition
     #[test]
     fn test_wait_for_invoked_during_start() {
         let wait_for = TestWaitFor {
@@ -214,7 +213,7 @@ mod tests {
 
         let source = Source::DockerHub(PullPolicy::IfNotPresent);
         let image = Image::with_repository(&repository);
-        let instance = ImageInstance::with_image(image).wait_for(wrapped_wait_for.clone());
+        let instance = Composition::with_image(image).wait_for(wrapped_wait_for.clone());
 
         let client = Rc::new(shiplift::Docker::new());
 

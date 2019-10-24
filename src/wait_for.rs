@@ -144,8 +144,8 @@ fn wait_for_container_state(
 #[cfg(test)]
 mod tests {
     use crate::container::Container;
-    use crate::image_instance::StartPolicy;
     use crate::wait_for::{NoWait, WaitFor};
+    use crate::StartPolicy;
     use shiplift;
     use std::rc::Rc;
     use tokio::runtime::current_thread;
