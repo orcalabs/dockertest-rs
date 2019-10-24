@@ -1,8 +1,5 @@
 use dockertest::image::{Image, PullPolicy, Source};
-use dockertest::wait_for::{ExitedWait, RunningWait};
 use dockertest::{Composition, DockerTest};
-use std::rc::Rc;
-use tokio::runtime::current_thread;
 
 #[test]
 fn test_run_with_no_failure() {
@@ -156,65 +153,5 @@ fn test_resolve_handle_with_identical_repository() {
         let handle = ops.handle(repo);
         assert!(handle.is_err(),
                 "should fail to retrieve handle for container when there exists multiple containers with the same repository name and no user_provided_container_name");
-    });
-}
-
-// Tests that the RunningWait implementation waits for the container to appear as running.
-#[test]
-fn test_running_wait_for() {
-    let source = Source::DockerHub(PullPolicy::IfNotPresent);
-    let mut test = DockerTest::new().with_default_source(source);
-
-    let repo = "luca3m/sleep";
-    let sleep_container = Composition::with_repository(repo).wait_for(Rc::new(RunningWait {
-        max_checks: 10,
-        check_interval: 1000,
-    }));
-
-    test.add_composition(sleep_container);
-
-    test.run(|ops| {
-        let handle = ops.handle(repo).expect("failed to get container handle");
-
-        let mut rt = current_thread::Runtime::new().expect("failed to start runtime");
-
-        let is_running = rt
-            .block_on(handle.is_running())
-            .expect("failed to get container state");
-
-        assert!(
-            is_running,
-            "container should be running when using the RunningWait waiting strategy"
-        );
-    });
-}
-
-// Tests that the ExitedWait implementation waits for the container to reach an exit status.
-#[test]
-fn test_exit_wait_for() {
-    let source = Source::DockerHub(PullPolicy::IfNotPresent);
-    let mut test = DockerTest::new().with_default_source(source);
-
-    let repo = "hello-world";
-    let sleep_container = Composition::with_repository(repo).wait_for(Rc::new(ExitedWait {
-        max_checks: 10,
-        check_interval: 1000,
-    }));
-
-    test.add_composition(sleep_container);
-
-    test.run(|ops| {
-        let handle = ops.handle(repo).expect("failed to get container handle");
-
-        let mut rt = current_thread::Runtime::new().expect("failed to start runtime");
-
-        let is_running = rt
-            .block_on(handle.is_running())
-            .expect("failed to get container state");
-
-        assert!(
-            !is_running,
-            "container should not be running when using the ExitWait waiting strategy"
-        );
     });
 }
