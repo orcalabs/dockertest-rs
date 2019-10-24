@@ -15,8 +15,9 @@ pub use status::{ExitedWait, RunningWait};
 
 /// Trait to wait for a container to be ready for service.
 pub trait WaitFor {
-    /// Should wait for the associated container to be ready for service.
-    /// When the container is ready the method should return true.
+    /// Method implementation should return a future that resolves once the condition
+    /// described by the implementing structure is fulfilled. Once this successfully resolves,
+    /// the container is marked as ready.
     fn wait_for_ready(
         &self,
         container: Container,
