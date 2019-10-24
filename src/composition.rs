@@ -11,7 +11,7 @@ use shiplift::builder::{ContainerOptions, RmContainerOptions};
 use std::collections::HashMap;
 use std::rc::Rc;
 
-/// Specifies the starting policy of an Composition.
+/// Specifies the starting policy of a Composition.
 /// A Strict policy will enforce that the Composition is started in the order
 /// it was added to DockerTest. A Relaxed policy will not enforce any ordering,
 /// all Compositions with a Relaxed policy will be started concurrently.
@@ -79,7 +79,7 @@ impl Composition {
         }
     }
 
-    /// Creates an Composition with the given instance.
+    /// Creates a Composition with the given instance.
     pub fn with_image(image: Image) -> Composition {
         Composition {
             user_provided_container_name: None,
@@ -273,7 +273,7 @@ mod tests {
     use tokio::runtime::current_thread;
 
     // Tests that the with_repository constructor creates
-    // an Composition with the correct values
+    // a Composition with the correct values
     #[test]
     fn test_with_repository_constructor() {
         let repository = "this_is_a_repository".to_string();
@@ -291,12 +291,12 @@ mod tests {
         assert_eq!(
             instance.env.len(),
             0,
-            "there should be no environmental variables after constructing an Composition"
+            "there should be no environmental variables after constructing a Composition"
         );
         assert_eq!(
             instance.cmd.len(),
             0,
-            "there should be no commands after constructing an Composition"
+            "there should be no commands after constructing a Composition"
         );
 
         let equal = match instance.start_policy {
@@ -307,7 +307,7 @@ mod tests {
     }
 
     // Tests that the with_image constructor creates
-    // an Composition with the correct values
+    // a Composition with the correct values
     #[test]
     fn test_with_image_constructor() {
         let repository = "this_is_a_repository".to_string();
@@ -327,12 +327,12 @@ mod tests {
         assert_eq!(
             instance.env.len(),
             0,
-            "there should be no environmental variables after constructing an Composition"
+            "there should be no environmental variables after constructing a Composition"
         );
         assert_eq!(
             instance.cmd.len(),
             0,
-            "there should be no commands after constructing an Composition"
+            "there should be no commands after constructing a Composition"
         );
 
         let equal = match instance.start_policy {
@@ -446,11 +446,11 @@ mod tests {
 
         assert!(
             res.is_err(),
-            "should fail to start an Composition with non-exisiting image"
+            "should fail to start a Composition with non-exisiting image"
         );
     }
 
-    // Tests that we can successfully create a Container from an Composition
+    // Tests that we can successfully create a Container from a Composition
     // resulting in a Container with correct values.
     #[test]
     fn test_create_with_existing_image() {
@@ -476,7 +476,7 @@ mod tests {
         );
     }
 
-    // Tests that we can successfully create a Contaienr from an Composition,
+    // Tests that we can successfully create a Contaienr from a Composition,
     // even if there exists a container with the same name.
     // The start method should detect that there already
     // exists a container with the same name,

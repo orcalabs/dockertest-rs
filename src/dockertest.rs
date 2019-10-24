@@ -146,7 +146,7 @@ impl DockerTest {
         }
     }
 
-    /// Add an Composition to this DockerTest.
+    /// Add a Composition to this DockerTest.
     pub fn add_composition(&mut self, instance: Composition) {
         match &instance.start_policy() {
             StartPolicy::Relaxed => self.relaxed_instances.push(instance),

@@ -12,7 +12,7 @@
 //! * Retrieve [Image] from remote source according to [PullPolicy].
 //! * Support multiple [Remote] registries, which can be individually assigned to [Image].
 //! * Dictate how each [Container] is created and operated from an [Image]
-//!   through an [Composition].
+//!   through a [Composition].
 //!  * This allows us to have muliple containers with the same Image,
 //!    but with different start conditions.
 //! * Control each [Composition] condition for when it is deemed running through [WaitFor].
