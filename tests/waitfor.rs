@@ -115,3 +115,45 @@ fn test_wait_for_strict_failed() {
         assert!(false);
     });
 }
+
+// Tests that the MessageWait implementation waits for a message to occur in stream
+#[test]
+fn test_message_wait_for_success_on_stdout() {
+    let source = Source::DockerHub(PullPolicy::IfNotPresent);
+    let mut test = DockerTest::new().with_default_source(source);
+
+    let repo = "hello-world";
+    let hello_container = Composition::with_repository(repo).wait_for(Rc::new(MessageWait {
+        message: "Hello from Docker!".to_string(),
+        source: MessageSource::Stdout,
+        timeout: 5,
+    }));
+
+    test.add_composition(hello_container);
+
+    test.run(|_ops| {
+        // TODO: Determine how we can assert that this wait for was successful?
+        assert!(true);
+    });
+}
+
+// Tests that the MessageWait implementation fails test when message does not occur.
+#[test]
+#[should_panic]
+fn test_message_wait_for_not_found_on_stream() {
+    let source = Source::DockerHub(PullPolicy::IfNotPresent);
+    let mut test = DockerTest::new().with_default_source(source);
+
+    let repo = "hello-world";
+    let hello_container = Composition::with_repository(repo).wait_for(Rc::new(MessageWait {
+        message: "MESSAGE NOT PRESENT IN OUTPUT".to_string(),
+        source: MessageSource::Stdout,
+        timeout: 5,
+    }));
+
+    test.add_composition(hello_container);
+
+    test.run(|_ops| {
+        assert!(false);
+    });
+}
