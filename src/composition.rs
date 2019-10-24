@@ -23,7 +23,26 @@ pub enum StartPolicy {
     Strict,
 }
 
-/// Represents an instance of an image.
+/// Represents an instance of an [Image].
+/// The Composition is used to specialize an Image whose name, version, tag and source is known,
+/// but before one can create a [RunningContainer] from an Image, it must be augmented with
+/// information about how to start it, how to ensure it has been started, environment variables
+/// and runtime commands.
+/// Thus, this structure represents the concrete instance of an [Image] that will be started
+/// and become a [RunningContainer].
+///
+/// # Examples
+/// ```rust
+/// # use crate::Composition;
+/// let hello = Composition::with_repository("hello-world")
+///     .with_container_name("my-hello-world")
+///     .with_cmd(vec!["can", "i", "override", "this?"]);
+/// hello.env("MY_ENV", "MY VALUE");
+/// hello.cmd("appended_to_original_cmd!");
+/// ```
+///
+/// [Image]: ../image/struct.Image.html
+/// [RunningContainer]: ../container/struct.Container.html
 #[derive(Clone)]
 pub struct Composition {
     /// User provided name of the container.
@@ -66,8 +85,15 @@ pub struct Composition {
 }
 
 impl Composition {
-    /// Creates an image instance with the given repository.
-    /// Will create an Image with the same repository.
+    /// Creates a Composition based on the Image repository name provided.
+    /// This will internally create the [Image] based on the provided repository name,
+    /// and default the tag to `latest`.
+    ///
+    /// This is the shortcut method of constructing a Composition.
+    /// See [with_image] to create one with a provided [Image].
+    ///
+    /// [Image]: ../image/struct.Image.html
+    /// [with_image]: struct.Composition.html#method.with_image
     pub fn with_repository<T: ToString>(repository: T) -> Composition {
         let copy = repository.to_string();
         Composition {
@@ -82,7 +108,11 @@ impl Composition {
         }
     }
 
-    /// Creates a Composition with the given instance.
+    /// Creates a Composition with the provided Image.
+    /// This is the long-winded way of defining a Composition.
+    /// See [with_repository] to for the shortcut method.
+    ///
+    /// [with_repository]: struct.Composition.html#method.with_repository
     pub fn with_image(image: Image) -> Composition {
         Composition {
             user_provided_container_name: None,
@@ -96,8 +126,10 @@ impl Composition {
         }
     }
 
-    /// Sets the start_policy for this Composition,
-    /// defaults to a relaxed policy.
+    /// Sets the start_policy for this Composition.
+    /// Defaults to a [relaxed] policy.
+    ///
+    /// [relaxed]: enum.StartPolicy.html#variant.Relaxed
     pub fn with_start_policy(self, start_policy: StartPolicy) -> Composition {
         Composition {
             start_policy,
@@ -105,20 +137,34 @@ impl Composition {
         }
     }
 
-    /// Sets environmental values for the container.
-    /// Each key in the map should be a environmental variable,
+    /// Assigns the full set of environmental variables available for the [RunningContainer].
+    /// Each key in the map should be the environmental variable name
     /// and its corresponding value will be set as its value.
+    ///
+    /// This method replaces the entire existing env map provided.
+    ///
+    /// [RunningContainer]: ../container/struct.Container.html
     pub fn with_env(self, env: HashMap<String, String>) -> Composition {
         Composition { env, ..self }
     }
 
-    /// Sets the command of the container, if not set
-    /// the container will default to the image's command, if any.
+    /// Sets the command of the container.
+    ///
+    /// If no entries in the command vector is provided to the [Composition],
+    /// the command within the [Image] will be used, if any.
+    ///
+    /// [Composition]: struct.Composition.html
+    /// [Image]: ../image/struct.Image.html
     pub fn with_cmd(self, cmd: Vec<String>) -> Composition {
         Composition { cmd, ..self }
     }
 
     /// Sets the name of the container that will eventually be started.
+    /// This is merely part of the final container name, and the full container name issued
+    /// to docker will be generated.
+    /// The container name assigned here is also used to resolve the `handle` concept used
+    /// by _dockertest_.
+    ///
     /// The container name defaults to the repository name.
     pub fn with_container_name<T: ToString>(self, container_name: T) -> Composition {
         Composition {
@@ -127,24 +173,36 @@ impl Composition {
         }
     }
 
-    /// Sets the wait_for trait object, this object will be
-    /// invoked repeatedly when we are waiting for the container to start.
-    /// Defaults to waiting for the container to appear as running.
+    /// Sets the wait_for trait object for this Composition.
+    ///
+    /// The default WaitFor implementation used is [RunningWait].
+    ///
+    /// [RunningWait]: ../waitfor/struct.RunningWait.html
     pub fn with_wait_for(self, wait: Rc<dyn WaitFor>) -> Composition {
         Composition { wait, ..self }
     }
 
-    /// Sets the given environment variable to given value.
-    /// Note, if with_env is called after a call to env, all values
-    /// added by env will be overwritten.
+    /// Sets the environment variable to the given value.
+    ///
+    /// NOTE: if [with_env] is called after a call to [env], all values added by [env] will be overwritten.
+    ///
+    /// [env]: struct.Composition.html#method.env
+    /// [with_env]: struct.Composition.html#method.with_env
     pub fn env<T: ToString, S: ToString>(&mut self, name: T, value: S) -> &mut Composition {
         self.env.insert(name.to_string(), value.to_string());
         self
     }
 
-    /// Adds the given command.
-    /// Note, if with_cmd is called after a call to cmd,
-    /// all commands added with cmd will be overwritten.
+    /// Appends the command string to the current command vector.
+    ///
+    /// If no entries in the command vector is provided to the [Composition],
+    /// the command within the [Image] will be used, if any.
+    ///
+    /// NOTE: if [with_cmd] is called after a call to [cmd], all entries to the command vector
+    /// added with [cmd] will be overwritten.
+    ///
+    /// [cmd]: struct.Composition.html#method.cmd
+    /// [with_cmd]: struct.Composition.html#method.with_cmd
     pub fn cmd<T: ToString>(&mut self, cmd: T) -> &mut Composition {
         self.cmd.push(cmd.to_string());
         self
