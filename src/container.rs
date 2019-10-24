@@ -62,9 +62,9 @@ impl Container {
     }
 
     /// Returns which host port the given container port is mapped to.
-    pub fn host_port(&self, _container_port: u32) -> u32 {
+    pub fn host_port(&self, container_port: u32) -> u32 {
         // TODO: Implement host-port mapping.
-        0
+        container_port
     }
 
     // QUESTION: Why is this public?
