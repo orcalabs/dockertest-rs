@@ -327,9 +327,9 @@ fn start_relaxed_containers(
         let start_fut = c
             .start()
             .map_err(|e| format_err!("failed to start container: {}", e))
-            .then(move |_| {
+            .then(move |e| {
                 sender_clone
-                    .send(Ok(()))
+                    .send(e)
                     .map_err(|e| eprintln!("failed to send container in channel: {}", e))
             })
             .and_then(|_| Ok(()));
