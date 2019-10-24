@@ -1,7 +1,7 @@
 //! Represents a docker `Container`.
 
 use crate::error::DockerError;
-use crate::wait_for::WaitFor;
+use crate::waitfor::WaitFor;
 use crate::StartPolicy;
 use futures::future::{self, Future};
 use shiplift;
@@ -138,7 +138,7 @@ impl Container {
 mod tests {
     use crate::container::Container;
     use crate::image::{Image, PullPolicy, Source};
-    use crate::wait_for::{NoWait, WaitFor};
+    use crate::waitfor::{NoWait, WaitFor};
     use crate::{Composition, StartPolicy};
     use failure::Error;
     use futures::future::{self, Future};

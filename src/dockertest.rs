@@ -393,7 +393,7 @@ mod tests {
     };
     use crate::image::{Image, PullPolicy, Source};
     use crate::test_utils;
-    use crate::wait_for::NoWait;
+    use crate::waitfor::NoWait;
     use crate::{Composition, DockerTest, StartPolicy};
     use futures::future::Future;
     use futures::sink::Sink;

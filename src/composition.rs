@@ -3,7 +3,7 @@
 use crate::container::Container;
 use crate::error::{DockerError, DockerErrorKind};
 use crate::image::Image;
-use crate::wait_for::{NoWait, WaitFor};
+use crate::waitfor::{NoWait, WaitFor};
 use futures;
 use futures::future::{self, Future};
 use shiplift;
