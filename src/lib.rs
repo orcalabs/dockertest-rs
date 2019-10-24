@@ -2,7 +2,7 @@
 #![deny(warnings)]
 #![deny(rust_2018_idioms)]
 
-//! dockertest-rs is a testing & automation abstraction for Docker.
+//! _dockertest_ is a testing and automation abstraction for Docker.
 //!
 //! The primary utility for this crate is to easily employ docker in test infrastructure,
 //! with the following key features:
@@ -33,6 +33,26 @@
 //! to interact with it. This includes retrieving the [host_port] that a port in the [Container]
 //! is mapped to on the host.
 //!
+//! # Handle - referencing the same container throughout your test
+//!
+//! _dockertest_ assigns a `handle` to each [Composition], which carries over to a
+//! [RunningContainer]. When writing a test, one will reference the intended object through its
+//! handle.
+//!
+//! By default, the handle is auto-assigned to be the repository name of the [Composition].
+//!
+//! The user may change the `handle` by changing the container name (as seen from the user
+//! - the final container name will be disambiguated for each _dockertest_) through the
+//! [with_container_name] builder method on [Composition].
+//!
+//! If the test includes multiple [Composition]s with the same handle,
+//! attempting to reference one that has multiple occurrences will fail the test (e.g., panic).
+//!
+//! # WaitFor - Control how to determine when the container is ready
+//!
+//! Each [Composition] require a trait object of [WaitFor] whose method [wait_for_ready]
+//! must resolve until the container can become a [RunningContainer].
+//! This trait may be implemented and supplied to [Composition] through [with_wait_for].
 //!
 //! # Example
 //!
@@ -64,10 +84,14 @@
 //! [Image]: image/struct.Image.html
 //! [Composition]: composition/struct.Composition.html
 //! [with_container_name]: composition/struct.Composition.html#method.with_container_name
+//! [PendingContainer]: container/struct.Container.html
 //! [PullPolicy]: image/enum.PullPolicy.html
 //! [Remote]: image/struct.Remote.html
+//! [RunningContainer]: container/struct.Container.html
 //! [StartPolicy]: composition/enum.StartPolicy.html
 //! [WaitFor]: waitfor/trait.WaitFor.html
+//! [wait_for_ready]: waitfor/trait.WaitFor.html#method.wait_for_ready
+//! [with_wait_for]: waitfor/struct.Composition.html#method.with_wait_for
 //! [DockerTest]: test/struct.DockerTest.html
 
 pub mod composition;
