@@ -119,7 +119,6 @@ impl Container {
     }
 
     /// Returns the id of container.
-    #[cfg(test)]
     pub(crate) fn id(&self) -> &str {
         &self.id
     }
