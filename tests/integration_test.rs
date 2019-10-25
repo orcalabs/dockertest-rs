@@ -1,5 +1,4 @@
-use dockertest::image::{Image, PullPolicy, Source};
-use dockertest::{Composition, DockerTest};
+use dockertest::{Composition, DockerTest, Image, PullPolicy, Source};
 
 #[test]
 fn test_run_with_no_failure() {
