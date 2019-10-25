@@ -33,10 +33,10 @@ pub enum StartPolicy {
 ///
 /// # Examples
 /// ```rust
-/// # use crate::Composition;
-/// let hello = Composition::with_repository("hello-world")
+/// # use dockertest::Composition;
+/// let mut hello = Composition::with_repository("hello-world")
 ///     .with_container_name("my-hello-world")
-///     .with_cmd(vec!["can", "i", "override", "this?"]);
+///     .with_cmd(vec!["command".to_string(), "arg".to_string()]);
 /// hello.env("MY_ENV", "MY VALUE");
 /// hello.cmd("appended_to_original_cmd!");
 /// ```
