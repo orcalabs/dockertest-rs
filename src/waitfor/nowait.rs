@@ -1,6 +1,6 @@
 //! `WaitFor` implementation: `NoWait`.
 
-use crate::container::Container;
+use crate::container::{PendingContainer, RunningContainer};
 use crate::waitfor::WaitFor;
 use failure::Error;
 use futures::future::{self, Future};
@@ -12,9 +12,9 @@ pub struct NoWait {}
 impl WaitFor for NoWait {
     fn wait_for_ready(
         &self,
-        container: Container,
-    ) -> Box<dyn Future<Item = Container, Error = Error>> {
-        Box::new(future::ok(container))
+        container: PendingContainer,
+    ) -> Box<dyn Future<Item = RunningContainer, Error = Error>> {
+        Box::new(future::ok(container.into()))
     }
 }
 

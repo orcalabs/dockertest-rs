@@ -1,6 +1,6 @@
 //! `WaitFor` implementations regarding status changes.
 
-use crate::container::Container;
+use crate::container::{PendingContainer, RunningContainer};
 use crate::waitfor::WaitFor;
 use failure::{format_err, Error};
 use futures::future::{self, Future};
@@ -31,8 +31,8 @@ pub struct ExitedWait {
 impl WaitFor for RunningWait {
     fn wait_for_ready(
         &self,
-        container: Container,
-    ) -> Box<dyn Future<Item = Container, Error = Error>> {
+        container: PendingContainer,
+    ) -> Box<dyn Future<Item = RunningContainer, Error = Error>> {
         let liveness_future =
             wait_for_container_state(container, self.check_interval, self.max_checks, |state| {
                 state.running
@@ -45,8 +45,8 @@ impl WaitFor for RunningWait {
 impl WaitFor for ExitedWait {
     fn wait_for_ready(
         &self,
-        container: Container,
-    ) -> Box<dyn Future<Item = Container, Error = Error>> {
+        container: PendingContainer,
+    ) -> Box<dyn Future<Item = RunningContainer, Error = Error>> {
         let liveness_future =
             wait_for_container_state(container, self.check_interval, self.max_checks, |state| {
                 !state.running
@@ -57,13 +57,13 @@ impl WaitFor for ExitedWait {
 }
 
 fn wait_for_container_state(
-    container: Container,
+    container: PendingContainer,
     check_interval: i32,
     max_checks: i32,
     container_state_compare: fn(&shiplift::rep::State) -> bool,
-) -> impl Future<Item = Container, Error = Error> {
+) -> impl Future<Item = RunningContainer, Error = Error> {
     let client = shiplift::Docker::new();
-    let container_name = container.name().to_string();
+    let container_name = container.name.to_string();
 
     let desired_state = Arc::new(AtomicBool::new(false));
 
@@ -107,12 +107,12 @@ fn wait_for_container_state(
                 let s = desired_state_clone2.load(atomic::Ordering::SeqCst);
                 // The desired status has been reached and we can return Ok
                 if s {
-                    future::Either::A(future::ok(container))
+                    future::Either::A(future::ok(container.into()))
                 } else {
                     // The desired status was not reached and we return an error
                     future::Either::B(future::err(format_err!(
                         "container failed to reach desired container state, container name: {}",
-                        container.name()
+                        container.name
                     )))
                 }
             }

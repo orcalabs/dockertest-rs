@@ -1,4 +1,4 @@
-use crate::container::Container;
+use crate::container::{PendingContainer, RunningContainer};
 use crate::waitfor::WaitFor;
 use failure::{format_err, Error};
 use futures::future::{self, Future};
@@ -33,19 +33,19 @@ pub enum MessageSource {
 impl WaitFor for MessageWait {
     fn wait_for_ready(
         &self,
-        container: Container,
-    ) -> Box<dyn Future<Item = Container, Error = Error>> {
+        container: PendingContainer,
+    ) -> Box<dyn Future<Item = RunningContainer, Error = Error>> {
         let fut = wait_for_message(container, self.source, self.message.clone(), self.timeout);
         Box::new(fut)
     }
 }
 
 fn wait_for_message(
-    container: Container,
+    container: PendingContainer,
     source: MessageSource,
     msg: String,
     timeout: u16,
-) -> impl Future<Item = Container, Error = Error> {
+) -> impl Future<Item = RunningContainer, Error = Error> {
     // Construct LogOptionsBuilder
     let mut options_builder = LogsOptions::builder();
     options_builder.follow(true);
@@ -56,7 +56,7 @@ fn wait_for_message(
     let log_options = options_builder.build();
 
     let client = shiplift::Docker::new();
-    let stream = shiplift::Container::new(&client, container.id()).logs(&log_options);
+    let stream = shiplift::Container::new(&client, container.id.to_string()).logs(&log_options);
     let desired_state = Arc::new(AtomicBool::new(false));
     let ds_takewhile = desired_state.clone();
     let ds_then = desired_state.clone();
@@ -79,7 +79,7 @@ fn wait_for_message(
                 future::Either::B(future::err(format_err!("error occured on stream")))
             } else if ds_then.load(atomic::Ordering::SeqCst) {
                 // The message was found in the message source
-                future::Either::A(future::ok(container))
+                future::Either::A(future::ok(container.into()))
             } else {
                 // No such message was found, and the stream completed.
                 future::Either::B(future::err(format_err!("stream completed - no message")))

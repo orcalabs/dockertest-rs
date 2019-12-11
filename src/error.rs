@@ -23,10 +23,6 @@ impl DockerError {
         DockerError::from(DockerErrorKind::Daemon(s.as_ref().to_string()))
     }
 
-    pub(crate) fn teardown<T: AsRef<str>>(s: T) -> DockerError {
-        DockerError::from(DockerErrorKind::Teardown(s.as_ref().to_string()))
-    }
-
     pub(crate) fn pull<T: AsRef<str>>(s: T) -> DockerError {
         DockerError::from(DockerErrorKind::Pull(s.as_ref().to_string()))
     }

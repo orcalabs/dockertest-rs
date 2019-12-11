@@ -1,6 +1,6 @@
 //! Represent a concrete instance of an Image, before it is ran as a Container.
 
-use crate::container::Container;
+use crate::container::PendingContainer;
 use crate::error::{DockerError, DockerErrorKind};
 use crate::image::Image;
 use crate::waitfor::{NoWait, WaitFor};
@@ -15,7 +15,7 @@ use std::rc::Rc;
 /// A Strict policy will enforce that the Composition is started in the order
 /// it was added to DockerTest. A Relaxed policy will not enforce any ordering,
 /// all Compositions with a Relaxed policy will be started concurrently.
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub enum StartPolicy {
     /// Concurrently start the Container with other Relaxed instances.
     Relaxed,
@@ -215,11 +215,12 @@ impl Composition {
         self
     }
 
-    // Configurate the container's name with the given namespace as prefix
+    // QUESTION: Should this be consuming self??
+    // Configure the container's name with the given namespace as prefix
     // and suffix.
     // We do this to ensure that we do not have overlapping container names
     // and make it clear which containers are run by DockerTest.
-    pub(crate) fn configurate_container_name(self, namespace: &str, suffix: &str) -> Composition {
+    pub(crate) fn configure_container_name(self, namespace: &str, suffix: &str) -> Composition {
         let name = match &self.user_provided_container_name {
             None => self.image.repository(),
             Some(n) => n,
@@ -239,7 +240,7 @@ impl Composition {
     pub(crate) fn create<'a>(
         self,
         client: Rc<shiplift::Docker>,
-    ) -> impl Future<Item = Container, Error = DockerError> + 'a {
+    ) -> impl Future<Item = PendingContainer, Error = DockerError> + 'a {
         println!("starting container: {}", self.container_name);
 
         let wait_for_clone = self.wait.clone();
@@ -302,7 +303,7 @@ impl Composition {
                     .map_err(|e| DockerError::daemon(format!("failed to create container: {}", e)))
             })
             .and_then(move |container_info| {
-                let container = Container::new(
+                let container = PendingContainer::new(
                     &container_name_clone,
                     &container_info.id,
                     handle,
@@ -320,9 +321,12 @@ impl Composition {
         &self.image
     }
 
-    // Returns the StartPolicy of this Composition.
-    pub(crate) fn start_policy(&self) -> &StartPolicy {
-        &self.start_policy
+    /// Retrieve a copy of the applicable handle name for this Composition.
+    pub fn handle(&self) -> String {
+        match &self.user_provided_container_name {
+            None => self.image.repository().to_string(),
+            Some(n) => n.clone(),
+        }
     }
 }
 
