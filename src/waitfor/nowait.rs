@@ -20,7 +20,7 @@ impl WaitFor for NoWait {
 
 #[cfg(test)]
 mod tests {
-    use crate::container::Container;
+    use crate::container::PendingContainer;
     use crate::waitfor::{NoWait, WaitFor};
     use crate::StartPolicy;
     use shiplift;
@@ -38,7 +38,7 @@ mod tests {
         let id = "this_is_an_id".to_string();
         let handle_key = "this_is_a_handle_key";
 
-        let container = Container::new(
+        let container = PendingContainer::new(
             &container_name,
             &id,
             handle_key,

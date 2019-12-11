@@ -127,53 +127,16 @@ impl PendingContainer {
             .start()
             .map_err(|e| DockerError::startup(format!("failed to start container: {}", e)))
             .and_then(move |_| {
-                wait_for_clone
-                    .wait_for_ready(self_clone)
-                    .map_err(|e| {
-                        DockerError::startup(format!(
-                            "failed to wait for container to be ready: {}",
-                            e
-                        ))
-                    })
-                    .map(|_| ())
+                wait_for_clone.wait_for_ready(self_clone).map_err(|e| {
+                    DockerError::startup(format!("failed to wait for container to be ready: {}", e))
+                })
             })
-    }
-
-    /// Returns the name of container.
-    // QUESTION: What name?
-    pub(crate) fn name(&self) -> &str {
-        &self.name
-    }
-
-    /// Returns the handle_key of this container.
-    pub(crate) fn handle_key(&self) -> &str {
-        &self.handle_key
-    }
-
-    /// Returns a copy of the StartPolicy.
-    pub(crate) fn start_policy(&self) -> StartPolicy {
-        self.start_policy.clone()
-    }
-
-    /// Returns the id of container.
-    pub(crate) fn id(&self) -> &str {
-        &self.id
-    }
-
-    /// Forcefully removes the container.
-    /// This will leave the container object in an invalid state after
-    /// this method is invoked.
-    pub(crate) fn remove(&self) -> impl Future<Item = (), Error = DockerError> {
-        let ops = RmContainerOptions::builder().force(true).build();
-        shiplift::Container::new(&self.client, self.id.clone())
-            .remove(ops)
-            .map_err(|e| DockerError::daemon(format!("failed to remove container: {}", e)))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::container::Container;
+    use crate::container::{PendingContainer, RunningContainer};
     use crate::image::{Image, PullPolicy, Source};
     use crate::waitfor::{NoWait, WaitFor};
     use crate::{Composition, StartPolicy};
@@ -194,7 +157,7 @@ mod tests {
         let name = "this_is_a_container_name".to_string();
         let handle_key = "this_is_a_handle_key";
 
-        let container = Container::new(
+        let container = PendingContainer::new(
             &name,
             &id,
             handle_key,
@@ -205,18 +168,12 @@ mod tests {
         assert_eq!(id, container.id, "wrong id set in container creation");
         assert_eq!(name, container.name, "wrong name set in container creation");
         assert_eq!(
-            name,
-            container.name(),
+            name, container.name,
             "container name getter returns wrong value"
         );
         assert_eq!(
             handle_key, container.handle_key,
             "wrong handle_key set in container creation"
-        );
-        assert_eq!(
-            handle_key,
-            container.handle_key(),
-            "handle_key getter returns wrong value"
         );
     }
 
@@ -227,11 +184,11 @@ mod tests {
     impl WaitFor for TestWaitFor {
         fn wait_for_ready(
             &self,
-            container: Container,
-        ) -> Box<dyn Future<Item = Container, Error = Error>> {
+            container: PendingContainer,
+        ) -> Box<dyn Future<Item = RunningContainer, Error = Error>> {
             let mut invoked = self.invoked.write().expect("failed to take invoked lock");
             *invoked = true;
-            Box::new(future::ok(container))
+            Box::new(future::ok(container.into()))
         }
     }
     // Tests that the provided WaitFor trait object is invoked

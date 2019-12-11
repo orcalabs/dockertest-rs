@@ -540,20 +540,19 @@ fn generate_random_string(len: i32) -> String {
 
 #[cfg(test)]
 mod tests {
-    use crate::container::Container;
+    use super::Keeper;
+    use crate::container::{CleanupContainer, PendingContainer, RunningContainer};
     use crate::dockertest::{
-        resolve_container_handle_key, start_relaxed_containers, start_strict_containers,
-        wait_for_relaxed_containers,
+        start_relaxed_containers, start_strict_containers, wait_for_relaxed_containers,
     };
     use crate::image::{Image, PullPolicy, Source};
     use crate::test_utils;
-    use crate::waitfor::NoWait;
     use crate::{Composition, DockerTest, StartPolicy};
+
     use futures::future::Future;
     use futures::sink::Sink;
     use futures::stream::Stream;
     use futures::sync::mpsc;
-    use std::collections::HashMap;
     use std::rc::Rc;
     use tokio::runtime::current_thread;
 
@@ -562,15 +561,9 @@ mod tests {
     fn test_default_constructor() {
         let test = DockerTest::new();
         assert_eq!(
-            test.strict_instances.len(),
+            test.compositions.len(),
             0,
             "should not have any strict instances after creation"
-        );
-
-        assert_eq!(
-            test.relaxed_instances.len(),
-            0,
-            "should not have any relaxed instances after creation"
         );
 
         assert_eq!(
@@ -617,61 +610,22 @@ mod tests {
 
     // Tests that the pull_images method pulls images with strict startup policy
     #[test]
-    fn test_pull_images_strict() {
-        let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
-        let client = Rc::new(shiplift::Docker::new());
-
-        let mut test =
-            DockerTest::new().with_default_source(Source::DockerHub(PullPolicy::IfNotPresent));
-
+    fn test_pull_images() {
+        // meta
         let repository = "hello-world".to_string();
         let tag = "latest".to_string();
-
-        let image = Image::with_repository(&repository);
-        let composition = Composition::with_image(image).with_start_policy(StartPolicy::Strict);
-
-        test.add_composition(composition);
-
-        let res = rt.block_on(test_utils::delete_image_if_present(
-            &repository,
-            &tag,
-            &client,
-        ));
-        assert!(
-            res.is_ok(),
-            format!("failed to delete existing image {}", res.unwrap_err())
-        );
-
-        let output = test.pull_images(&mut rt);
-        assert!(output.is_ok(), format!("{}", output.unwrap_err()));
-
-        let exists = rt.block_on(test_utils::image_exists_locally(&repository, &tag, &client));
-        assert!(
-            exists.is_ok(),
-            format!(
-                "image should exists locally after pulling: {}",
-                exists.unwrap_err()
-            )
-        );
-    }
-
-    // Tests that the pull_images method pulls images with strict startup policy
-    #[test]
-    fn test_pull_images_relaxed() {
-        let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
-        let client = Rc::new(shiplift::Docker::new());
-
-        let mut test =
-            DockerTest::new().with_default_source(Source::DockerHub(PullPolicy::IfNotPresent));
-
-        let repository = "hello-world".to_string();
-        let tag = "latest".to_string();
-
         let image = Image::with_repository(&repository);
         let composition = Composition::with_image(image).with_start_policy(StartPolicy::Relaxed);
 
+        // setup
+        let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
+        let client = Rc::new(shiplift::Docker::new());
+        let mut test =
+            DockerTest::new().with_default_source(Source::DockerHub(PullPolicy::IfNotPresent));
         test.add_composition(composition);
+        let compositions: Keeper<Composition> = test.validate_composition_handlers();
 
+        // Ensure image is not present
         let res = rt.block_on(test_utils::delete_image_if_present(
             &repository,
             &tag,
@@ -682,9 +636,11 @@ mod tests {
             format!("failed to delete existing image {}", res.unwrap_err())
         );
 
-        let output = test.pull_images(&mut rt);
+        // Issue test operation
+        let output = test.pull_images(&mut rt, &compositions);
         assert!(output.is_ok(), format!("{}", output.unwrap_err()));
 
+        // Verify
         let exists = rt.block_on(test_utils::image_exists_locally(&repository, &tag, &client));
         assert!(
             exists.is_ok(),
@@ -698,49 +654,46 @@ mod tests {
     // Tests that the start_relaxed_containers function starts all the relaxed containers
     #[test]
     fn test_start_relaxed_containers() {
-        let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
-        let client = Rc::new(shiplift::Docker::new());
-
-        let mut test =
-            DockerTest::new().with_default_source(Source::DockerHub(PullPolicy::IfNotPresent));
-
+        // meta
         let repository = "hello-world".to_string();
         let image = Image::with_repository(&repository);
 
-        let res = rt.block_on(image.pull(client.clone(), test.source()));
-        assert!(
-            res.is_ok(),
-            "failed to pull relaxed container image: {}",
-            res.unwrap_err()
-        );
+        // setup
+        let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
+        let client = Rc::new(shiplift::Docker::new());
+        let mut test =
+            DockerTest::new().with_default_source(Source::DockerHub(PullPolicy::IfNotPresent));
+        rt.block_on(image.pull(client.clone(), test.source()))
+            .expect("failed to pull relaxed container image");
 
+        // Add Composition to test
         let image_id = image.retrieved_id();
-
         let composition = Composition::with_image(image).with_start_policy(StartPolicy::Relaxed);
-
         test.add_composition(composition);
 
+        // Ensure that that previous instances of the container is removed
         rt.block_on(test_utils::remove_containers(image_id, &client))
             .expect("failed to remove existing containers");
 
-        let mut containers: HashMap<String, Vec<Container>> = HashMap::new();
-
-        test.create_containers(&mut containers, &mut rt)
+        // Create the container and retrieve its new id
+        let compositions: Keeper<Composition> = test.validate_composition_handlers();
+        let mut containers: Keeper<PendingContainer> = test
+            .create_containers(&mut rt, compositions)
             .expect("failed to create containers");
-
-        let created_containers: Vec<&Container> = containers.values().flatten().collect();
-
-        let container_id = created_containers
+        let container_id = containers
+            .kept
             .first()
             .expect("failed to get container from vector")
-            .id()
+            .id
             .to_string();
+        let pending = std::mem::replace(&mut containers.kept, vec![]);
 
+        // Issue the test operation
         let (sender, receiver) = mpsc::channel(0);
+        start_relaxed_containers(&sender, &mut rt, pending);
 
-        start_relaxed_containers(&sender, &mut rt, created_containers);
-
-        let mut res = rt
+        // Wait for the operation to complete
+        let mut result = rt
             .block_on(
                 receiver
                     .take(1)
@@ -748,8 +701,7 @@ mod tests {
                     .map_err(|e| format!("failed to retrieve started relaxed container: {:?}", e)),
             )
             .expect("failed to retrieve result of startup procedure");
-
-        let result = res
+        let result = result
             .pop()
             .expect("failed to retrieve the first result from vector");
 
@@ -766,43 +718,45 @@ mod tests {
     }
 
     // Tests that the start_strict_containers method starts all the strict containers
+    // TODO: Add failure test for starting strict containers
     #[test]
     fn test_start_strict_containers() {
-        let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
-        let client = Rc::new(shiplift::Docker::new());
-
-        let mut test =
-            DockerTest::new().with_default_source(Source::DockerHub(PullPolicy::IfNotPresent));
-
+        // meta
         let repository = "hello-world".to_string();
         let image = Image::with_repository(&repository);
 
+        // setup
+        let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
+        let client = Rc::new(shiplift::Docker::new());
+        let mut test =
+            DockerTest::new().with_default_source(Source::DockerHub(PullPolicy::IfNotPresent));
         rt.block_on(image.pull(client.clone(), test.source()))
             .expect("failed to pull relaxed container image");
 
+        // Add Composition to test
         let image_id = image.retrieved_id();
-
         let composition = Composition::with_image(image).with_start_policy(StartPolicy::Strict);
-
         test.add_composition(composition);
 
+        // Ensure that that previous instances of the container is removed
         rt.block_on(test_utils::remove_containers(image_id, &client))
             .expect("failed to remove existing containers");
 
-        let mut containers: HashMap<String, Vec<Container>> = HashMap::new();
-
-        test.create_containers(&mut containers, &mut rt)
+        // Create the container and retrieve its new id
+        let compositions: Keeper<Composition> = test.validate_composition_handlers();
+        let mut containers: Keeper<PendingContainer> = test
+            .create_containers(&mut rt, compositions)
             .expect("failed to create containers");
-
-        let created_containers: Vec<&Container> = containers.values().flatten().collect();
-
-        let container_id = created_containers
+        let container_id = containers
+            .kept
             .first()
             .expect("failed to get container from vector")
-            .id()
+            .id
             .to_string();
+        let pending = std::mem::replace(&mut containers.kept, vec![]);
 
-        let res = start_strict_containers(created_containers, &mut rt);
+        // Issue the operation
+        let res = start_strict_containers(&mut rt, pending);
 
         assert!(res.is_ok(), format!("failed to start relaxed container"));
 
@@ -816,166 +770,88 @@ mod tests {
         );
     }
 
-    // Tests that the wait_for_relaxed_containers function waits for the results send through its
-    // input channel
+    // Tests that `wait_for_relaxed_containers` function successfully waits the set.
+    // TODO: Add failure test for starting relaxed containers
     #[test]
     fn test_wait_for_relaxed_container() {
         let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
-
         let (sender, receiver) = mpsc::channel(0);
+        let sender_ref = &sender;
 
-        let send_fut = sender
-            .send(Ok(()))
-            .map_err(|e| eprintln!("failed to send empty OK through channel {}", e))
-            .map(|_| ());
+        // Spawn X running containers and receive the result
+        for i in 1..10 {
+            let running = RunningContainer {
+                id: i.to_string(),
+                name: i.to_string(),
+            };
+            let sender = sender_ref.clone();
+            let send_fut = sender
+                .send(Ok(running))
+                .map_err(|e| eprintln!("failed to send empty OK through channel {}", e))
+                .map(|_| ());
 
-        rt.spawn(send_fut);
+            rt.spawn(send_fut);
+        }
 
-        let res = wait_for_relaxed_containers(receiver, &mut rt, 1);
+        let cleanup = (1..10)
+            .into_iter()
+            .map(|x| CleanupContainer { id: x.to_string() })
+            .collect();
+        let res = wait_for_relaxed_containers(&mut rt, receiver, cleanup);
         assert!(res.is_ok(), "failed to receive results through channel");
     }
 
     // Tests that the teardown method removes all containers
     #[test]
     fn test_teardown_with_exited_containers() {
-        let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
-        let client = Rc::new(shiplift::Docker::new());
-
-        let mut test =
-            DockerTest::new().with_default_source(Source::DockerHub(PullPolicy::IfNotPresent));
-
+        // meta
         let repository = "hello-world".to_string();
         let image = Image::with_repository(&repository);
 
-        let res = rt.block_on(image.pull(client.clone(), test.source()));
-        assert!(
-            res.is_ok(),
-            "failed to pull relaxed container image: {}",
-            res.unwrap_err()
-        );
+        // setup
+        let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
+        let client = Rc::new(shiplift::Docker::new());
+        let mut test =
+            DockerTest::new().with_default_source(Source::DockerHub(PullPolicy::IfNotPresent));
+        rt.block_on(image.pull(client.clone(), test.source()))
+            .expect("failed to pull relaxed container image");
 
+        // Add Composition to test
         let composition = Composition::with_image(image).with_start_policy(StartPolicy::Relaxed);
-
         test.add_composition(composition);
 
-        let mut containers: HashMap<String, Vec<Container>> = HashMap::new();
-
-        test.create_containers(&mut containers, &mut rt)
+        // Create
+        // XXX: This does NOT ensure that the created container does not already exist, no?
+        let compositions: Keeper<Composition> = test.validate_composition_handlers();
+        let pending: Keeper<PendingContainer> = test
+            .create_containers(&mut rt, compositions)
             .expect("failed to create containers");
 
-        test.start_containers(&containers, &mut rt)
+        // Start
+        let running = test
+            .start_containers(&mut rt, pending)
             .expect("failed to start containers");
 
-        let res = test.teardown(&mut rt, &containers);
-        assert!(
-            res.is_ok(),
-            "failed to teardown environment: {}",
-            res.unwrap_err()
-        );
+        // Issue the test operation
+        let cleanup: Vec<CleanupContainer> = running.kept.into_iter().map(|x| x.into()).collect();
+        let cleanup_copy = cleanup.clone();
+        test.teardown(&mut rt, cleanup);
+        // NOTE: Currently, teardown does not return a result
 
-        for (_, container_vec) in containers {
-            for c in container_vec {
-                let is_running = rt
-                    .block_on(test_utils::is_container_running(
-                        c.id().to_string(),
-                        &client,
-                    ))
-                    .expect("failed to check for container liveness");
-                assert!(
-                    !is_running,
-                    "container should not be running after teardown"
-                );
-            }
+        // Check that containers are not running
+        for c in cleanup_copy {
+            let is_running = rt
+                .block_on(test_utils::is_container_running(c.id.to_string(), &client))
+                .expect("failed to check for container liveness");
+            assert!(
+                !is_running,
+                "container should not be running after teardown"
+            );
         }
     }
 
-    // Tests that the resolve_container_handle_key method successfully resolves a handle_key to a
-    // container with only one container exisiting for that handle.
-    #[test]
-    fn test_resolve_container_handle_key_with_one_container() {
-        let client = Rc::new(shiplift::Docker::new());
-        let name = "this_is_a_name";
-        let id = "this_is_a_id";
-        let handle = "this_is_a_handle_key";
-
-        let container = Container::new(
-            name,
-            id,
-            handle,
-            StartPolicy::Relaxed,
-            Rc::new(NoWait {}),
-            client,
-        );
-        let container_id = container.id().to_string();
-
-        let mut containers = Vec::new();
-        containers.push(container);
-
-        let resolved_container = resolve_container_handle_key(&containers, handle);
-
-        assert!(
-            resolved_container.is_ok(),
-            "failed to retrieve container from vector with only one container"
-        );
-
-        let output = resolved_container.expect("failed to unwrap container");
-        assert_eq!(
-            output.id(),
-            container_id,
-            "resolved container_id does not match original container"
-        );
-    }
-
-    // Tests that the resolve_container_handle_key method fails to resolve a handle_key to a
-    // container when there exists multiple containers with the same handle_key.
-    #[test]
-    fn test_resolve_container_handle_key_with_two_container() {
-        let client = Rc::new(shiplift::Docker::new());
-        let name = "this_is_a_name";
-        let id = "this_is_a_id";
-        let handle = "this_is_a_handle_key";
-
-        let id2 = "this_is_a_id2";
-
-        let container = Container::new(
-            name,
-            id,
-            handle,
-            StartPolicy::Relaxed,
-            Rc::new(NoWait {}),
-            client.clone(),
-        );
-        let container2 = Container::new(
-            name,
-            id2,
-            handle,
-            StartPolicy::Relaxed,
-            Rc::new(NoWait {}),
-            client,
-        );
-
-        let mut containers = Vec::new();
-        containers.push(container);
-        containers.push(container2);
-
-        let resolved_container = resolve_container_handle_key(&containers, handle);
-        assert!(
-            resolved_container.is_err(),
-            "should not be able to resolve handle_key with multiple containers with same handle key"
-        );
-    }
-
-    // Tests that the resolve_container_handle_key method fails to resolve a handle_key to a
-    // container when there exists no containers for the given handle_key
-    #[test]
-    fn test_resolve_container_handle_key_with_zero_container() {
-        let handle = "this_is_a_handle_key";
-        let containers = Vec::new();
-
-        let resolved_container = resolve_container_handle_key(&containers, handle);
-        assert!(
-            resolved_container.is_err(),
-            "should not be able to resolve handle_key with no containers"
-        );
-    }
+    /*
+     * TODO: Implement tests for handle resolution on on the Keeper<T> object, especially after
+     * the convertion into RunningContainer.
+     */
 }

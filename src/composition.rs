@@ -679,7 +679,7 @@ mod tests {
 
         let expected_output = format!("{}-{}-{}", namespace, repository, suffix);
 
-        let new_instance = composition.configurate_container_name(&namespace, suffix);
+        let new_instance = composition.configure_container_name(&namespace, suffix);
 
         assert_eq!(
             new_instance.container_name, expected_output,
@@ -701,7 +701,7 @@ mod tests {
 
         let expected_output = format!("{}-{}-{}", namespace, container_name, suffix);
 
-        let new_instance = composition.configurate_container_name(&namespace, suffix);
+        let new_instance = composition.configure_container_name(&namespace, suffix);
 
         assert_eq!(
             new_instance.container_name, expected_output,
@@ -726,7 +726,7 @@ mod tests {
 
         let expected_output = format!("{}-{}-{}", namespace, expected_container_name, suffix);
 
-        let new_instance = composition.configurate_container_name(&namespace, suffix);
+        let new_instance = composition.configure_container_name(&namespace, suffix);
 
         assert_eq!(
             new_instance.container_name, expected_output,
@@ -749,7 +749,7 @@ mod tests {
 
         let expected_output = format!("{}-{}-{}", namespace, expected_container_name, suffix);
 
-        let new_instance = composition.configurate_container_name(&namespace, suffix);
+        let new_instance = composition.configure_container_name(&namespace, suffix);
 
         assert_eq!(
             new_instance.container_name, expected_output,
