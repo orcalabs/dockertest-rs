@@ -4,26 +4,25 @@ use dockertest::waitfor::{MessageSource, MessageWait};
 use dockertest::{Composition, DockerTest, PullPolicy, Source};
 use std::rc::Rc;
 
-#[ignore]
 #[test]
-fn test_connect_to_postgres_through_host_port() {
+fn test_connect_to_postgres_through_container_ip() {
     let source = Source::DockerHub(PullPolicy::IfNotPresent);
     let mut test = DockerTest::new().with_default_source(source);
 
     let repo = "postgres";
-    let mut postgres = Composition::with_repository(repo).with_wait_for(Rc::new(MessageWait {
+    let postgres = Composition::with_repository(repo).with_wait_for(Rc::new(MessageWait {
         message: "database system is ready to accept connections".to_string(),
         source: MessageSource::Stderr,
         timeout: 20,
     }));
-    postgres.port_map(5432, 5432);
 
     test.add_composition(postgres);
 
     test.run(|ops| {
         let container = ops.handle("postgres").expect("retrieve postgres container");
-        let host_port = container.host_port(5432);
-        let conn_string = format!("postgres://postgres:postgres@localhost:{}", host_port);
+        let ip = container.ip();
+        let port = "5432";
+        let conn_string = format!("postgres://postgres:postgres@{}:{}", ip, port);
         let pgconn = PgConnection::establish(&conn_string);
 
         assert!(
