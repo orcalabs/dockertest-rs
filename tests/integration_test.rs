@@ -1,4 +1,6 @@
+use dockertest::waitfor::RunningWait;
 use dockertest::{Composition, DockerTest, Image, PullPolicy, Source};
+use std::rc::Rc;
 
 #[test]
 fn test_run_with_no_failure() {
@@ -132,5 +134,27 @@ fn test_resolve_handle_with_identical_repository() {
         let handle = ops.handle(repo);
         assert!(handle.is_err(),
                 "should fail to retrieve handle for container when there exists multiple containers with the same repository name and no user_provided_container_name");
+    });
+}
+
+// Tests that the RunningWait implementation waits for the container to appear as running.
+#[test]
+fn test_ip_on_running_container() {
+    let source = Source::DockerHub(PullPolicy::IfNotPresent);
+    let mut test = DockerTest::new().with_default_source(source);
+
+    let repo = "luca3m/sleep";
+    let sleep_container = Composition::with_repository(repo).with_wait_for(Rc::new(RunningWait {
+        max_checks: 10,
+        check_interval: 1000,
+    }));
+
+    test.add_composition(sleep_container);
+
+    test.run(|ops| {
+        let handle = ops.handle(repo).expect("failed to get container handle");
+        // UNSPECIFIED is the default ip-addr.
+        // - we simply check that we have populated with something else.
+        assert_ne!(handle.ip(), &std::net::Ipv4Addr::UNSPECIFIED);
     });
 }
