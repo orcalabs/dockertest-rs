@@ -1,5 +1,7 @@
 use dockertest::waitfor::{ExitedWait, MessageSource, MessageWait, RunningWait, WaitFor};
-use dockertest::{Composition, Container, DockerTest, PullPolicy, Source, StartPolicy};
+use dockertest::{
+    Composition, DockerTest, PendingContainer, PullPolicy, RunningContainer, Source, StartPolicy,
+};
 use failure::{format_err, Error};
 use futures::future::{self, Future};
 use std::rc::Rc;
@@ -10,10 +12,21 @@ struct FailWait {}
 impl WaitFor for FailWait {
     fn wait_for_ready(
         &self,
-        _container: Container,
-    ) -> Box<dyn Future<Item = Container, Error = Error>> {
+        _container: PendingContainer,
+    ) -> Box<dyn Future<Item = RunningContainer, Error = Error>> {
         Box::new(future::err(format_err!("this FailWait shall fail")))
     }
+}
+
+/// Returns whether the container is in a running state.
+pub fn is_running(id: String) -> impl Future<Item = bool, Error = Error> {
+    let client = shiplift::Docker::new();
+    client
+        .containers()
+        .get(&id)
+        .inspect()
+        .map_err(|e| format_err!("inspecting container: {}", e))
+        .and_then(|c| future::ok(c.state.running))
 }
 
 // Tests that the RunningWait implementation waits for the container to appear as running.
@@ -36,7 +49,7 @@ fn test_running_wait_for() {
         let mut rt = current_thread::Runtime::new().expect("failed to start runtime");
 
         let is_running = rt
-            .block_on(handle.is_running())
+            .block_on(is_running(handle.id().to_string()))
             .expect("failed to get container state");
 
         assert!(
@@ -66,7 +79,7 @@ fn test_exit_wait_for() {
         let mut rt = current_thread::Runtime::new().expect("failed to start runtime");
 
         let is_running = rt
-            .block_on(handle.is_running())
+            .block_on(is_running(handle.id().to_string()))
             .expect("failed to get container state");
 
         assert!(

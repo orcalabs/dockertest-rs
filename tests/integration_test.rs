@@ -33,26 +33,6 @@ fn test_run_with_failure() {
     });
 }
 
-#[test]
-fn test_multiple_runs() {
-    let source = Source::DockerHub(PullPolicy::IfNotPresent);
-    let mut test = DockerTest::new().with_default_source(source);
-
-    let repo = "hello-world".to_string();
-    let img = Image::with_repository(&repo);
-    let hello_world = Composition::with_image(img);
-
-    test.add_composition(hello_world);
-
-    test.run(|_ops| {
-        assert!(true);
-    });
-
-    test.run(|_ops| {
-        assert!(true);
-    });
-}
-
 // Tests that we can retrieve the handle of a container by providing the repository as the key
 #[test]
 fn test_resolve_handle_with_repository_as_key() {

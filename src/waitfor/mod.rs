@@ -1,7 +1,7 @@
 //! Contains `WaitFor` trait used to determine when a PendingContainer has started
 //! and all the default implementations of it.
 
-use crate::container::Container;
+use crate::container::{PendingContainer, RunningContainer};
 use failure::Error;
 use futures::future::Future;
 
@@ -18,8 +18,10 @@ pub trait WaitFor {
     /// Method implementation should return a future that resolves once the condition
     /// described by the implementing structure is fulfilled. Once this successfully resolves,
     /// the container is marked as ready.
+    ///
+    // TODO: Implement error propagation with the container id that failed for cleanup
     fn wait_for_ready(
         &self,
-        container: Container,
-    ) -> Box<dyn Future<Item = Container, Error = Error>>;
+        container: PendingContainer,
+    ) -> Box<dyn Future<Item = RunningContainer, Error = Error>>;
 }

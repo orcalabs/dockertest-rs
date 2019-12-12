@@ -3,31 +3,26 @@
 use crate::error::DockerError;
 use crate::waitfor::WaitFor;
 use crate::StartPolicy;
-use futures::future::{self, Future};
-use shiplift;
-use shiplift::builder::RmContainerOptions;
+use futures::future::Future;
 use std::rc::Rc;
 
-// TODO: do host_port mapping
-/// Represents a docker container.
-/// This object lives in two phases:
-/// * Startup -> ensure that the container is ready once its `WaitFor` has successfully completed.
-/// * Test body -> container is active and interactable according to its respective `WaitFor`
-/// clause.
+/// Represent a docker container object in a pending phase between
+/// it being created on the daemon, but may not be running.
 ///
-// The reason the container represents both a pending and running container is that
-// we must ensure that _all_ containers are running, and therefore must be able to teardown
-// existing containers if one fails.
+/// This object is an implementation detail of `dockertest-rs` and is only
+/// publicly exposed due to the public `WaitFor` trait which is responsible
+/// of performing the into conversion from `PendingContainer` to `RunningContainer`.
+// No methods on this structure, not fields, shall be publicly exposed.
 #[derive(Clone)]
-pub struct Container {
+pub struct PendingContainer {
     /// The docker client
     client: Rc<shiplift::Docker>,
 
     /// Name of the container, defaults to the repository name of the image.
-    name: String,
+    pub(crate) name: String,
 
     /// Id of the running container.
-    id: String,
+    pub(crate) id: String,
 
     /// The key used to retrieve the handle to this container from DockerTest.
     /// The user can set this directly by specifying container_name in the Composition builder.
@@ -35,13 +30,72 @@ pub struct Container {
     handle_key: String,
 
     /// The StartPolicy of this Container, is provided from its Composition.
-    start_policy: StartPolicy,
+    pub(crate) start_policy: StartPolicy,
 
     /// Trait implementing how to wait for the container to startup.
     wait_for: Rc<dyn WaitFor>,
 }
 
-impl Container {
+/// Represent a docker container in running state and available to the test body.
+// Fields within this structure are pub(crate) only for testability
+#[derive(Clone, Debug)]
+pub struct RunningContainer {
+    /// The unique docker container identifier assigned at creation.
+    pub(crate) id: String,
+    /// The generated docker name for this running container.
+    pub(crate) name: String,
+}
+
+/// A Container representation of a created or started container, that requires us to
+/// perform cleanup on it.
+///
+/// This structure is an implementation detail of `dockertest-rs` and shall NOT be publicly
+/// exposed.
+#[derive(Clone, Debug)]
+pub(crate) struct CleanupContainer {
+    pub id: String,
+}
+
+impl From<PendingContainer> for RunningContainer {
+    fn from(container: PendingContainer) -> RunningContainer {
+        RunningContainer {
+            id: container.id,
+            name: container.name,
+        }
+    }
+}
+
+impl From<PendingContainer> for CleanupContainer {
+    fn from(container: PendingContainer) -> CleanupContainer {
+        CleanupContainer { id: container.id }
+    }
+}
+
+impl From<RunningContainer> for CleanupContainer {
+    fn from(container: RunningContainer) -> CleanupContainer {
+        CleanupContainer { id: container.id }
+    }
+}
+
+impl RunningContainer {
+    /// Returns which host port the given container port is mapped to.
+    pub fn host_port(&self, container_port: u32) -> u32 {
+        // TODO: Implement host-port mapping.
+        container_port
+    }
+
+    /// Return the generated name on the docker container object for this `RunningContainer`.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Return the docker assigned identifier for this `RunningContainer`.
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+}
+
+impl PendingContainer {
     /// Creates a new Container object with the given values.
     pub(crate) fn new<T: ToString, R: ToString, S: ToString>(
         name: T,
@@ -50,8 +104,8 @@ impl Container {
         start_policy: StartPolicy,
         wait_for: Rc<dyn WaitFor>,
         client: Rc<shiplift::Docker>,
-    ) -> Container {
-        Container {
+    ) -> PendingContainer {
+        PendingContainer {
             client,
             name: name.to_string(),
             id: id.to_string(),
@@ -61,27 +115,10 @@ impl Container {
         }
     }
 
-    /// Returns which host port the given container port is mapped to.
-    pub fn host_port(&self, container_port: u32) -> u32 {
-        // TODO: Implement host-port mapping.
-        container_port
-    }
-
-    // QUESTION: Why is this public?
-    /// Returns whether the container is in a running state.
-    pub fn is_running(&self) -> impl Future<Item = bool, Error = DockerError> {
-        self.client
-            .containers()
-            .get(&self.name)
-            .inspect()
-            .map_err(|e| {
-                DockerError::daemon(format!("failed to get container state from daemon: {}", e))
-            })
-            .and_then(|c| future::ok(c.state.running))
-    }
-
-    ///
-    pub(crate) fn start(&self) -> impl Future<Item = (), Error = DockerError> {
+    /// Run the start command and initiate the WaitFor condition.
+    /// Once the PendingContainer is successfully started and the WaitFor condition
+    /// has been achived, the RunningContainer is returned.
+    pub(crate) fn start(self) -> impl Future<Item = RunningContainer, Error = DockerError> {
         let wait_for_clone = self.wait_for.clone();
         let self_clone = self.clone();
         self.client
@@ -90,53 +127,16 @@ impl Container {
             .start()
             .map_err(|e| DockerError::startup(format!("failed to start container: {}", e)))
             .and_then(move |_| {
-                wait_for_clone
-                    .wait_for_ready(self_clone)
-                    .map_err(|e| {
-                        DockerError::startup(format!(
-                            "failed to wait for container to be ready: {}",
-                            e
-                        ))
-                    })
-                    .map(|_| ())
+                wait_for_clone.wait_for_ready(self_clone).map_err(|e| {
+                    DockerError::startup(format!("failed to wait for container to be ready: {}", e))
+                })
             })
-    }
-
-    /// Returns the name of container.
-    // QUESTION: What name?
-    pub(crate) fn name(&self) -> &str {
-        &self.name
-    }
-
-    /// Returns the handle_key of this container.
-    pub(crate) fn handle_key(&self) -> &str {
-        &self.handle_key
-    }
-
-    /// Returns a copy of the StartPolicy.
-    pub(crate) fn start_policy(&self) -> StartPolicy {
-        self.start_policy.clone()
-    }
-
-    /// Returns the id of container.
-    pub(crate) fn id(&self) -> &str {
-        &self.id
-    }
-
-    /// Forcefully removes the container.
-    /// This will leave the container object in an invalid state after
-    /// this method is invoked.
-    pub(crate) fn remove(&self) -> impl Future<Item = (), Error = DockerError> {
-        let ops = RmContainerOptions::builder().force(true).build();
-        shiplift::Container::new(&self.client, self.id.clone())
-            .remove(ops)
-            .map_err(|e| DockerError::daemon(format!("failed to remove container: {}", e)))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::container::Container;
+    use crate::container::{PendingContainer, RunningContainer};
     use crate::image::{Image, PullPolicy, Source};
     use crate::waitfor::{NoWait, WaitFor};
     use crate::{Composition, StartPolicy};
@@ -157,7 +157,7 @@ mod tests {
         let name = "this_is_a_container_name".to_string();
         let handle_key = "this_is_a_handle_key";
 
-        let container = Container::new(
+        let container = PendingContainer::new(
             &name,
             &id,
             handle_key,
@@ -168,18 +168,12 @@ mod tests {
         assert_eq!(id, container.id, "wrong id set in container creation");
         assert_eq!(name, container.name, "wrong name set in container creation");
         assert_eq!(
-            name,
-            container.name(),
+            name, container.name,
             "container name getter returns wrong value"
         );
         assert_eq!(
             handle_key, container.handle_key,
             "wrong handle_key set in container creation"
-        );
-        assert_eq!(
-            handle_key,
-            container.handle_key(),
-            "handle_key getter returns wrong value"
         );
     }
 
@@ -190,11 +184,11 @@ mod tests {
     impl WaitFor for TestWaitFor {
         fn wait_for_ready(
             &self,
-            container: Container,
-        ) -> Box<dyn Future<Item = Container, Error = Error>> {
+            container: PendingContainer,
+        ) -> Box<dyn Future<Item = RunningContainer, Error = Error>> {
             let mut invoked = self.invoked.write().expect("failed to take invoked lock");
             *invoked = true;
-            Box::new(future::ok(container))
+            Box::new(future::ok(container.into()))
         }
     }
     // Tests that the provided WaitFor trait object is invoked

@@ -1,6 +1,6 @@
 //! `WaitFor` implementation: `NoWait`.
 
-use crate::container::Container;
+use crate::container::{PendingContainer, RunningContainer};
 use crate::waitfor::WaitFor;
 use failure::Error;
 use futures::future::{self, Future};
@@ -12,15 +12,15 @@ pub struct NoWait {}
 impl WaitFor for NoWait {
     fn wait_for_ready(
         &self,
-        container: Container,
-    ) -> Box<dyn Future<Item = Container, Error = Error>> {
-        Box::new(future::ok(container))
+        container: PendingContainer,
+    ) -> Box<dyn Future<Item = RunningContainer, Error = Error>> {
+        Box::new(future::ok(container.into()))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::container::Container;
+    use crate::container::PendingContainer;
     use crate::waitfor::{NoWait, WaitFor};
     use crate::StartPolicy;
     use shiplift;
@@ -38,7 +38,7 @@ mod tests {
         let id = "this_is_an_id".to_string();
         let handle_key = "this_is_a_handle_key";
 
-        let container = Container::new(
+        let container = PendingContainer::new(
             &container_name,
             &id,
             handle_key,

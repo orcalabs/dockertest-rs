@@ -106,6 +106,6 @@ pub mod waitfor;
 mod test_utils;
 
 pub use crate::composition::{Composition, StartPolicy};
-pub use crate::container::Container;
+pub use crate::container::{PendingContainer, RunningContainer};
 pub use crate::dockertest::{DockerOperations, DockerTest};
 pub use crate::image::{Image, PullPolicy, Remote, Source};
