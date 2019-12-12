@@ -41,8 +41,8 @@ pub enum StartPolicy {
 /// hello.cmd("appended_to_original_cmd!");
 /// ```
 ///
-/// [Image]: ../struct.Image.html
-/// [RunningContainer]: ../struct.Container.html
+/// [Image]: struct.Image.html
+/// [RunningContainer]: struct.RunningContainer.html
 #[derive(Clone)]
 pub struct Composition {
     /// User provided name of the container.
@@ -92,7 +92,7 @@ impl Composition {
     /// This is the shortcut method of constructing a Composition.
     /// See [with_image] to create one with a provided [Image].
     ///
-    /// [Image]: ../struct.Image.html
+    /// [Image]: struct.Image.html
     /// [with_image]: struct.Composition.html#method.with_image
     pub fn with_repository<T: ToString>(repository: T) -> Composition {
         let copy = repository.to_string();
@@ -143,7 +143,7 @@ impl Composition {
     ///
     /// This method replaces the entire existing env map provided.
     ///
-    /// [RunningContainer]: ../struct.Container.html
+    /// [RunningContainer]: struct.RunningContainer.html
     pub fn with_env(self, env: HashMap<String, String>) -> Composition {
         Composition { env, ..self }
     }
@@ -154,7 +154,7 @@ impl Composition {
     /// the command within the [Image] will be used, if any.
     ///
     /// [Composition]: struct.Composition.html
-    /// [Image]: ../struct.Image.html
+    /// [Image]: struct.Image.html
     pub fn with_cmd(self, cmd: Vec<String>) -> Composition {
         Composition { cmd, ..self }
     }
@@ -177,7 +177,7 @@ impl Composition {
     ///
     /// The default WaitFor implementation used is [RunningWait].
     ///
-    /// [RunningWait]: ../waitfor/struct.RunningWait.html
+    /// [RunningWait]: waitfor/struct.RunningWait.html
     pub fn with_wait_for(self, wait: Rc<dyn WaitFor>) -> Composition {
         Composition { wait, ..self }
     }
