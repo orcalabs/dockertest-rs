@@ -263,11 +263,11 @@ impl DockerTest {
         // Therefore, we copy the set of ids in the ordered `kept` vector, and at the end
         // right before we return Keeper::<RunningContainer>, we sort the `kept` vector
         // on this same predicate.
-        let mut original_ordered_ids = vec![];
-        pending_containers
+        let original_ordered_ids = pending_containers
             .kept
             .iter()
-            .for_each(|c| original_ordered_ids.push(c.id.to_string()));
+            .map(|c| c.id.to_string())
+            .collect();
 
         // Replace the `kept` vector into the stack frame
         let pending = std::mem::replace(&mut pending_containers.kept, vec![]);
