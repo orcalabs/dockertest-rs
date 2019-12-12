@@ -44,6 +44,7 @@ pub struct RunningContainer {
     pub(crate) id: String,
     /// The generated docker name for this running container.
     pub(crate) name: String,
+    pub(crate) ip: std::net::Ipv4Addr,
 }
 
 /// A Container representation of a created or started container, that requires us to
@@ -61,6 +62,7 @@ impl From<PendingContainer> for RunningContainer {
         RunningContainer {
             id: container.id,
             name: container.name,
+            ip: std::net::Ipv4Addr::UNSPECIFIED,
         }
     }
 }
@@ -92,6 +94,24 @@ impl RunningContainer {
     /// Return the docker assigned identifier for this `RunningContainer`.
     pub fn id(&self) -> &str {
         &self.id
+    }
+
+    /// Return the IPv4 address for this container on the local docker network adapter.
+    /// Use this address to contact the `RunningContainer` in the test body.
+    ///
+    /// This property is retrieved from the docker daemon prior to entering the test body.
+    /// It is cached internally and not updated between invocations. This means that
+    /// if the docker container enters an exited state, this function will still return
+    /// the original ip assigned to the container.
+    ///
+    /// If the [ExitedWait] for strategy is employed on the `Composition`, the `RunningContainer`
+    /// will, somewhat contradictory to its name, be in an exited status when the test body
+    /// is entered. For this scenarion, this function will return [Ipv4Addr::UNSPECIFIED].
+    ///
+    /// [Ipv4Addr::UNSPECIFIED]: https://doc.rust-lang.org/std/net/struct.Ipv4Addr.html#associatedconstant.UNSPECIFIED
+    /// [ExitedWait]: waitfor/struct.ExitedWait.html
+    pub fn ip(&self) -> &std::net::Ipv4Addr {
+        &self.ip
     }
 }
 
