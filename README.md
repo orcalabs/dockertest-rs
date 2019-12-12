@@ -4,54 +4,45 @@ Run docker containers in your Rust integration tests.
 
 This crate provides the following features for your docker testing needs:
 
-* Ensure one or more docker containers are running before your test executes.
-* Teardown each started container after test is terminated (both successfully and on test failure).
-* Control origin and management of `Image`s used for your docker containers and the pull policy thereof.
-Supported sources are:
-  * Local - must be present on the host machine.
-  * DockerHub - fetch from the offical DockerHub.
-  * Custom - custom docker registry. (Currently not implemented)
-
-## Architecture
-
-This shows the various stages of components in dockertest-rs.
-
-```
-Image -> Composition -> PendingContainer -> RunningContainer
-```
-
-An `Image` represents a built image from docker that we may attempt to start a container of.
-
-A `Composition` is a specific instance of an `Image`, with its runtime parameters supplied.
-
-The `PendingContainer` represents a docker container who is either built or running,
-but not yet in the control of the test body.
-
-Once the test body executes, all containers will be available as `RunningContainer`s and
-all operations present on this object will be available to the test body.
+* Ensure docker containers are invoked and running according to `WaitFor` strategy.
+ * Customize your own or use one of the batteries included.
+* Interact with the `RunningContainer` in the test body through its `ip` address.
+* Teardown each started container after test is terminated - both successfully and on test failure.
 
 ## Example
+
+The canonical example and motivation for this crate can be expressed with the following
+use-case example - host a database used by your test in a container, which is fresh between each test.
 
  ```rust
 use diesel::pg::PgConnection;
 use diesel::prelude::*;
-use dockertest::image::{PullPolicy, Source};
-use dockertest::{Composition, DockerTest};
+use dockertest::waitfor::{MessageSource, MessageWait};
+use dockertest::{Composition, DockerTest, PullPolicy, Source};
+use std::rc::Rc;
 
+// Define our test
 let source = Source::DockerHub(PullPolicy::IfNotPresent);
 let mut test = DockerTest::new().with_default_source(source);
 
-let repo = "postgres";
-let postgres = Composition::with_repository(repo);
-
+// Define our Composition - the Image we will start and end up as our RunningContainer
+let postgres = Composition::with_repository("postgres").with_wait_for(Rc::new(MessageWait {
+    message: "database system is ready to accept connections".to_string(),
+    source: MessageSource::Stderr,
+    timeout: 20,
+}));
 test.add_composition(postgres);
 
+// Run the test body
 test.run(|ops| {
     let container = ops.handle("postgres").expect("retrieve postgres container");
-    let host_port = container.host_port(5432);
-    let conn_string = format!("postgres://postgres:postgres@localhost:{}", host_port);
+    let ip = container.ip();
+    // This is the default postgres serve port
+    let port = "5432";
+    let conn_string = format!("postgres://postgres:postgres@{}:{}", ip, port);
     let pgconn = PgConnection::establish(&conn_string);
 
+    // Perform your database operations here
     assert!(
         pgconn.is_ok(),
         "failed to establish connection to postgres docker"
@@ -75,12 +66,5 @@ cargo test -- --test-threads=1
 ```
 
 Caveats that may fail tests:
-* Port `5432` is already taken for postgres on the host.
 * Exited `hello-world` containers on the system. This will currently make removing
-old images fail and many tests will fail. This is an area we need to improve.
-
-## TODO:
-* Document limits when spawning stuff in test body.
-* Document handle concept.
-* Break up Container into PendingContainer and RunningContainer.
-* Document and implement port mapping for random host port assignment.
+old images fail and many tests will fail.
