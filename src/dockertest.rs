@@ -161,7 +161,7 @@ impl DockerTest {
             });
 
         // Start the PendingContainers
-        let running_containers: Keeper<RunningContainer> = self
+        let mut running_containers: Keeper<RunningContainer> = self
             .start_containers(&mut rt, pending_containers)
             .unwrap_or_else(|e| {
                 self.teardown(&mut rt, e);
@@ -176,6 +176,33 @@ impl DockerTest {
                 id: x.id().to_string(),
             })
             .collect();
+
+        // Lets inspect each container for their ip address
+        for c in running_containers.kept.iter_mut() {
+            let res = rt.block_on(
+                shiplift::Container::new(&self.client, c.id.to_string())
+                    .inspect()
+                    .map_err(|e| DockerError::daemon(format!("failed to inspect container: {}", e)))
+                    .and_then(|details| {
+                        future::ok(
+                            details
+                                .network_settings
+                                .ip_address
+                                .parse::<std::net::Ipv4Addr>()
+                                // Exited containers will not have an IP address
+                                .unwrap_or_else(|_| std::net::Ipv4Addr::UNSPECIFIED),
+                        )
+                    }),
+            );
+            match res {
+                Ok(ip) => c.ip = ip,
+                Err(e) => {
+                    // This error is extraordinary - worth terminating everything.
+                    self.teardown(&mut rt, cleanup_containers);
+                    panic!(format!("{}", e));
+                }
+            }
+        }
 
         // We are ready to invoke the test body now
         let ops = DockerOperations {
@@ -783,6 +810,7 @@ mod tests {
             let running = RunningContainer {
                 id: i.to_string(),
                 name: i.to_string(),
+                ip: std::net::Ipv4Addr::UNSPECIFIED,
             };
             let sender = sender_ref.clone();
             let send_fut = sender
