@@ -11,7 +11,7 @@
 //!  * Support multiple containers from same image, with different configurations.
 //! * Retrieve [Image] from remote source according to [PullPolicy].
 //! * Support multiple [Remote] registries, which can be individually assigned to [Image].
-//! * Dictate how each [Container] is created and operated from an [Image]
+//! * Dictate how each [RunningContainer] is created and operated from an [Image]
 //!   through a [Composition].
 //!  * This allows us to have muliple containers with the same Image,
 //!    but with different start conditions.
@@ -25,13 +25,10 @@
 //! Once the [DockerTest] test is `run`, the provided closure will be ran once
 //! all predicates for each supplied [Composition] has successfully been fulfilled.
 //! The closure is provided with one [DockerOperations] parameter, allowing the test body
-//! to interact with [DockerTest] and each individual [Container].
-//! The reference to each [Container] is queried through a handle, which is the user provided
-//! container name, specified in [Composition] through [with_container_name].
-//!
-//! Once the reference to a [Container] is retrieved, one may call all methods public methods
-//! to interact with it. This includes retrieving the [host_port] that a port in the [Container]
-//! is mapped to on the host.
+//! to interact with [DockerTest] and each individual [RunningContainer].
+//! The reference to each [RunningContainer] is queried through a handle, which is the user-provided
+//! container name, specified in [Composition] through [with_container_name]. See the Handle
+//! section.
 //!
 //! # Handle - referencing the same container throughout your test
 //!
@@ -41,12 +38,12 @@
 //!
 //! By default, the handle is auto-assigned to be the repository name of the [Composition].
 //!
-//! The user may change the `handle` by changing the container name (as seen from the user
+//! The user may change the handle by changing the container name (as seen from the user
 //! - the final container name will be disambiguated for each _dockertest_) through the
 //! [with_container_name] builder method on [Composition].
 //!
 //! If the test includes multiple [Composition]s with the same handle,
-//! attempting to reference one that has multiple occurrences will fail the test (e.g., panic).
+//! attempting to reference one that has multiple occurrences will fail the test at runtime.
 //!
 //! # WaitFor - Control how to determine when the container is ready
 //!
@@ -54,23 +51,43 @@
 //! must resolve until the container can become a [RunningContainer].
 //! This trait may be implemented and supplied to [Composition] through [with_wait_for].
 //!
+//! The batteries included implementations are:
+//! * [RunningWait] - wait for the container to report _running_ status.
+//! * [ExitedWait] - wait for the container to report _exited_ status.
+//! * [NoWait] - don't wait for anything
+//! * [MessageWait] - wait for the following message to appear in the log stream.
+//!
 //! # Example
 //!
-//! ```rust,ignore
+//! ```rust
+//! use diesel::pg::PgConnection;
+//! use diesel::prelude::*;
+//! use dockertest::waitfor::{MessageSource, MessageWait};
+//! use dockertest::{Composition, DockerTest, PullPolicy, Source};
+//! use std::rc::Rc;
+//!
+//! // Define our test
 //! let source = Source::DockerHub(PullPolicy::IfNotPresent);
 //! let mut test = DockerTest::new().with_default_source(source);
 //!
-//! let repo = "postgres";
-//! let postgres = Composition::with_repository(repo);
+//! // Define our Composition - the Image we will start and end up as our RunningContainer
+//! let postgres = Composition::with_repository("postgres").with_wait_for(Rc::new(MessageWait {
+//!     message: "database system is ready to accept connections".to_string(),
+//!     source: MessageSource::Stderr,
+//!     timeout: 20,
+//! }));
+//! test.add_composition(postgres);
 //!
-//! test.add_instance(postgres);
-//!
+//! // Run the test body
 //! test.run(|ops| {
 //!     let container = ops.handle("postgres").expect("retrieve postgres container");
-//!     let host_port = container.host_port(5432);
-//!     let conn_string = format!("postgres://postgres:postgres@localhost:{}", host_port);
+//!     let ip = container.ip();
+//!     // This is the default postgres serve port
+//!     let port = "5432";
+//!     let conn_string = format!("postgres://postgres:postgres@{}:{}", ip, port);
 //!     let pgconn = PgConnection::establish(&conn_string);
 //!
+//!     // Perform your database operations here
 //!     assert!(
 //!         pgconn.is_ok(),
 //!         "failed to establish connection to postgres docker"
@@ -78,20 +95,23 @@
 //! });
 //! ```
 //!
-//! [Container]: struct.Container.html
-//! [host_port]: struct.Container.html#method.host_port
+//! [Composition]: struct.Composition.html
 //! [DockerOperations]: struct.DockerOperations.html
 //! [DockerTest]: struct.DockerTest.html
+//! [ExitedWait]: waitfor/struct.ExitedWait.html
+//! [host_port]: struct.Container.html#method.host_port
 //! [Image]: struct.Image.html
-//! [Composition]: struct.Composition.html
-//! [with_container_name]: struct.Composition.html#method.with_container_name
+//! [MessageWait]: waitfor/struct.MessageWait.html
+//! [NoWait]: waitfor/struct.NoWait.html
 //! [PendingContainer]: struct.Container.html
 //! [PullPolicy]: enum.PullPolicy.html
 //! [Remote]: struct.Remote.html
-//! [RunningContainer]: struct.Container.html
+//! [RunningContainer]: struct.RunningContainer.html
+//! [RunningWait]: waitfor/struct.RunningWait.html
 //! [StartPolicy]: enum.StartPolicy.html
 //! [WaitFor]: waitfor/trait.WaitFor.html
 //! [wait_for_ready]: waitfor/trait.WaitFor.html#method.wait_for_ready
+//! [with_container_name]: struct.Composition.html#method.with_container_name
 //! [with_wait_for]: struct.Composition.html#method.with_wait_for
 
 mod composition;
