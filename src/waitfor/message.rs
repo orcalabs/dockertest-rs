@@ -59,7 +59,7 @@ fn wait_for_message(
     let stream = shiplift::Container::new(&client, container.id.to_string()).logs(&log_options);
     let desired_state = Arc::new(AtomicBool::new(false));
     let ds_takewhile = desired_state.clone();
-    let ds_then = desired_state.clone();
+    let ds_then = desired_state;
 
     let workfut = stream
         .take_while(move |chunk| {

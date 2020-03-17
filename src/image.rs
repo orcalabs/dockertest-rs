@@ -126,7 +126,7 @@ impl Image {
             .inspect()
             .and_then(move |details| {
                 let mut id = self.id.write().expect("failed to get id lock");
-                *id = details.id.clone();
+                *id = details.id;
                 future::ok(())
             })
             .map_err(|e| DockerError::pull(format!("failed to retrieve id of image: {}", e)))

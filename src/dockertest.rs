@@ -9,7 +9,7 @@ use futures::sink::Sink;
 use futures::stream::Stream;
 use futures::sync::mpsc;
 use rand::{self, Rng};
-use shiplift::builder::RmContainerOptions;
+use shiplift::builder::{RmContainerOptions, VolumeCreateOptions};
 use std::clone::Clone;
 use std::collections::{HashMap, HashSet};
 use std::panic;
@@ -33,6 +33,8 @@ pub struct DockerTest {
     /// The default pull source to use for all images.
     /// Images with a specified source will override this default.
     default_source: Source,
+    /// All user specified named volumes, will be created on dockertest startup.
+    volumes: Vec<String>,
 }
 
 impl Default for DockerTest {
@@ -42,6 +44,7 @@ impl Default for DockerTest {
             compositions: Vec::new(),
             namespace: "dockertest-rs".to_string(),
             client: Rc::new(shiplift::Docker::new()),
+            volumes: Vec::new(),
         }
     }
 }
@@ -129,6 +132,16 @@ impl DockerTest {
         }
     }
 
+    /// Creates the given named volumes.
+    /// Each of these volumes can be used by any container by specifying the volume
+    /// name in Composition creation.
+    pub fn with_named_volumes(self, names: Vec<String>) -> DockerTest {
+        DockerTest {
+            volumes: names,
+            ..self
+        }
+    }
+
     /// Execute the test body within the provided function closure.
     /// All Compositions added to the DockerTest has successfully completed their WaitFor clause
     /// once the test body is executed.
@@ -137,6 +150,10 @@ impl DockerTest {
         T: FnOnce(&DockerOperations) -> () + panic::UnwindSafe,
     {
         let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
+
+        if let Err(e) = self.create_volumes(&mut rt) {
+            panic!(e);
+        }
 
         // Resolve all name mappings prior to creation
         // We might want to support refering to a Composition handler name
@@ -362,7 +379,7 @@ impl DockerTest {
     }
 
     /// Forcefully remove the `CleanupContainer` objects from `cleanup`.
-    ///
+    /// Also removes all named volumes added to dockertest.
     /// All errors are discarded.
     fn teardown(&self, rt: &mut current_thread::Runtime, cleanup: Vec<CleanupContainer>) {
         // We spawn all cleanup procedures independently, because we want to cleanup
@@ -374,6 +391,16 @@ impl DockerTest {
                     .remove(ops)
                     .map_err(|_| ()),
             );
+        }
+        // Volumes have to be removed after the containers, as we will get a 409 from the docker
+        // daemon if the volume is still in use by a container.
+        // We therefore run the container remove futures to completion before trying to remove volumes.
+        // We will not be able to remove volumes if the associated container was not removed
+        // successfully.
+        rt.run().expect("runtime failure");
+        for v in &self.volumes {
+            let volume = self.client.volumes().get(v);
+            rt.spawn(volume.delete().map_err(|_| ()));
         }
         rt.run().expect("runtime failure");
     }
@@ -409,6 +436,20 @@ impl DockerTest {
             lookup_handlers: handlers,
             kept: compositions,
         }
+    }
+
+    fn create_volumes(&self, rt: &mut current_thread::Runtime) -> Result<(), DockerError> {
+        let c = self.client.volumes();
+        for v in &self.volumes {
+            let opts = VolumeCreateOptions::builder().name(v.as_str()).build();
+            let fut = c.create(&opts).map_err(|_| ()).map(|_| ());
+
+            rt.spawn(fut);
+        }
+
+        rt.run().expect("failed to create named volumes");
+
+        Ok(())
     }
 }
 

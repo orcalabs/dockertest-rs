@@ -82,6 +82,9 @@ pub struct Composition {
     /// The image that this Composition
     /// stems from.
     image: Image,
+
+    /// Volumes associated with this composition, are in the form of: "HOST_PATH/CONTAINER_PATH"
+    volumes: Vec<String>,
 }
 
 impl Composition {
@@ -105,6 +108,7 @@ impl Composition {
             cmd: Vec::new(),
             port: HashMap::new(),
             start_policy: StartPolicy::Relaxed,
+            volumes: Vec::new(),
         }
     }
 
@@ -123,6 +127,7 @@ impl Composition {
             cmd: Vec::new(),
             port: HashMap::new(),
             start_policy: StartPolicy::Relaxed,
+            volumes: Vec::new(),
         }
     }
 
@@ -215,6 +220,22 @@ impl Composition {
         self
     }
 
+    /// Adds the given volume to the Composition.
+    /// The name must match a volume added to the DockerTest instance.
+    /// The volume will be mounted into the container on the given path.
+    pub fn named_volume<T: ToString, S: ToString>(
+        &mut self,
+        volume_name: T,
+        path_in_container: S,
+    ) -> &mut Composition {
+        self.volumes.push(format!(
+            "{}:{}",
+            volume_name.to_string(),
+            path_in_container.to_string()
+        ));
+        self
+    }
+
     // QUESTION: Should this be consuming self??
     // Configure the container's name with the given namespace as prefix
     // and suffix.
@@ -278,6 +299,8 @@ impl Composition {
                 let envs = envs.iter().map(|s| s.as_ref()).collect();
                 let cmds = self.cmd.iter().map(|s| s.as_ref()).collect();
 
+                let volumes: Vec<&str> = self.volumes.iter().map(|v| v.as_str()).collect();
+
                 let containers = c1.containers();
 
                 let image_id = self.image.retrieved_id();
@@ -285,6 +308,7 @@ impl Composition {
                 options_builder
                     .cmd(cmds)
                     .env(envs)
+                    .volumes(volumes)
                     .name(&self.container_name);
 
                 // Handle ports
