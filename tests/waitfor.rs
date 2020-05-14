@@ -1,8 +1,9 @@
 use dockertest::waitfor::{ExitedWait, MessageSource, MessageWait, RunningWait, WaitFor};
 use dockertest::{
-    Composition, DockerTest, PendingContainer, PullPolicy, RunningContainer, Source, StartPolicy,
+    Composition, DockerTest, DockerTestError, PendingContainer, PullPolicy, RunningContainer,
+    Source, StartPolicy,
 };
-use failure::{format_err, Error};
+
 use futures::future::{self, Future};
 use std::rc::Rc;
 use tokio::runtime::current_thread;
@@ -13,19 +14,21 @@ impl WaitFor for FailWait {
     fn wait_for_ready(
         &self,
         _container: PendingContainer,
-    ) -> Box<dyn Future<Item = RunningContainer, Error = Error>> {
-        Box::new(future::err(format_err!("this FailWait shall fail")))
+    ) -> Box<dyn Future<Item = RunningContainer, Error = DockerTestError>> {
+        Box::new(future::err(DockerTestError::Processing(
+            "this FailWait shall fail".to_string(),
+        )))
     }
 }
 
 /// Returns whether the container is in a running state.
-pub fn is_running(id: String) -> impl Future<Item = bool, Error = Error> {
+pub fn is_running(id: String) -> impl Future<Item = bool, Error = DockerTestError> {
     let client = shiplift::Docker::new();
     client
         .containers()
         .get(&id)
         .inspect()
-        .map_err(|e| format_err!("inspecting container: {}", e))
+        .map_err(|e| DockerTestError::Processing(format!("inspecting container: {}", e)))
         .and_then(|c| future::ok(c.state.running))
 }
 

@@ -13,10 +13,12 @@ readme = "README.md"
 documentation = "https://docs.rs/dockertest"
 
 [dependencies]
+anyhow = "1.0.30"
 futures = "0.1.25"
+thiserror = "1.0.17"
 tokio = "0.1.15"
+tracing = "0.1.13"
 shiplift = "0.5.0"
-failure = "0.1.5"
 rand = "0.6.5"
 
 [dev-dependencies]

@@ -1,6 +1,7 @@
 use crate::container::{PendingContainer, RunningContainer};
 use crate::waitfor::WaitFor;
-use failure::{format_err, Error};
+use crate::DockerTestError;
+
 use futures::future::{self, Future};
 use futures::stream::Stream;
 use shiplift::builder::LogsOptions;
@@ -34,7 +35,7 @@ impl WaitFor for MessageWait {
     fn wait_for_ready(
         &self,
         container: PendingContainer,
-    ) -> Box<dyn Future<Item = RunningContainer, Error = Error>> {
+    ) -> Box<dyn Future<Item = RunningContainer, Error = DockerTestError>> {
         let fut = wait_for_message(container, self.source, self.message.clone(), self.timeout);
         Box::new(fut)
     }
@@ -45,7 +46,7 @@ fn wait_for_message(
     source: MessageSource,
     msg: String,
     timeout: u16,
-) -> impl Future<Item = RunningContainer, Error = Error> {
+) -> impl Future<Item = RunningContainer, Error = DockerTestError> {
     // Construct LogOptionsBuilder
     let mut options_builder = LogsOptions::builder();
     options_builder.follow(true);
@@ -76,13 +77,17 @@ fn wait_for_message(
         .then(move |res| {
             if let Err(_e) = res {
                 // Error occurred while reading stream - not found
-                future::Either::B(future::err(format_err!("error occured on stream")))
+                future::Either::B(future::err(DockerTestError::Processing(
+                    "error occured on stream".to_string(),
+                )))
             } else if ds_then.load(atomic::Ordering::SeqCst) {
                 // The message was found in the message source
                 future::Either::A(future::ok(container.into()))
             } else {
                 // No such message was found, and the stream completed.
-                future::Either::B(future::err(format_err!("stream completed - no message")))
+                future::Either::B(future::err(DockerTestError::Processing(
+                    "stream completed - no message".to_string(),
+                )))
             }
         });
 
@@ -90,5 +95,5 @@ fn wait_for_message(
     workfut
         .timeout(Duration::from_secs(timeout.into()))
         // Have to map the err to get the same return type..
-        .map_err(|e| format_err!("{}", e))
+        .map_err(|e| DockerTestError::Processing(format!("{:?}", e)))
 }

@@ -1,6 +1,7 @@
 //! An Image persisted in Docker.
 
-use crate::error::DockerError;
+use crate::DockerTestError;
+
 use futures::future::{self, Future};
 use futures::stream::Stream;
 use shiplift::builder::PullOptions;
@@ -93,7 +94,7 @@ impl Image {
     fn do_pull<'a>(
         &'a self,
         client: &Rc<shiplift::Docker>,
-    ) -> impl Future<Item = (), Error = DockerError> + 'a {
+    ) -> impl Future<Item = (), Error = DockerTestError> + 'a {
         let pull_options = PullOptions::builder()
             .image(self.repository.clone())
             .repo(self.repository.clone())
@@ -105,7 +106,7 @@ impl Image {
             .collect()
             .map(|_| ())
             .map_err(move |e| {
-                DockerError::pull(format!(
+                DockerTestError::Pull(format!(
                     "failed to pull image: {}:{}, reason: {}",
                     self.repository, self.tag, e,
                 ))
@@ -119,7 +120,7 @@ impl Image {
     fn retrieve_and_set_id<'a>(
         &'a self,
         client: Rc<shiplift::Docker>,
-    ) -> impl Future<Item = (), Error = DockerError> + 'a {
+    ) -> impl Future<Item = (), Error = DockerTestError> + 'a {
         client
             .images()
             .get(&format!("{}:{}", self.repository, self.tag))
@@ -129,7 +130,7 @@ impl Image {
                 *id = details.id;
                 future::ok(())
             })
-            .map_err(|e| DockerError::pull(format!("failed to retrieve id of image: {}", e)))
+            .map_err(|e| DockerTestError::Pull(format!("failed to retrieve id of image: {}", e)))
     }
 
     // Checks wether the image exists locally, will return false
@@ -139,7 +140,7 @@ impl Image {
     fn does_image_exist<'a>(
         &'a self,
         client: Rc<shiplift::Docker>,
-    ) -> impl Future<Item = bool, Error = DockerError> + 'a {
+    ) -> impl Future<Item = bool, Error = DockerTestError> + 'a {
         client
             .images()
             .get(&format!("{}:{}", self.repository, self.tag))
@@ -153,7 +154,7 @@ impl Image {
         &'a self,
         client: Rc<shiplift::Docker>,
         default_source: &'a Source,
-    ) -> impl Future<Item = (), Error = DockerError> + 'a {
+    ) -> impl Future<Item = (), Error = DockerTestError> + 'a {
         let pull_source = match &self.source {
             None => default_source,
             Some(r) => r,
@@ -171,14 +172,14 @@ impl Image {
                 }
                 Err(e) => future::Either::B(future::err(e)),
             })
-            .map_err(|e| DockerError::pull(format!("failed to pull image: {}", e)))
+            .map_err(|e| DockerTestError::Pull(format!("failed to pull image: {}", e)))
             .and_then(move |_| self.retrieve_and_set_id(client_clone))
             .map(|_| ())
     }
 
     // Decides wether we should pull the image based on its
     // Source, PullPolicy, and if it exists locally.
-    fn should_pull(&self, exists: bool, source: &Source) -> Result<bool, DockerError> {
+    fn should_pull(&self, exists: bool, source: &Source) -> Result<bool, DockerTestError> {
         match source {
             Source::Remote(r) => is_valid_pull_policy(exists, r.pull_policy()),
             Source::DockerHub(p) => is_valid_pull_policy(exists, p),
@@ -186,20 +187,20 @@ impl Image {
                 if exists {
                     Ok(false)
                 } else {
-                    Err(DockerError::pull("image source was set to local, but the provided image does not exists on the local host"))
+                    Err(DockerTestError::Pull("image source was set to local, but the provided image does not exists on the local host".to_string()))
                 }
             }
         }
     }
 }
 
-fn is_valid_pull_policy(exists: bool, pull_policy: &PullPolicy) -> Result<bool, DockerError> {
+fn is_valid_pull_policy(exists: bool, pull_policy: &PullPolicy) -> Result<bool, DockerTestError> {
     match pull_policy {
         PullPolicy::Never => {
             if exists {
                 Ok(false)
             } else {
-                Err(DockerError::pull("image source was set to remote and pull_policy to never, but the provided image does not exists on the local host"))
+                Err(DockerTestError::Pull("image source was set to remote and pull_policy to never, but the provided image does not exists on the local host".to_string()))
             }
         }
 

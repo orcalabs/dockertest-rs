@@ -2,7 +2,8 @@
 //! and all the default implementations of it.
 
 use crate::container::{PendingContainer, RunningContainer};
-use failure::Error;
+use crate::DockerTestError;
+
 use futures::future::Future;
 
 mod message;
@@ -23,5 +24,5 @@ pub trait WaitFor {
     fn wait_for_ready(
         &self,
         container: PendingContainer,
-    ) -> Box<dyn Future<Item = RunningContainer, Error = Error>>;
+    ) -> Box<dyn Future<Item = RunningContainer, Error = DockerTestError>>;
 }

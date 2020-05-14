@@ -1,12 +1,11 @@
 //! Represent a concrete instance of an Image, before it is ran as a Container.
 
 use crate::container::PendingContainer;
-use crate::error::{DockerError, DockerErrorKind};
 use crate::image::Image;
 use crate::waitfor::{NoWait, WaitFor};
-use futures;
+use crate::DockerTestError;
+
 use futures::future::{self, Future};
-use shiplift;
 use shiplift::builder::{ContainerOptions, RmContainerOptions};
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -261,7 +260,7 @@ impl Composition {
     pub(crate) fn create<'a>(
         self,
         client: Rc<shiplift::Docker>,
-    ) -> impl Future<Item = PendingContainer, Error = DockerError> + 'a {
+    ) -> impl Future<Item = PendingContainer, Error = DockerTestError> + 'a {
         println!("starting container: {}", self.container_name);
 
         let wait_for_clone = self.wait.clone();
@@ -281,8 +280,8 @@ impl Composition {
         remove_fut
             .then(|res| match res {
                 Ok(_) => Ok(()),
-                Err(e) => match e.kind() {
-                    DockerErrorKind::Recoverable(_) => Ok(()),
+                Err(e) => match e {
+                    DockerTestError::Recoverable(_) => Ok(()),
                     _ => Err(e),
                 },
             })
@@ -322,9 +321,9 @@ impl Composition {
                 }
 
                 let container_options = options_builder.build();
-                containers
-                    .create(&container_options)
-                    .map_err(|e| DockerError::daemon(format!("failed to create container: {}", e)))
+                containers.create(&container_options).map_err(|e| {
+                    DockerTestError::Daemon(format!("failed to create container: {}", e))
+                })
             })
             .and_then(move |container_info| {
                 let container = PendingContainer::new(
@@ -358,16 +357,16 @@ impl Composition {
 fn remove_container_if_exists(
     client: Rc<shiplift::Docker>,
     name: String,
-) -> impl Future<Item = (), Error = DockerError> {
+) -> impl Future<Item = (), Error = DockerTestError> {
     client
         .containers()
         .get(&name)
         .inspect()
-        .map_err(|e| DockerError::recoverable(format!("container did not exist: {}", e)))
+        .map_err(|e| DockerTestError::Recoverable(format!("container did not exist: {}", e)))
         .and_then(move |_| {
             let opts = RmContainerOptions::builder().force(true).build();
             client.containers().get(&name).remove(opts).map_err(|e| {
-                DockerError::daemon(format!("failed to remove existing container: {}", e))
+                DockerTestError::Daemon(format!("failed to remove existing container: {}", e))
             })
         })
         .map(|_| ())
@@ -376,8 +375,9 @@ fn remove_container_if_exists(
 #[cfg(test)]
 mod tests {
     use crate::composition::{remove_container_if_exists, Composition, StartPolicy};
-    use crate::error::DockerErrorKind;
     use crate::image::{Image, PullPolicy, Source};
+    use crate::DockerTestError;
+
     use std::collections::HashMap;
     use std::rc::Rc;
     use tokio::runtime::current_thread;
@@ -683,8 +683,8 @@ mod tests {
 
         let res = match res {
             Ok(_) => false,
-            Err(e) => match e.kind() {
-                DockerErrorKind::Recoverable(_) => true,
+            Err(e) => match e {
+                DockerTestError::Recoverable(_) => true,
                 _ => false,
             },
         };

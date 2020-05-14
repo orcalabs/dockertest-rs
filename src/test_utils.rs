@@ -1,4 +1,5 @@
-use failure::{format_err, Error};
+use crate::DockerTestError;
+
 use futures::future::{self, Future};
 use futures::stream::Stream;
 use shiplift;
@@ -11,7 +12,7 @@ pub(crate) fn pull_if_not_present<'a>(
     repository: &'a str,
     tag: &'a str,
     client: &'a Rc<shiplift::Docker>,
-) -> impl Future<Item = String, Error = Error> + 'a {
+) -> impl Future<Item = String, Error = DockerTestError> + 'a {
     image_exists_locally(&repository, &tag, &client)
         .and_then(move |exists| {
             if !exists {
@@ -31,7 +32,7 @@ pub(crate) fn delete_image_if_present<'a>(
     repository: &'a str,
     tag: &'a str,
     client: &'a Rc<shiplift::Docker>,
-) -> impl Future<Item = (), Error = Error> + 'a {
+) -> impl Future<Item = (), Error = DockerTestError> + 'a {
     image_exists_locally(&repository, &tag, &client)
         .and_then(move |exists| {
             println!("image existence: {}", exists);
@@ -51,7 +52,7 @@ pub(crate) fn image_exists_locally(
     repository: &str,
     tag: &str,
     client: &Rc<shiplift::Docker>,
-) -> impl Future<Item = bool, Error = Error> {
+) -> impl Future<Item = bool, Error = DockerTestError> {
     client
         .images()
         .get(&format!("{}:{}", &repository, &tag))
@@ -69,13 +70,15 @@ pub(crate) fn image_exists_locally(
 pub(crate) fn delete_image<'a>(
     image_id: String,
     client: &'a Rc<shiplift::Docker>,
-) -> impl Future<Item = (), Error = Error> + 'a {
+) -> impl Future<Item = (), Error = DockerTestError> + 'a {
     remove_containers(image_id.to_string(), &client).and_then(move |_| {
         client
             .images()
             .get(&image_id)
             .delete()
-            .map_err(|e| format_err!("failed to delete existing image: {}", e))
+            .map_err(|e| {
+                DockerTestError::Processing(format!("failed to delete existing image: {}", e))
+            })
             .map(|_| ())
     })
 }
@@ -86,7 +89,7 @@ pub(crate) fn delete_image<'a>(
 pub(crate) fn remove_containers<'a>(
     image_id: String,
     client: &'a shiplift::Docker,
-) -> impl Future<Item = (), Error = Error> + 'a {
+) -> impl Future<Item = (), Error = DockerTestError> + 'a {
     client
         .containers()
         .list(&ContainerListOptions::builder().all().build())
@@ -102,7 +105,7 @@ pub(crate) fn remove_containers<'a>(
 
             future::join_all(fut_vec).map(|_| ())
         })
-        .map_err(|e| format_err!("failed to remove containers: {}", e))
+        .map_err(|e| DockerTestError::Processing(format!("failed to remove containers: {}", e)))
 }
 
 // Helper function that pulls a given image with the given tag
@@ -110,7 +113,7 @@ pub(crate) fn pull_image(
     repository: &str,
     tag: &str,
     client: &Rc<shiplift::Docker>,
-) -> impl Future<Item = (), Error = Error> {
+) -> impl Future<Item = (), Error = DockerTestError> {
     let images = shiplift::Images::new(&client);
     let opts = PullOptions::builder().image(repository).tag(tag).build();
 
@@ -118,7 +121,7 @@ pub(crate) fn pull_image(
         .pull(&opts)
         .collect()
         .map(|_| ())
-        .map_err(|e| format_err!("failed to pull image: {}", e))
+        .map_err(|e| DockerTestError::Processing(format!("failed to pull image: {}", e)))
 }
 
 // Helper function that retreives the id of a given image
@@ -126,19 +129,19 @@ pub(crate) fn image_id(
     repository: &str,
     tag: &str,
     client: &Rc<shiplift::Docker>,
-) -> impl Future<Item = String, Error = Error> {
+) -> impl Future<Item = String, Error = DockerTestError> {
     client
         .images()
         .get(&format!("{}:{}", repository, tag))
         .inspect()
         .map(|res| res.id)
-        .map_err(|e| format_err!("failed to get image id {}", e))
+        .map_err(|e| DockerTestError::Processing(format!("failed to get image id {}", e)))
 }
 
 pub(crate) fn is_container_running(
     container_id: String,
     client: &Rc<shiplift::Docker>,
-) -> impl Future<Item = bool, Error = Error> {
+) -> impl Future<Item = bool, Error = DockerTestError> {
     client
         .containers()
         .list(&ContainerListOptions::builder().build())
@@ -150,5 +153,5 @@ pub(crate) fn is_container_running(
             }
             return future::ok(false);
         })
-        .map_err(|e| format_err!("failed to remove containers: {}", e))
+        .map_err(|e| DockerTestError::Processing(format!("failed to remove containers: {}", e)))
 }

@@ -1,8 +1,7 @@
 //! Represents a docker `Container`.
 
-use crate::error::DockerError;
 use crate::waitfor::WaitFor;
-use crate::StartPolicy;
+use crate::{DockerTestError, StartPolicy};
 use futures::future::Future;
 use std::rc::Rc;
 
@@ -138,17 +137,20 @@ impl PendingContainer {
     /// Run the start command and initiate the WaitFor condition.
     /// Once the PendingContainer is successfully started and the WaitFor condition
     /// has been achived, the RunningContainer is returned.
-    pub(crate) fn start(self) -> impl Future<Item = RunningContainer, Error = DockerError> {
+    pub(crate) fn start(self) -> impl Future<Item = RunningContainer, Error = DockerTestError> {
         let wait_for_clone = self.wait_for.clone();
         let self_clone = self.clone();
         self.client
             .containers()
             .get(&self.name)
             .start()
-            .map_err(|e| DockerError::startup(format!("failed to start container: {}", e)))
+            .map_err(|e| DockerTestError::Startup(format!("failed to start container: {}", e)))
             .and_then(move |_| {
                 wait_for_clone.wait_for_ready(self_clone).map_err(|e| {
-                    DockerError::startup(format!("failed to wait for container to be ready: {}", e))
+                    DockerTestError::Startup(format!(
+                        "failed to wait for container to be ready: {}",
+                        e
+                    ))
                 })
             })
     }
@@ -159,8 +161,8 @@ mod tests {
     use crate::container::{PendingContainer, RunningContainer};
     use crate::image::{Image, PullPolicy, Source};
     use crate::waitfor::{NoWait, WaitFor};
-    use crate::{Composition, StartPolicy};
-    use failure::Error;
+    use crate::{Composition, DockerTestError, StartPolicy};
+
     use futures::future::{self, Future};
     use shiplift;
     use std::rc::Rc;
@@ -205,7 +207,7 @@ mod tests {
         fn wait_for_ready(
             &self,
             container: PendingContainer,
-        ) -> Box<dyn Future<Item = RunningContainer, Error = Error>> {
+        ) -> Box<dyn Future<Item = RunningContainer, Error = DockerTestError>> {
             let mut invoked = self.invoked.write().expect("failed to take invoked lock");
             *invoked = true;
             Box::new(future::ok(container.into()))

@@ -2,7 +2,8 @@
 
 use crate::container::{PendingContainer, RunningContainer};
 use crate::waitfor::WaitFor;
-use failure::Error;
+use crate::DockerTestError;
+
 use futures::future::{self, Future};
 
 /// The NoWait `WaitFor` implementation for containers.
@@ -13,7 +14,7 @@ impl WaitFor for NoWait {
     fn wait_for_ready(
         &self,
         container: PendingContainer,
-    ) -> Box<dyn Future<Item = RunningContainer, Error = Error>> {
+    ) -> Box<dyn Future<Item = RunningContainer, Error = DockerTestError>> {
         Box::new(future::ok(container.into()))
     }
 }
@@ -23,6 +24,7 @@ mod tests {
     use crate::container::PendingContainer;
     use crate::waitfor::{NoWait, WaitFor};
     use crate::StartPolicy;
+
     use shiplift;
     use std::rc::Rc;
     use tokio::runtime::current_thread;

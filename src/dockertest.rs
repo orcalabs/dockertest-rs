@@ -1,9 +1,9 @@
 //! The main library structures.
 
 use crate::container::{CleanupContainer, PendingContainer, RunningContainer};
-use crate::error::DockerError;
 use crate::image::Source;
-use crate::{Composition, StartPolicy};
+use crate::{Composition, DockerTestError, StartPolicy};
+
 use futures::future::{self, Future};
 use futures::sink::Sink;
 use futures::stream::Stream;
@@ -15,6 +15,7 @@ use std::collections::{HashMap, HashSet};
 use std::panic;
 use std::rc::Rc;
 use tokio::runtime::current_thread;
+use tracing::{event, span, Level};
 
 /// Represents the docker test environment,
 /// and keep track of all containers
@@ -65,16 +66,16 @@ impl DockerOperations {
     /// Returns a handle to the specified container.
     /// If no container_name was specified when creating the Composition, the Image repository
     /// is the default key for the corresponding container.
-    pub fn handle<'a>(&'a self, key: &'a str) -> Result<&'a RunningContainer, DockerError> {
+    pub fn handle<'a>(&'a self, key: &'a str) -> Result<&'a RunningContainer, DockerTestError> {
         if self.containers.lookup_collisions.contains(key) {
-            return Err(DockerError::recoverable(format!(
+            return Err(DockerTestError::Recoverable(format!(
                 "handle key '{}' defined multiple times",
                 key
             )));
         }
 
         match self.containers.lookup_handlers.get(key) {
-            None => Err(DockerError::recoverable(format!(
+            None => Err(DockerTestError::Recoverable(format!(
                 "container with key: {} not found",
                 key
             ))),
@@ -84,7 +85,7 @@ impl DockerOperations {
 
     /// Indicate that this test failed with the accompanied message.
     pub fn failure(&self, msg: &str) {
-        eprintln!("test failure: {}", msg);
+        event!(Level::ERROR, "test failure: {}", msg);
         panic!("test failure: {}", msg);
     }
 }
@@ -145,17 +146,40 @@ impl DockerTest {
     /// Execute the test body within the provided function closure.
     /// All Compositions added to the DockerTest has successfully completed their WaitFor clause
     /// once the test body is executed.
-    pub fn run<T>(mut self, test: T)
+    pub fn run<T>(self, test: T)
     where
         T: FnOnce(&DockerOperations) -> () + panic::UnwindSafe,
     {
-        let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
+        let span = span!(Level::INFO, "dockertest");
+        let _guard = span.enter();
 
-        if let Err(e) = self.create_volumes(&mut rt) {
-            panic!(e);
+        match self.run_impl(test) {
+            Ok(_) => event!(Level::DEBUG, "dockertest successfully executed"),
+            Err(e) => {
+                event!(
+                    Level::ERROR,
+                    "internal dockertest condition failure: {:?}",
+                    e
+                );
+                event!(Level::WARN, "dockertest failure");
+                panic!("see above");
+            }
         }
+    }
 
-        // Resolve all name mappings prior to creation
+    /// Internal impl of the public `run` method, to catch internal panics
+    fn run_impl<T>(mut self, test: T) -> Result<(), DockerTestError>
+    where
+        T: FnOnce(&DockerOperations) -> () + panic::UnwindSafe,
+    {
+        // Allocate a new runtime for this test.
+        let mut rt = current_thread::Runtime::new()?;
+
+        // Before constructing the compositions, we ensure that all configured
+        // docker volumes have been created.
+        self.create_volumes(&mut rt)?;
+
+        // Resolve all name mappings prior to creation.
         // We might want to support refering to a Composition handler name
         // prior to creating the PendingContainer (in the future).
         // It therefore makes sense to split the verification/handling upfront,
@@ -164,26 +188,22 @@ impl DockerTest {
 
         // Make sure all the images are present on the local docker daemon before we create
         // the containers from them.
-        self.pull_images(&mut rt, &compositions)
-            .unwrap_or_else(|e| {
-                panic!(e);
-            });
+        self.pull_images(&mut rt, &compositions)?;
 
         // Create PendingContainers from the Compositions
-        let pending_containers: Keeper<PendingContainer> = self
-            .create_containers(&mut rt, compositions)
-            .unwrap_or_else(|e| {
+        let pending_containers: Keeper<PendingContainer> =
+            self.create_containers(&mut rt, compositions).map_err(|e| {
                 self.teardown(&mut rt, e);
-                panic!(DockerError::startup("failed to setup environment").to_string());
-            });
+                DockerTestError::Startup("failed to setup environment".to_string())
+            })?;
 
         // Start the PendingContainers
         let mut running_containers: Keeper<RunningContainer> = self
             .start_containers(&mut rt, pending_containers)
-            .unwrap_or_else(|e| {
+            .map_err(|e| {
                 self.teardown(&mut rt, e);
-                panic!(DockerError::startup("failed to setup environment").to_string());
-            });
+                DockerTestError::Startup("failed to setup environment".to_string())
+            })?;
 
         // Create the set of cleanup containers used after the test body
         let cleanup_containers = running_containers
@@ -199,7 +219,9 @@ impl DockerTest {
             let res = rt.block_on(
                 shiplift::Container::new(&self.client, c.id.to_string())
                     .inspect()
-                    .map_err(|e| DockerError::daemon(format!("failed to inspect container: {}", e)))
+                    .map_err(|e| {
+                        DockerTestError::Daemon(format!("failed to inspect container: {}", e))
+                    })
                     .and_then(|details| {
                         future::ok(
                             details
@@ -216,7 +238,7 @@ impl DockerTest {
                 Err(e) => {
                     // This error is extraordinary - worth terminating everything.
                     self.teardown(&mut rt, cleanup_containers);
-                    panic!(format!("{}", e));
+                    return Err(DockerTestError::Startup(format!("{}", e)));
                 }
             }
         }
@@ -238,6 +260,8 @@ impl DockerTest {
         if res.is_err() {
             ops.failure("see panic above");
         }
+
+        Ok(())
     }
 
     /// Add a Composition to this DockerTest.
@@ -363,7 +387,7 @@ impl DockerTest {
         &self,
         rt: &mut current_thread::Runtime,
         compositions: &Keeper<Composition>,
-    ) -> Result<(), DockerError> {
+    ) -> Result<(), DockerTestError> {
         let mut future_vec = Vec::new();
 
         for composition in compositions.kept.iter() {
@@ -438,7 +462,7 @@ impl DockerTest {
         }
     }
 
-    fn create_volumes(&self, rt: &mut current_thread::Runtime) -> Result<(), DockerError> {
+    fn create_volumes(&self, rt: &mut current_thread::Runtime) -> Result<(), DockerTestError> {
         let c = self.client.volumes();
         for v in &self.volumes {
             let opts = VolumeCreateOptions::builder().name(v.as_str()).build();
@@ -501,7 +525,7 @@ fn sort_running_containers_into_insertion_order(
 ///
 /// Returns the vector of container ids of starting containers.
 fn start_relaxed_containers(
-    sender: &mpsc::Sender<Result<RunningContainer, DockerError>>,
+    sender: &mpsc::Sender<Result<RunningContainer, DockerTestError>>,
     rt: &mut current_thread::Runtime,
     containers: Vec<PendingContainer>,
 ) -> Vec<CleanupContainer> {
@@ -568,10 +592,10 @@ fn start_strict_containers(
 
 fn wait_for_relaxed_containers(
     rt: &mut current_thread::Runtime,
-    receiver: mpsc::Receiver<Result<RunningContainer, DockerError>>,
+    receiver: mpsc::Receiver<Result<RunningContainer, DockerTestError>>,
     starting_relaxed: Vec<CleanupContainer>,
 ) -> Result<Vec<RunningContainer>, Vec<CleanupContainer>> {
-    let running_relaxed_result: Vec<Result<RunningContainer, DockerError>> = rt.block_on(
+    let running_relaxed_result: Vec<Result<RunningContainer, DockerTestError>> = rt.block_on(
         receiver
             .take(starting_relaxed.len() as u64)
             .collect()
