@@ -1,6 +1,6 @@
 use dockertest::waitfor::RunningWait;
 use dockertest::{Composition, DockerTest, Image, PullPolicy, Source};
-use std::rc::Rc;
+use test_env_log::test;
 
 #[test]
 fn test_run_with_no_failure() {
@@ -13,7 +13,7 @@ fn test_run_with_no_failure() {
 
     test.add_composition(hello_world);
 
-    test.run(|_ops| {
+    test.run(|_ops| async {
         assert!(true);
     });
 }
@@ -30,7 +30,7 @@ fn test_run_with_failure() {
 
     test.add_composition(hello_world);
 
-    test.run(|_ops| {
+    test.run(|_ops| async {
         assert!(false);
     });
 }
@@ -47,14 +47,16 @@ fn test_resolve_handle_with_repository_as_key() {
 
     test.add_composition(hello_world);
 
-    test.run(|ops| {
-        let handle = ops.handle(repo);
-        assert!(handle.is_ok(), "failed to retrieve handle for container");
+    test.run(|ops| async move {
+        let _ = ops.handle(repo);
     });
 }
 
 // Tests that we fail to retrieve a handle for a container with an invalid key
 #[test]
+#[should_panic(
+    expected = "test body failure `container with handle 'handle_does_not_exist' not found`"
+)]
 fn test_resolve_handle_with_invalid_key() {
     let source = Source::DockerHub(PullPolicy::IfNotPresent);
     let mut test = DockerTest::new().with_default_source(source);
@@ -65,12 +67,8 @@ fn test_resolve_handle_with_invalid_key() {
 
     test.add_composition(hello_world);
 
-    test.run(|ops| {
-        let handle = ops.handle("not_an_existing_key");
-        assert!(
-            handle.is_err(),
-            "should fail to retrieve handle for container with non-existing key"
-        );
+    test.run(|ops| async move {
+        let _ = ops.handle("handle_does_not_exist");
     });
 }
 
@@ -88,15 +86,17 @@ fn test_resolve_handle_with_user_provided_container_name_as_key() {
 
     test.add_composition(hello_world);
 
-    test.run(|ops| {
-        let handle = ops.handle(container_name);
-        assert!(handle.is_ok(), "failed to retrieve handle for container");
+    test.run(|ops| async move {
+        let _ = ops.handle(container_name);
     });
 }
 
 // Tests that we fail to retrieve a handle for a container when multiple containers have the same
 // user provided container name
 #[test]
+#[should_panic(
+    expected = "test body failure `handle 'this_is_a_container_name' defined multiple times`"
+)]
 fn test_resolve_handle_with_identical_user_provided_container_name() {
     let source = Source::DockerHub(PullPolicy::IfNotPresent);
     let mut test = DockerTest::new().with_default_source(source);
@@ -109,16 +109,15 @@ fn test_resolve_handle_with_identical_user_provided_container_name() {
     test.add_composition(hello_world);
     test.add_composition(hello_world2);
 
-    test.run(|ops| {
-        let handle = ops.handle(container_name);
-        assert!(handle.is_err(),
-                "should fail to retrieve handle for container when there exists multiple containers with the same user_provided_container_name");
+    test.run(|ops| async move {
+        let _ = ops.handle(container_name);
     });
 }
 
 // Tests that we fail to retrieve a handle for a container when multiple containers have the same
 // repository name
 #[test]
+#[should_panic(expected = "test body failure `handle 'hello-world' defined multiple times`")]
 fn test_resolve_handle_with_identical_repository() {
     let source = Source::DockerHub(PullPolicy::IfNotPresent);
     let mut test = DockerTest::new().with_default_source(source);
@@ -130,10 +129,8 @@ fn test_resolve_handle_with_identical_repository() {
     test.add_composition(hello_world);
     test.add_composition(hello_world2);
 
-    test.run(|ops| {
-        let handle = ops.handle(repo);
-        assert!(handle.is_err(),
-                "should fail to retrieve handle for container when there exists multiple containers with the same repository name and no user_provided_container_name");
+    test.run(|ops| async move {
+        let _ = ops.handle(repo);
     });
 }
 
@@ -144,15 +141,15 @@ fn test_ip_on_running_container() {
     let mut test = DockerTest::new().with_default_source(source);
 
     let repo = "luca3m/sleep";
-    let sleep_container = Composition::with_repository(repo).with_wait_for(Rc::new(RunningWait {
+    let sleep_container = Composition::with_repository(repo).with_wait_for(Box::new(RunningWait {
         max_checks: 10,
         check_interval: 1000,
     }));
 
     test.add_composition(sleep_container);
 
-    test.run(|ops| {
-        let handle = ops.handle(repo).expect("failed to get container handle");
+    test.run(|ops| async move {
+        let handle = ops.handle(repo);
         // UNSPECIFIED is the default ip-addr.
         // - we simply check that we have populated with something else.
         assert_ne!(handle.ip(), &std::net::Ipv4Addr::UNSPECIFIED);

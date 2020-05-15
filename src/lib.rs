@@ -1,6 +1,7 @@
 #![deny(missing_docs)]
 #![deny(warnings)]
 #![deny(rust_2018_idioms)]
+#![deny(intra_doc_link_resolution_failure)]
 
 //! _dockertest_ is a testing and automation abstraction for Docker.
 //!
@@ -57,6 +58,16 @@
 //! * [NoWait] - don't wait for anything
 //! * [MessageWait] - wait for the following message to appear in the log stream.
 //!
+//! # Prune policy
+//!
+//! By default, _dockertest_ will stop and remove all containers and created volumes
+//! regardless of execution result. You can control this policy by setting the environment variable
+//! `DOCKERTEST_PRUNE`:
+//! * "always": [default] remove everything
+//! * "never": leave all containers running
+//! * "stop_on_failure": stop containers on exeuction failure
+//! * "running_on_failure": leave containers running on execution failure
+//!
 //! # Example
 //!
 //! ```rust
@@ -71,7 +82,7 @@
 //! let mut test = DockerTest::new().with_default_source(source);
 //!
 //! // Define our Composition - the Image we will start and end up as our RunningContainer
-//! let postgres = Composition::with_repository("postgres").with_wait_for(Rc::new(MessageWait {
+//! let postgres = Composition::with_repository("postgres").with_wait_for(Box::new(MessageWait {
 //!     message: "database system is ready to accept connections".to_string(),
 //!     source: MessageSource::Stderr,
 //!     timeout: 20,
@@ -80,11 +91,8 @@
 //!
 //! // Run the test body
 //! test.run(|ops| {
-//!     let container = ops.handle("postgres").expect("retrieve postgres container");
-//!     let ip = container.ip();
-//!     // This is the default postgres serve port
-//!     let port = "5432";
-//!     let conn_string = format!("postgres://postgres:postgres@{}:{}", ip, port);
+//!     let container = ops.handle("postgres");
+//!     let conn_string = format!("postgres://postgres:postgres@{}:{}", container.ip(), 5432);
 //!     let pgconn = PgConnection::establish(&conn_string);
 //!
 //!     // Perform your database operations here

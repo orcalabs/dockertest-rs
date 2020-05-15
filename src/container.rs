@@ -2,8 +2,8 @@
 
 use crate::waitfor::WaitFor;
 use crate::{DockerTestError, StartPolicy};
-use futures::future::Future;
-use std::rc::Rc;
+
+use bollard::{container::StartContainerOptions, Docker};
 
 /// Represent a docker container object in a pending phase between
 /// it being created on the daemon, but may not be running.
@@ -11,11 +11,10 @@ use std::rc::Rc;
 /// This object is an implementation detail of `dockertest-rs` and is only
 /// publicly exposed due to the public `WaitFor` trait which is responsible
 /// of performing the into conversion from `PendingContainer` to `RunningContainer`.
-// No methods on this structure, not fields, shall be publicly exposed.
-#[derive(Clone)]
+// NOTE: No methods on this structure, nor fields, shall be publicly exposed.
 pub struct PendingContainer {
     /// The docker client
-    client: Rc<shiplift::Docker>,
+    pub(crate) client: Docker,
 
     /// Name of the container, defaults to the repository name of the image.
     pub(crate) name: String,
@@ -23,20 +22,15 @@ pub struct PendingContainer {
     /// Id of the running container.
     pub(crate) id: String,
 
-    /// The key used to retrieve the handle to this container from DockerTest.
-    /// The user can set this directly by specifying container_name in the Composition builder.
-    /// Defaults to the repository name of the containers image.
-    handle_key: String,
-
     /// The StartPolicy of this Container, is provided from its Composition.
     pub(crate) start_policy: StartPolicy,
 
     /// Trait implementing how to wait for the container to startup.
-    wait_for: Rc<dyn WaitFor>,
+    wait: Option<Box<dyn WaitFor>>,
 }
 
 /// Represent a docker container in running state and available to the test body.
-// Fields within this structure are pub(crate) only for testability
+// NOTE: Fields within this structure are pub(crate) only for testability
 #[derive(Clone, Debug)]
 pub struct RunningContainer {
     /// The unique docker container identifier assigned at creation.
@@ -46,14 +40,14 @@ pub struct RunningContainer {
     pub(crate) ip: std::net::Ipv4Addr,
 }
 
-/// A Container representation of a created or started container, that requires us to
+/// A container representation of a pending or running container, that requires us to
 /// perform cleanup on it.
 ///
-/// This structure is an implementation detail of `dockertest-rs` and shall NOT be publicly
+/// This structure is an implementation detail of dockertest and shall NOT be publicly
 /// exposed.
 #[derive(Clone, Debug)]
 pub(crate) struct CleanupContainer {
-    pub id: String,
+    pub(crate) id: String,
 }
 
 impl From<PendingContainer> for RunningContainer {
@@ -72,6 +66,14 @@ impl From<PendingContainer> for CleanupContainer {
     }
 }
 
+impl From<&PendingContainer> for CleanupContainer {
+    fn from(container: &PendingContainer) -> CleanupContainer {
+        CleanupContainer {
+            id: container.id.clone(),
+        }
+    }
+}
+
 impl From<RunningContainer> for CleanupContainer {
     fn from(container: RunningContainer) -> CleanupContainer {
         CleanupContainer { id: container.id }
@@ -79,12 +81,6 @@ impl From<RunningContainer> for CleanupContainer {
 }
 
 impl RunningContainer {
-    /// Returns which host port the given container port is mapped to.
-    pub fn host_port(&self, container_port: u32) -> u32 {
-        // TODO: Implement host-port mapping.
-        container_port
-    }
-
     /// Return the generated name on the docker container object for this `RunningContainer`.
     pub fn name(&self) -> &str {
         &self.name
@@ -116,20 +112,18 @@ impl RunningContainer {
 
 impl PendingContainer {
     /// Creates a new Container object with the given values.
-    pub(crate) fn new<T: ToString, R: ToString, S: ToString>(
+    pub(crate) fn new<T: ToString, R: ToString>(
         name: T,
         id: R,
-        handle: S,
         start_policy: StartPolicy,
-        wait_for: Rc<dyn WaitFor>,
-        client: Rc<shiplift::Docker>,
+        wait: Box<dyn WaitFor>,
+        client: Docker,
     ) -> PendingContainer {
         PendingContainer {
             client,
             name: name.to_string(),
             id: id.to_string(),
-            handle_key: handle.to_string(),
-            wait_for,
+            wait: Some(wait),
             start_policy,
         }
     }
@@ -137,22 +131,19 @@ impl PendingContainer {
     /// Run the start command and initiate the WaitFor condition.
     /// Once the PendingContainer is successfully started and the WaitFor condition
     /// has been achived, the RunningContainer is returned.
-    pub(crate) fn start(self) -> impl Future<Item = RunningContainer, Error = DockerTestError> {
-        let wait_for_clone = self.wait_for.clone();
-        let self_clone = self.clone();
+    pub(crate) async fn start(mut self) -> Result<RunningContainer, DockerTestError> {
         self.client
-            .containers()
-            .get(&self.name)
-            .start()
-            .map_err(|e| DockerTestError::Startup(format!("failed to start container: {}", e)))
-            .and_then(move |_| {
-                wait_for_clone.wait_for_ready(self_clone).map_err(|e| {
-                    DockerTestError::Startup(format!(
-                        "failed to wait for container to be ready: {}",
-                        e
-                    ))
-                })
-            })
+            .start_container(&self.name, None::<StartContainerOptions<String>>)
+            .await
+            .map_err(|e| DockerTestError::Startup(format!("failed to start container: {}", e)))?;
+
+        let waitfor = self.wait.take().unwrap();
+
+        // Issue WaitFor operation
+        let res = waitfor.wait_for_ready(self);
+        res.await.map_err(|e| {
+            DockerTestError::Startup(format!("failed to wait for container to be ready: {}", e))
+        })
     }
 }
 

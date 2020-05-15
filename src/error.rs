@@ -14,10 +14,12 @@ pub enum DockerTestError {
     Teardown(String),
     #[error("pulling image from remote repository failed")]
     Pull(String),
-    #[error("startup condition not fulfilled")]
+    #[error("startup condition not fulfilled `{0}`")]
     Startup(String),
     #[error("processing error condition")]
     Processing(String),
+    #[error("test body failure `{0}`")]
+    TestBody(String),
 
     /// Catch-all IO error condition
     #[error("IO error condition")]

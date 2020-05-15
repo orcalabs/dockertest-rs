@@ -2,14 +2,15 @@
 
 use crate::DockerTestError;
 
-use futures::future::{self, Future};
-use futures::stream::Stream;
-use shiplift::builder::PullOptions;
+use bollard::{image::CreateImageOptions, Docker};
+use futures::stream::StreamExt;
 use std::rc::Rc;
 use std::sync::RwLock;
+use tracing::{event, Level};
 
-/// Represents a docker image, and describes
-/// where its stored (locally or remote).
+/// Represents a docker `Image`.
+///
+/// This structure embeds the information related to its naming, tag and `Source` location.
 #[derive(Clone)]
 pub struct Image {
     repository: String,
@@ -18,7 +19,7 @@ pub struct Image {
     id: Rc<RwLock<String>>,
 }
 
-/// Represents the source of an Image.
+/// Represents the `Source` of an `Image`.
 #[derive(Clone)]
 pub enum Source {
     /// Use the local docker daemon storage.
@@ -29,10 +30,9 @@ pub enum Source {
     Remote(Remote),
 }
 
-/// Represents a remote registry,
-/// currently only described by an address.
-// TODO: Add possibility for credentials, either here
-// or in another abstraction
+/// Represents a custom remote docker registry.
+///
+/// NOTE: This is currently not properly supported.
 #[derive(Clone)]
 pub struct Remote {
     address: String,
@@ -51,8 +51,9 @@ pub enum PullPolicy {
 }
 
 impl Image {
-    /// Creates an Image with the given repository, will default
-    /// to the latest tag and local source.
+    /// Creates an `Image` with the given `repository`.
+    ///
+    /// The default tag is `latest` and its source is `Source::Local`.
     pub fn with_repository<T: ToString>(repository: T) -> Image {
         Image {
             repository: repository.to_string(),
@@ -62,8 +63,9 @@ impl Image {
         }
     }
 
-    /// Sets the tag for this image,
-    /// default value is latest.
+    /// Set the tag for this `Image`.
+    ///
+    /// If left unconfigured, it will default to `latest`.
     pub fn tag<T: ToString>(self, tag: T) -> Image {
         Image {
             tag: tag.to_string(),
@@ -71,7 +73,9 @@ impl Image {
         }
     }
 
-    /// Sets the source for this image. Default value is local.
+    /// Set the `Source` for this `Image`.
+    ///
+    /// If left unconfigured, it will default to `Source::Local`.
     pub fn source(self, source: Source) -> Image {
         Image {
             source: Some(source),
@@ -79,7 +83,9 @@ impl Image {
         }
     }
 
-    /// Returns the repository.
+    /// Returns the repository of this `Image`.
+    ///
+    /// This property is often generalized as the variable `name`.
     pub(crate) fn repository(&self) -> &str {
         &self.repository
     }
@@ -91,94 +97,91 @@ impl Image {
     }
 
     // Pulls the image from its source with the given docker client.
-    fn do_pull<'a>(
-        &'a self,
-        client: &Rc<shiplift::Docker>,
-    ) -> impl Future<Item = (), Error = DockerTestError> + 'a {
-        let pull_options = PullOptions::builder()
-            .image(self.repository.clone())
-            .repo(self.repository.clone())
-            .tag(self.tag.clone())
-            .build();
+    async fn do_pull(&self, client: &Docker) -> Result<(), DockerTestError> {
+        let options = Some(CreateImageOptions::<&str> {
+            from_image: &self.repository,
+            repo: &self.repository,
+            tag: &self.tag,
+            ..Default::default()
+        });
 
-        shiplift::Images::new(&client)
-            .pull(&pull_options)
-            .collect()
-            .map(|_| ())
-            .map_err(move |e| {
-                DockerTestError::Pull(format!(
-                    "failed to pull image: {}:{}, reason: {}",
-                    self.repository, self.tag, e,
-                ))
-            })
+        // NOTE: create_image for some reason returns a stream of items.
+        match client.create_image(options, None, None).next().await {
+            Some(_) => {
+                event!(Level::DEBUG, "successfully pulled image");
+                Ok(())
+            }
+            None => Err(DockerTestError::Pull(format!(
+                "failed to pull image: {}:{}, reason: empty stream result",
+                self.repository, self.tag
+            ))),
+        }
     }
 
     // Retrieves the id of the image from the local docker daemon and
     // sets that id field in image to that value.
     // If this method is invoked and the image does not exist locally,
     // it will return an error.
-    fn retrieve_and_set_id<'a>(
-        &'a self,
-        client: Rc<shiplift::Docker>,
-    ) -> impl Future<Item = (), Error = DockerTestError> + 'a {
-        client
-            .images()
-            .get(&format!("{}:{}", self.repository, self.tag))
-            .inspect()
-            .and_then(move |details| {
+    async fn retrieve_and_set_id(&self, client: &Docker) -> Result<(), DockerTestError> {
+        match client
+            .inspect_image(&format!("{}:{}", self.repository, self.tag))
+            .await
+        {
+            Ok(details) => {
                 let mut id = self.id.write().expect("failed to get id lock");
                 *id = details.id;
-                future::ok(())
-            })
-            .map_err(|e| DockerTestError::Pull(format!("failed to retrieve id of image: {}", e)))
+                Ok(())
+            }
+            Err(e) => Err(DockerTestError::Pull(format!(
+                "failed to retrieve id of image: {}",
+                e
+            ))),
+        }
     }
 
-    // Checks wether the image exists locally, will return false
-    // if it does not exists, but will also return false if we
-    // fail to contact the docker daemon.
-    // TODO: Return error if docker daemon is unavailable.
-    fn does_image_exist<'a>(
-        &'a self,
-        client: Rc<shiplift::Docker>,
-    ) -> impl Future<Item = bool, Error = DockerTestError> + 'a {
-        client
-            .images()
-            .get(&format!("{}:{}", self.repository, self.tag))
-            .inspect()
-            .then(|res| future::ok(res.is_ok()))
+    /// Checks whether the image exists locally through attempting to inspect it.
+    ///
+    /// If docker daemon communication failed, we will also implicitly return false.
+    async fn does_image_exist(&self, client: &Docker) -> Result<bool, DockerTestError> {
+        match client
+            .inspect_image(&format!("{}:{}", self.repository, self.tag))
+            .await
+        {
+            Ok(_) => Ok(true),
+            Err(_) => Ok(false),
+        }
     }
 
-    /// Pulls the image if neccessary.
-    /// The pulling decision is decided by the image's Source and PullPolicy.
-    pub(crate) fn pull<'a>(
-        &'a self,
-        client: Rc<shiplift::Docker>,
-        default_source: &'a Source,
-    ) -> impl Future<Item = (), Error = DockerTestError> + 'a {
+    /// Pulls the `Image` if neccessary.
+    ///
+    /// This function respects the `Image` Source and PullPolicy settings.
+    pub(crate) async fn pull(
+        &self,
+        client: &Docker,
+        default_source: &Source,
+    ) -> Result<(), DockerTestError> {
         let pull_source = match &self.source {
             None => default_source,
             Some(r) => r,
         };
 
-        let client_clone = client.clone();
-        self.does_image_exist(client.clone())
-            .and_then(move |exists| match self.should_pull(exists, &pull_source) {
-                Ok(do_pull) => {
-                    if do_pull {
-                        future::Either::A(self.do_pull(&client))
-                    } else {
-                        future::Either::B(future::ok(()))
-                    }
-                }
-                Err(e) => future::Either::B(future::err(e)),
-            })
-            .map_err(|e| DockerTestError::Pull(format!("failed to pull image: {}", e)))
-            .and_then(move |_| self.retrieve_and_set_id(client_clone))
-            .map(|_| ())
+        let exists = self.does_image_exist(client).await?;
+
+        let pull = self.should_pull(exists, &pull_source)?;
+        if pull {
+            self.do_pull(client).await?;
+        }
+
+        // FIXME: If we encounter a scenario where the image should not be pulled, we need to err
+        // with appropriate information. Currently, it fails with the same error message as
+        // other scenarios.
+        self.retrieve_and_set_id(client).await
     }
 
-    // Decides wether we should pull the image based on its
-    // Source, PullPolicy, and if it exists locally.
+    /// Determine whether or not the `Image` should be pulled from `Source`.
+    ///
+    /// This function will consult the `Source`, `PullPolicy` and whether it already
+    /// exists on the local docker daemon.
     fn should_pull(&self, exists: bool, source: &Source) -> Result<bool, DockerTestError> {
         match source {
             Source::Remote(r) => is_valid_pull_policy(exists, r.pull_policy()),
@@ -216,10 +219,8 @@ fn is_valid_pull_policy(exists: bool, pull_policy: &PullPolicy) -> Result<bool, 
     }
 }
 
-// TODO: Use the address to contact a remote repository. As of now we always default to docker hub.
-// We also have to be able to add credentials somewhere.
 impl Remote {
-    /// Creates a new remote with the given address and PullPolicy.
+    /// Creates a new remote with the given address and `PullPolicy`.
     pub fn new<T: ToString>(address: &T, pull_policy: PullPolicy) -> Remote {
         Remote {
             address: address.to_string(),
@@ -227,7 +228,7 @@ impl Remote {
         }
     }
 
-    /// Returns this remote's PullPolicy.
+    /// Returns the `PullPolicy associated with  this `Remote`.
     pub(crate) fn pull_policy(&self) -> &PullPolicy {
         &self.pull_policy
     }

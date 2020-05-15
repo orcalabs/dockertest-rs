@@ -3,8 +3,7 @@
 
 use crate::container::{PendingContainer, RunningContainer};
 use crate::DockerTestError;
-
-use futures::future::Future;
+pub use async_trait::async_trait;
 
 mod message;
 mod nowait;
@@ -15,14 +14,15 @@ pub use nowait::NoWait;
 pub use status::{ExitedWait, RunningWait};
 
 /// Trait to wait for a container to be ready for service.
-pub trait WaitFor {
+#[async_trait]
+pub trait WaitFor: Send {
     /// Method implementation should return a future that resolves once the condition
     /// described by the implementing structure is fulfilled. Once this successfully resolves,
     /// the container is marked as ready.
     ///
     // TODO: Implement error propagation with the container id that failed for cleanup
-    fn wait_for_ready(
+    async fn wait_for_ready(
         &self,
         container: PendingContainer,
-    ) -> Box<dyn Future<Item = RunningContainer, Error = DockerTestError>>;
+    ) -> Result<RunningContainer, DockerTestError>;
 }

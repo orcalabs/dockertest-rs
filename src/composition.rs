@@ -5,15 +5,22 @@ use crate::image::Image;
 use crate::waitfor::{NoWait, WaitFor};
 use crate::DockerTestError;
 
-use futures::future::{self, Future};
-use shiplift::builder::{ContainerOptions, RmContainerOptions};
+use bollard::{
+    container::{Config, CreateContainerOptions, InspectContainerOptions, RemoveContainerOptions},
+    Docker,
+};
+use futures::future::TryFutureExt;
 use std::collections::HashMap;
-use std::rc::Rc;
+use tracing::{event, Level};
 
-/// Specifies the starting policy of a Composition.
-/// A Strict policy will enforce that the Composition is started in the order
-/// it was added to DockerTest. A Relaxed policy will not enforce any ordering,
+/// Specifies the starting policy of a `Composition`.
+///
+/// A `Strict` policy will enforce that the Composition is started in the order
+/// it was added to dockertest. A `Relaxed` policy will not enforce any ordering,
 /// all Compositions with a Relaxed policy will be started concurrently.
+///
+/// All relaxed compositions is asynchronously started before sequentially
+/// starting all with a strict `StartPolicy`.
 #[derive(Clone, PartialEq)]
 pub enum StartPolicy {
     /// Concurrently start the Container with other Relaxed instances.
@@ -23,7 +30,8 @@ pub enum StartPolicy {
 }
 
 /// Represents an instance of an [Image].
-/// The Composition is used to specialize an Image whose name, version, tag and source is known,
+///
+/// The `Composition` is used to specialize an Image whose name, version, tag and source is known,
 /// but before one can create a [RunningContainer] from an Image, it must be augmented with
 /// information about how to start it, how to ensure it has been started, environment variables
 /// and runtime commands.
@@ -42,7 +50,6 @@ pub enum StartPolicy {
 ///
 /// [Image]: struct.Image.html
 /// [RunningContainer]: struct.RunningContainer.html
-#[derive(Clone)]
 pub struct Composition {
     /// User provided name of the container.
     /// This will dictate the final container_name and the container_handle_key of the container
@@ -63,7 +70,7 @@ pub struct Composition {
     /// be created to be ready for service.
     /// Defaults to waiting for the container
     /// to appear as running.
-    wait: Rc<dyn WaitFor>,
+    wait: Box<dyn WaitFor>,
 
     /// The environmentable variables that will be
     /// passed to the container.
@@ -71,8 +78,6 @@ pub struct Composition {
 
     /// The command to pass to the container.
     cmd: Vec<String>,
-
-    port: HashMap<u32, u32>,
 
     /// The StartPolicy of this Composition,
     /// defaults to relaxed.
@@ -87,11 +92,12 @@ pub struct Composition {
 }
 
 impl Composition {
-    /// Creates a Composition based on the Image repository name provided.
+    /// Creates a `Composition` based on the `Image` repository name provided.
+    ///
     /// This will internally create the [Image] based on the provided repository name,
     /// and default the tag to `latest`.
     ///
-    /// This is the shortcut method of constructing a Composition.
+    /// This is the shortcut method of constructing a `Composition`.
     /// See [with_image] to create one with a provided [Image].
     ///
     /// [Image]: struct.Image.html
@@ -102,17 +108,17 @@ impl Composition {
             user_provided_container_name: None,
             image: Image::with_repository(&copy),
             container_name: copy,
-            wait: Rc::new(NoWait {}),
+            wait: Box::new(NoWait {}),
             env: HashMap::new(),
             cmd: Vec::new(),
-            port: HashMap::new(),
             start_policy: StartPolicy::Relaxed,
             volumes: Vec::new(),
         }
     }
 
-    /// Creates a Composition with the provided Image.
-    /// This is the long-winded way of defining a Composition.
+    /// Creates a `Composition` with the provided `Image`.
+    ///
+    /// This is the long-winded way of defining a `Composition`.
     /// See [with_repository] to for the shortcut method.
     ///
     /// [with_repository]: struct.Composition.html#method.with_repository
@@ -121,16 +127,16 @@ impl Composition {
             user_provided_container_name: None,
             container_name: image.repository().to_string(),
             image,
-            wait: Rc::new(NoWait {}),
+            wait: Box::new(NoWait {}),
             env: HashMap::new(),
             cmd: Vec::new(),
-            port: HashMap::new(),
             start_policy: StartPolicy::Relaxed,
             volumes: Vec::new(),
         }
     }
 
-    /// Sets the start_policy for this Composition.
+    /// Sets the `StartPolicy` for this `Composition`.
+    ///
     /// Defaults to a [relaxed] policy.
     ///
     /// [relaxed]: enum.StartPolicy.html#variant.Relaxed
@@ -142,6 +148,7 @@ impl Composition {
     }
 
     /// Assigns the full set of environmental variables available for the [RunningContainer].
+    ///
     /// Each key in the map should be the environmental variable name
     /// and its corresponding value will be set as its value.
     ///
@@ -164,10 +171,11 @@ impl Composition {
     }
 
     /// Sets the name of the container that will eventually be started.
+    ///
     /// This is merely part of the final container name, and the full container name issued
     /// to docker will be generated.
     /// The container name assigned here is also used to resolve the `handle` concept used
-    /// by _dockertest_.
+    /// by dockertest.
     ///
     /// The container name defaults to the repository name.
     pub fn with_container_name<T: ToString>(self, container_name: T) -> Composition {
@@ -177,12 +185,12 @@ impl Composition {
         }
     }
 
-    /// Sets the wait_for trait object for this Composition.
+    /// Sets the `WaitFor` trait object for this `Composition`.
     ///
-    /// The default WaitFor implementation used is [RunningWait].
+    /// The default `WaitFor` implementation used is [RunningWait].
     ///
     /// [RunningWait]: waitfor/struct.RunningWait.html
-    pub fn with_wait_for(self, wait: Rc<dyn WaitFor>) -> Composition {
+    pub fn with_wait_for(self, wait: Box<dyn WaitFor>) -> Composition {
         Composition { wait, ..self }
     }
 
@@ -212,13 +220,6 @@ impl Composition {
         self
     }
 
-    /// Adds the exported -> host port mapping.
-    /// If an exported port already exists, it will be overridden.
-    pub fn port_map(&mut self, exported: u32, host: u32) -> &mut Composition {
-        self.port.insert(exported, host);
-        self
-    }
-
     /// Adds the given volume to the Composition.
     /// The name must match a volume added to the DockerTest instance.
     /// The volume will be mounted into the container on the given path.
@@ -232,6 +233,15 @@ impl Composition {
             volume_name.to_string(),
             path_in_container.to_string()
         ));
+        self
+    }
+
+    /// rofl
+    pub fn inject_container_name<T: ToString, E: ToString>(
+        &mut self,
+        handle: T,
+        env: E,
+    ) -> &mut Composition {
         self
     }
 
@@ -257,86 +267,63 @@ impl Composition {
 
     // Consumes the Composition, creates the container and returns the Container object if it
     // was succesfully created.
-    pub(crate) fn create<'a>(
-        self,
-        client: Rc<shiplift::Docker>,
-    ) -> impl Future<Item = PendingContainer, Error = DockerTestError> + 'a {
-        println!("starting container: {}", self.container_name);
+    pub(crate) async fn create(self, client: &Docker) -> Result<PendingContainer, DockerTestError> {
+        event!(Level::INFO, "starting container: {}", self.container_name);
 
-        let wait_for_clone = self.wait.clone();
         let start_policy_clone = self.start_policy.clone();
-
         let container_name_clone = self.container_name.clone();
 
-        let c1 = client.clone();
+        // Ensure we can remove the previous container instance, if it somehow still exists.
+        // Only bail on non-recoverable failure.
+        match remove_container_if_exists(client, &self.container_name).await {
+            Ok(_) => {}
+            Err(e) => match e {
+                DockerTestError::Recoverable(_) => {}
+                _ => return Err(e),
+            },
+        }
 
-        let handle = match &self.user_provided_container_name {
-            None => self.image.repository().to_string(),
-            Some(n) => n.clone(),
+        // As we can't return temporary values owned by this closure
+        // we have to first convert our map into a vector of owned strings,
+        // then convert it to a vector of borrowed strings (&str).
+        // There is probably a better way to do this...
+        let envs: Vec<String> = self
+            .env
+            .iter()
+            .map(|(key, value)| format!("{}={}", key, value))
+            .collect();
+        let envs = envs.iter().map(|s| s.as_ref()).collect();
+        let cmds = self.cmd.iter().map(|s| s.as_ref()).collect();
+        let mut volumes: HashMap<&str, HashMap<(), ()>> = HashMap::new();
+        for v in self.volumes.iter() {
+            volumes.insert(v.as_str(), HashMap::new());
+        }
+        let image_id = self.image.retrieved_id();
+
+        // Construct options for create container
+        let options = Some(CreateContainerOptions {
+            name: &self.container_name,
+        });
+        let config = Config::<&str> {
+            image: Some(&image_id),
+            cmd: Some(cmds),
+            env: Some(envs),
+            volumes: Some(volumes),
+            ..Default::default()
         };
 
-        let remove_fut = remove_container_if_exists(client.clone(), self.container_name.clone());
+        let container_info = client
+            .create_container(options, config)
+            .map_err(|e| DockerTestError::Daemon(format!("failed to create container: {}", e)))
+            .await?;
 
-        remove_fut
-            .then(|res| match res {
-                Ok(_) => Ok(()),
-                Err(e) => match e {
-                    DockerTestError::Recoverable(_) => Ok(()),
-                    _ => Err(e),
-                },
-            })
-            .and_then(move |_| {
-                // As we can't return temporary values owned by this closure
-                // we have to first convert our map into a vector of owned strings,
-                // then convert it to a vector of borrowed strings (&str).
-                // There is probably a better way to do this...
-                let envs: Vec<String> = self
-                    .env
-                    .iter()
-                    .map(|(key, value)| format!("{}={}", key, value))
-                    .collect();
-                let envs = envs.iter().map(|s| s.as_ref()).collect();
-                let cmds = self.cmd.iter().map(|s| s.as_ref()).collect();
-
-                let volumes: Vec<&str> = self.volumes.iter().map(|v| v.as_str()).collect();
-
-                let containers = c1.containers();
-
-                let image_id = self.image.retrieved_id();
-                let mut options_builder = ContainerOptions::builder(&image_id);
-                options_builder
-                    .cmd(cmds)
-                    .env(envs)
-                    .volumes(volumes)
-                    .name(&self.container_name);
-
-                // Handle ports
-                if self.port.is_empty() {
-                    // TODO: export ALL ports
-                } else {
-                    // Export the specific ports
-                    for (export, host) in &self.port {
-                        options_builder.expose(*export, "tcp", *host);
-                    }
-                }
-
-                let container_options = options_builder.build();
-                containers.create(&container_options).map_err(|e| {
-                    DockerTestError::Daemon(format!("failed to create container: {}", e))
-                })
-            })
-            .and_then(move |container_info| {
-                let container = PendingContainer::new(
-                    &container_name_clone,
-                    &container_info.id,
-                    handle,
-                    start_policy_clone,
-                    wait_for_clone,
-                    client.clone(),
-                );
-
-                future::ok(container)
-            })
+        Ok(PendingContainer::new(
+            &container_name_clone,
+            &container_info.id,
+            start_policy_clone,
+            self.wait,
+            client.clone(),
+        ))
     }
 
     // Returns the Image associated with this Composition.
@@ -354,22 +341,22 @@ impl Composition {
 }
 
 // Forcefully removes the given container if it exists.
-fn remove_container_if_exists(
-    client: Rc<shiplift::Docker>,
-    name: String,
-) -> impl Future<Item = (), Error = DockerTestError> {
+async fn remove_container_if_exists(client: &Docker, name: &str) -> Result<(), DockerTestError> {
     client
-        .containers()
-        .get(&name)
-        .inspect()
+        .inspect_container(name, None::<InspectContainerOptions>)
         .map_err(|e| DockerTestError::Recoverable(format!("container did not exist: {}", e)))
-        .and_then(move |_| {
-            let opts = RmContainerOptions::builder().force(true).build();
-            client.containers().get(&name).remove(opts).map_err(|e| {
-                DockerTestError::Daemon(format!("failed to remove existing container: {}", e))
-            })
-        })
-        .map(|_| ())
+        .await?;
+
+    // We were able to inspect it successfully, it exists.
+    // Therefore, we can simply force remove it.
+    let options = Some(RemoveContainerOptions {
+        force: true,
+        ..Default::default()
+    });
+    client
+        .remove_container(name, options)
+        .map_err(|e| DockerTestError::Daemon(format!("failed to remove existing container: {}", e)))
+        .await
 }
 
 #[cfg(test)]

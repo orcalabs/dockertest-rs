@@ -1,21 +1,20 @@
 //! `WaitFor` implementation: `NoWait`.
 
 use crate::container::{PendingContainer, RunningContainer};
-use crate::waitfor::WaitFor;
+use crate::waitfor::{async_trait, WaitFor};
 use crate::DockerTestError;
-
-use futures::future::{self, Future};
 
 /// The NoWait `WaitFor` implementation for containers.
 /// This variant does not wait for anything, resolves immediately.
 pub struct NoWait {}
 
+#[async_trait]
 impl WaitFor for NoWait {
-    fn wait_for_ready(
+    async fn wait_for_ready(
         &self,
         container: PendingContainer,
-    ) -> Box<dyn Future<Item = RunningContainer, Error = DockerTestError>> {
-        Box::new(future::ok(container.into()))
+    ) -> Result<RunningContainer, DockerTestError> {
+        Ok(container.into())
     }
 }
 

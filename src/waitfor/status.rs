@@ -1,125 +1,123 @@
 //! `WaitFor` implementations regarding status changes.
 
 use crate::container::{PendingContainer, RunningContainer};
-use crate::waitfor::WaitFor;
+use crate::waitfor::{async_trait, WaitFor};
 use crate::DockerTestError;
 
-use futures::future::{self, Future};
-use futures::stream::Stream;
+use bollard::container::{InspectContainerOptions, State};
+use futures::stream::StreamExt;
 use std::sync::atomic::{self, AtomicBool};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
-use tokio::timer::Interval;
+use tokio::time::{interval, timeout, Duration};
+use tracing::{event, Level};
 
 /// The RunningWait `WaitFor` implementation for containers.
 /// This variant will wait until the docker daemon reports the container as running.
 pub struct RunningWait {
     /// How many seconds shall there be between each check for running state.
-    pub check_interval: i32,
+    pub check_interval: u64,
     /// The number of checks to perform before erroring out.
-    pub max_checks: i32,
+    pub max_checks: u64,
 }
 
 /// The ExitedWait `WaitFor` implementation for containers.
 /// This variant will wait until the docker daemon reports that the container has exited.
 pub struct ExitedWait {
     /// How many seconds shall there be between each check for running state.
-    pub check_interval: i32,
+    pub check_interval: u64,
     /// The number of checks to perform before erroring out.
-    pub max_checks: i32,
+    pub max_checks: u64,
 }
 
+#[async_trait]
 impl WaitFor for RunningWait {
-    fn wait_for_ready(
+    async fn wait_for_ready(
         &self,
         container: PendingContainer,
-    ) -> Box<dyn Future<Item = RunningContainer, Error = DockerTestError>> {
-        let liveness_future =
-            wait_for_container_state(container, self.check_interval, self.max_checks, |state| {
-                state.running
-            });
-
-        Box::new(liveness_future)
+    ) -> Result<RunningContainer, DockerTestError> {
+        wait_for_container_state(container, self.check_interval, self.max_checks, |state| {
+            state.running
+        })
+        .await
     }
 }
 
+#[async_trait]
 impl WaitFor for ExitedWait {
-    fn wait_for_ready(
+    async fn wait_for_ready(
         &self,
         container: PendingContainer,
-    ) -> Box<dyn Future<Item = RunningContainer, Error = DockerTestError>> {
-        let liveness_future =
-            wait_for_container_state(container, self.check_interval, self.max_checks, |state| {
-                !state.running
-            });
-
-        Box::new(liveness_future)
+    ) -> Result<RunningContainer, DockerTestError> {
+        wait_for_container_state(container, self.check_interval, self.max_checks, |state| {
+            !state.running
+        })
+        .await
     }
 }
 
-fn wait_for_container_state(
+async fn wait_for_container_state(
     container: PendingContainer,
-    check_interval: i32,
-    max_checks: i32,
-    container_state_compare: fn(&shiplift::rep::State) -> bool,
-) -> impl Future<Item = RunningContainer, Error = DockerTestError> {
-    let client = shiplift::Docker::new();
-    let container_name = container.name.to_string();
+    check_interval: u64,
+    max_checks: u64,
+    container_state_compare: fn(&State) -> bool,
+) -> Result<RunningContainer, DockerTestError> {
+    let client = &container.client;
 
-    let desired_state = Arc::new(AtomicBool::new(false));
+    let s1 = Arc::new(AtomicBool::new(false));
+    let s2 = s1.clone();
 
-    let desired_state_clone = desired_state.clone();
-    let desired_state_clone2 = desired_state.clone();
+    // Periodically check container state in an interval.
+    // At one point in the future, this check will time out with an error.
+    // Once the desired state has been fulfilled within the time out period,
+    // the operation returns successfully.
 
-    Interval::new(Instant::now(), Duration::from_millis(check_interval as u64))
-        // Limits us to only check status for the given amount of tries
-        .take(max_checks as u64)
-        .map_err(|e| {
-            DockerTestError::Processing(format!("failed to check container liveness: {}", e))
-        })
-        // While continue checking container status until the desired state is reached.
-        // If the desired state is reached we return false to stop the stream.
-        .take_while(move |_| {
-            let s = desired_state_clone.load(atomic::Ordering::SeqCst);
-            if s {
-                future::ok(false)
-            } else {
-                future::ok(true)
-            }
-        })
-        .for_each(move |_| {
-            let desired_state_clone3 = desired_state.clone();
-            client
-                .containers()
-                .get(&container_name)
-                .inspect()
-                .map_err(|e| {
-                    DockerTestError::Processing(format!("failed to inspect container: {}", e))
-                })
-                .and_then(move |c| {
-                    if container_state_compare(&c.state) {
-                        desired_state_clone3.store(true, atomic::Ordering::SeqCst);
-                    }
+    // Double fucking copy due to FnMut capturing scope and async return values
+    let c1 = client.clone();
+    let n1 = container.name.clone();
 
-                    future::ok(())
-                })
-        })
-        .then(move |r| {
-            // We failed checking the status of the container
-            if let Err(e) = r {
-                future::Either::B(future::err(DockerTestError::Processing(format!("{:?}", e))))
-            } else {
-                let s = desired_state_clone2.load(atomic::Ordering::SeqCst);
-                // The desired status has been reached and we can return Ok
-                if s {
-                    future::Either::A(future::ok(container.into()))
-                } else {
-                    // The desired status was not reached and we return an error
-                    future::Either::B(future::err(DockerTestError::Processing(format!(
-                        "container failed to reach desired container state, container name: {}",
-                        container.name
-                    ))))
+    // Perform the operation every check_interval until we get the desired state
+    let check_fut = async {
+        interval(Duration::from_secs(check_interval))
+            .take_while(move |_| {
+                let n2 = n1.clone();
+                let c2 = c1.clone();
+                let s3 = s1.clone();
+                async move {
+                    let val: bool = match c2
+                        .inspect_container(&n2, None::<InspectContainerOptions>)
+                        .await
+                    {
+                        Ok(container) if container_state_compare(&container.state) => {
+                            s3.store(true, atomic::Ordering::SeqCst);
+                            false
+                        }
+                        _ => true,
+                    };
+
+                    val
                 }
+            })
+            .collect::<Vec<_>>()
+            .await
+    };
+
+    // Run the check operation for a specified time period, aborting if it
+    // does not complete in the alloted time.
+    match timeout(Duration::from_secs(check_interval * max_checks), check_fut).await {
+        Ok(_) => {
+            if s2.load(atomic::Ordering::SeqCst) {
+                Ok(container.into())
+            } else {
+                Err(DockerTestError::Startup(
+                    "status waitfor is not triggered".to_string(),
+                ))
             }
-        })
+        }
+        Err(_) => {
+            event!(Level::WARN, "awaiting container state timed out");
+            Err(DockerTestError::Startup(
+                "awaiting container state timed out".to_string(),
+            ))
+        }
+    }
 }
