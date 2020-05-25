@@ -68,6 +68,25 @@
 //! * "stop_on_failure": stop containers on exeuction failure
 //! * "running_on_failure": leave containers running on execution failure
 //!
+//! # Viewing logs of test execution
+//! _dockertest_ utilizes the `tracing` log infrastructure. To enable this log output,
+//! you must perform enable a subscriber to handle the events.
+//! This can easily be done by for instance the wrapper crate `test-env-log`, that provides
+//! a new impl of the `#[test]` attribute.
+//!
+//! .Cargo.toml
+//! ```
+//! [dev-dependencies]
+//! tracing = "0.1.13"
+//! tracing-subscriber = "0.2"
+//! test-env-log = { version = "0.2", default-features = false, features = ["trace"] }
+//! ```
+//!
+//! .Top of test file
+//! ```
+//! use test_env_log::test;
+//! ```
+//!
 //! # Example
 //!
 //! ```rust
