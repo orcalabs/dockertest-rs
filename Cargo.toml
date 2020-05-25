@@ -27,3 +27,6 @@ rand = "0.7.3"
 [dev-dependencies]
 diesel = { version = "1.0", features = ["postgres"] }
 test-env-log = { version = "0.2", default-features = false, features = ["trace"] }
+
+[build-dependencies]
+anyhow = "1.0.30"
