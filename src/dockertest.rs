@@ -6,6 +6,7 @@ use crate::{Composition, DockerTestError, StartPolicy};
 
 use bollard::{
     container::{InspectContainerOptions, RemoveContainerOptions, StopContainerOptions},
+    network::CreateNetworkOptions,
     volume::{CreateVolumeOptions, RemoveVolumeOptions},
     Docker,
 };
@@ -52,6 +53,8 @@ pub struct DockerTest {
     default_source: Source,
     /// All user specified named volumes, will be created on dockertest startup.
     volumes: Vec<String>,
+    /// The associated network created for this test, that all containers run within.
+    network: String,
 }
 
 impl Default for DockerTest {
@@ -62,6 +65,7 @@ impl Default for DockerTest {
             namespace: "dockertest-rs".to_string(),
             client: Docker::connect_with_local_defaults().expect("local docker daemon connection"),
             volumes: Vec::new(),
+            network: format!("dockertest-rs-{}", generate_random_string(20)),
         }
     }
 }
@@ -243,11 +247,18 @@ impl DockerTest {
         // prior to creating the PendingContainer (in the future).
         // It therefore makes sense to split the verification/handling upfront,
         // so it is streamlined with the teardown regardless of when it must be performed.
-        let compositions: Keeper<Composition> = self.validate_composition_handlers();
+        let mut compositions: Keeper<Composition> = self.validate_composition_handlers();
+
+        self.resolve_final_container_name(&mut compositions);
+
+        self.resolve_inject_container_name_env(&mut compositions)?;
 
         // Make sure all the images are present on the local docker daemon before we create
         // the containers from them.
         self.pull_images(&compositions).await?;
+
+        // Create the network
+        self.create_network().await?;
 
         // Create PendingContainers from the Compositions
         let pending_containers: Keeper<PendingContainer> =
@@ -289,12 +300,26 @@ impl DockerTest {
                 .await
             {
                 Ok(details) => {
-                    c.ip = details
-                        .network_settings
-                        .ip_address
-                        .parse::<std::net::Ipv4Addr>()
-                        // Exited containers will not have an IP address
-                        .unwrap_or_else(|_| std::net::Ipv4Addr::UNSPECIFIED)
+                    // Get the ip address from the network
+                    c.ip = if let Some(network) =
+                        details.network_settings.networks.get(&self.network)
+                    {
+                        event!(
+                            Level::DEBUG,
+                            "container ip from inspect: {}",
+                            network.ip_address
+                        );
+                        network
+                            .ip_address
+                            .parse::<std::net::Ipv4Addr>()
+                            // Exited containers will not have an IP address
+                            .unwrap_or_else(|e| {
+                                event!(Level::TRACE, "container ip address failed to parse: {}", e);
+                                std::net::Ipv4Addr::UNSPECIFIED
+                            })
+                    } else {
+                        std::net::Ipv4Addr::UNSPECIFIED
+                    }
                 }
                 Err(e) => {
                     // This error is extraordinary - worth terminating everything.
@@ -353,6 +378,83 @@ impl DockerTest {
         &self.default_source
     }
 
+    /// Perform the magic transformation info the final container name.
+    fn resolve_final_container_name(&self, compositions: &mut Keeper<Composition>) {
+        for c in compositions.kept.iter_mut() {
+            let suffix = generate_random_string(20);
+            c.configure_container_name(&self.namespace, &suffix);
+        }
+    }
+
+    /// This function assumes that `resolve_final_container_name` has already been called.
+    fn resolve_inject_container_name_env(
+        &self,
+        compositions: &mut Keeper<Composition>,
+    ) -> Result<(), DockerTestError> {
+        // Due to ownership issues, we must iterate once to verify that the handlers resolve
+        // correctly, and thereafter we must apply the mutable changes to the env
+        let mut composition_transforms: Vec<Vec<(String, String, String)>> = Vec::new();
+
+        for c in compositions.kept.iter() {
+            let transformed: Result<Vec<(String, String, String)>, DockerTestError>
+                = c.inject_container_name_env.iter().map(|(handle, env)| {
+                // Guard against duplicate handle usage.
+                if compositions.lookup_collisions.contains(handle) {
+                    return Err(DockerTestError::Startup(format!("composition `{}` attempted to inject_container_name_env on duplicate handle `{}`", c.handle(), handle)));
+                }
+
+                // Resolve the handle
+                let index: usize = match compositions.lookup_handlers.get(handle) {
+                    Some(i) => *i,
+                    // TODO: usererror
+                    None => return Err(DockerTestError::Startup(format!("composition `{}` attempted to inject_container_name_env on non-existent handle `{}`", c.handle(), handle))),
+                };
+
+                let container_name = compositions.kept[index].container_name.clone();
+
+                Ok((handle.clone(), container_name, env.clone()))
+            }).collect();
+
+            composition_transforms.push(transformed?);
+        }
+
+        for (index, c) in compositions.kept.iter_mut().enumerate() {
+            for (handle, name, env) in composition_transforms[index].iter() {
+                // Inject the container name into env
+                if let Some(old) = c.env.insert(env.to_string(), name.to_string()) {
+                    event!(Level::WARN, "overwriting previously configured environment variable `{} = {}` with injected container name for handle `{}`", env, old, handle);
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn create_network(&self) -> Result<(), DockerTestError> {
+        let config = CreateNetworkOptions {
+            name: self.network.as_str(),
+            ..Default::default()
+        };
+
+        event!(Level::TRACE, "creating network {}", self.network);
+        let res = self
+            .client
+            .create_network(config)
+            .await
+            .map(|_| ())
+            .map_err(|e| {
+                DockerTestError::Startup(format!("creating docker network failed: {}", e))
+            });
+
+        event!(
+            Level::TRACE,
+            "finished created network with result: {}",
+            res.is_ok()
+        );
+
+        res
+    }
+
     /// Creates the set of `PendingContainer`s from the `Composition`s.
     ///
     /// This function assumes that all images required by the `Composition`s are
@@ -361,14 +463,13 @@ impl DockerTest {
         &self,
         compositions: Keeper<Composition>,
     ) -> Result<Keeper<PendingContainer>, Vec<CleanupContainer>> {
+        event!(Level::TRACE, "creating containers");
+
         // NOTE: The insertion order is preserved.
         let mut pending: Vec<PendingContainer> = Vec::new();
 
         for instance in compositions.kept.into_iter() {
-            let suffix = generate_random_string(20);
-            let namespaced_instance = instance.configure_container_name(&self.namespace, &suffix);
-
-            match namespaced_instance.create(&self.client).await {
+            match instance.create(&self.client, &self.network).await {
                 Ok(c) => pending.push(c),
                 Err(_) => {
                     // Error condition arose - we return the successfully created containers
@@ -530,6 +631,8 @@ impl DockerTest {
                         .collect::<Vec<_>>(),
                 )
                 .await;
+
+                self.teardown_network().await;
                 return;
             }
 
@@ -558,6 +661,9 @@ impl DockerTest {
         // successfully.
         join_all(remove_futs).await;
 
+        // Network must be removed after containers have been stopped.
+        self.teardown_network().await;
+
         // Cleanup volumes now
         let mut volume_futs = Vec::new();
         for v in &self.volumes {
@@ -565,6 +671,18 @@ impl DockerTest {
             volume_futs.push(self.client.remove_volume(v, options))
         }
         join_all(volume_futs).await;
+    }
+
+    /// Make sure we remove the network we have previously created.
+    async fn teardown_network(&self) {
+        if let Err(e) = self.client.remove_network(&self.network).await {
+            event!(
+                Level::ERROR,
+                "unable to remove docker network `{}`: {}",
+                self.network,
+                e
+            );
+        }
     }
 
     /// Make sure all `Composition`s registered does not conflict.
@@ -666,6 +784,7 @@ fn sort_running_containers_into_insertion_order(
 fn start_relaxed_containers(
     containers: Vec<PendingContainer>,
 ) -> Vec<JoinHandle<Result<RunningContainer, DockerTestError>>> {
+    event!(Level::TRACE, "beginning starting relaxed containers");
     containers
         .into_iter()
         .map(|c| tokio::spawn(c.start()))
@@ -678,6 +797,7 @@ async fn start_strict_containers(
     let mut running = vec![];
     let mut success = true;
 
+    event!(Level::TRACE, "beginning starting strict containers");
     for c in pending.into_iter() {
         match c.start().await {
             Ok(r) => running.push(r),
@@ -692,6 +812,12 @@ async fn start_strict_containers(
             }
         }
     }
+
+    event!(
+        Level::TRACE,
+        "finished starting strict containers with result: {}",
+        success
+    );
 
     if success {
         Ok(running)
@@ -738,6 +864,12 @@ async fn wait_for_relaxed_containers(
             }
         }
     }
+
+    event!(
+        Level::TRACE,
+        "finished waiting for started relaxed containers with result: {}",
+        success
+    );
 
     if success {
         Ok(running_relaxed)

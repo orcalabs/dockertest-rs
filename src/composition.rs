@@ -6,7 +6,9 @@ use crate::waitfor::{NoWait, WaitFor};
 use crate::DockerTestError;
 
 use bollard::{
-    container::{Config, CreateContainerOptions, InspectContainerOptions, RemoveContainerOptions},
+    container::{
+        Config, CreateContainerOptions, HostConfig, InspectContainerOptions, RemoveContainerOptions,
+    },
     Docker,
 };
 use futures::future::TryFutureExt;
@@ -63,7 +65,7 @@ pub struct Composition {
     /// If the user have provided a user_provided_container_name, the container_name will look like
     /// the following:
     ///     namespace_of_dockerTest - user_provided_container_name - random_generated_suffix
-    container_name: String,
+    pub(crate) container_name: String,
 
     /// Trait object that is responsible for
     /// waiting for the container that will
@@ -74,7 +76,7 @@ pub struct Composition {
 
     /// The environmentable variables that will be
     /// passed to the container.
-    env: HashMap<String, String>,
+    pub(crate) env: HashMap<String, String>,
 
     /// The command to pass to the container.
     cmd: Vec<String>,
@@ -89,6 +91,10 @@ pub struct Composition {
 
     /// Volumes associated with this composition, are in the form of: "HOST_PATH/CONTAINER_PATH"
     volumes: Vec<String>,
+
+    /// All user specified container name injections as environment variables.
+    /// Tuple contains (handle, env).
+    pub(crate) inject_container_name_env: Vec<(String, String)>,
 }
 
 impl Composition {
@@ -113,6 +119,7 @@ impl Composition {
             cmd: Vec::new(),
             start_policy: StartPolicy::Relaxed,
             volumes: Vec::new(),
+            inject_container_name_env: Vec::new(),
         }
     }
 
@@ -132,6 +139,7 @@ impl Composition {
             cmd: Vec::new(),
             start_policy: StartPolicy::Relaxed,
             volumes: Vec::new(),
+            inject_container_name_env: Vec::new(),
         }
     }
 
@@ -236,21 +244,32 @@ impl Composition {
         self
     }
 
-    /// rofl
+    /// Inject the generated container name identified by `handle` into
+    /// this Composition environment variable `env`.
+    ///
+    /// This is used to establish inter communication between running containers
+    /// controlled by dockertest. This is traditionally established through environment variables
+    /// for connection details, and thus the DNS resolving capabilities within docker will
+    /// map the container name into the correct IP address.
+    ///
+    /// To correctly use this feature, the `StartPolicy` between the dependant containers
+    /// must be configured such that these connections can successfully be established.
+    /// Dockertest will not make any attempt to verify the integrity of these dependencies.
     pub fn inject_container_name<T: ToString, E: ToString>(
         &mut self,
         handle: T,
         env: E,
     ) -> &mut Composition {
+        self.inject_container_name_env
+            .push((handle.to_string(), env.to_string()));
         self
     }
 
-    // QUESTION: Should this be consuming self??
     // Configure the container's name with the given namespace as prefix
     // and suffix.
     // We do this to ensure that we do not have overlapping container names
     // and make it clear which containers are run by DockerTest.
-    pub(crate) fn configure_container_name(self, namespace: &str, suffix: &str) -> Composition {
+    pub(crate) fn configure_container_name(&mut self, namespace: &str, suffix: &str) {
         let name = match &self.user_provided_container_name {
             None => self.image.repository(),
             Some(n) => n,
@@ -259,15 +278,16 @@ impl Composition {
         // The docker daemon does not like '/' or '\' in container names
         let stripped_name = name.replace("/", "_");
 
-        Composition {
-            container_name: format!("{}-{}-{}", namespace, stripped_name, suffix),
-            ..self
-        }
+        self.container_name = format!("{}-{}-{}", namespace, stripped_name, suffix);
     }
 
     // Consumes the Composition, creates the container and returns the Container object if it
     // was succesfully created.
-    pub(crate) async fn create(self, client: &Docker) -> Result<PendingContainer, DockerTestError> {
+    pub(crate) async fn create(
+        self,
+        client: &Docker,
+        network: &str,
+    ) -> Result<PendingContainer, DockerTestError> {
         event!(Level::INFO, "starting container: {}", self.container_name);
 
         let start_policy_clone = self.start_policy.clone();
@@ -300,6 +320,12 @@ impl Composition {
         }
         let image_id = self.image.retrieved_id();
 
+        // Construct host config
+        let host_config = HostConfig {
+            network_mode: Some(network),
+            ..Default::default()
+        };
+
         // Construct options for create container
         let options = Some(CreateContainerOptions {
             name: &self.container_name,
@@ -309,6 +335,7 @@ impl Composition {
             cmd: Some(cmds),
             env: Some(envs),
             volumes: Some(volumes),
+            host_config: Some(host_config),
             ..Default::default()
         };
 
