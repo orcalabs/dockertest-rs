@@ -61,6 +61,7 @@ async fn wait_for_message(
     let client = container.client.clone();
     let s1 = Arc::new(AtomicBool::new(false));
     let s2 = s1.clone();
+    let msg_clone = msg.clone();
 
     // Construct the stream
     let stream = client.logs(&container.id, log_options);
@@ -99,7 +100,7 @@ async fn wait_for_message(
                 Ok(container.into())
             } else {
                 Err(DockerTestError::Startup(
-                    "message waitfor not triggered".to_string(),
+                    format!("container `{}` ended log stream (terminated) before waitfor message triggered: `{}`", container.handle, msg_clone),
                 ))
             }
         }
