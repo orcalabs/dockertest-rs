@@ -347,6 +347,7 @@ impl Composition {
         Ok(PendingContainer::new(
             &container_name_clone,
             &container_info.id,
+            self.handle(),
             start_policy_clone,
             self.wait,
             client.clone(),

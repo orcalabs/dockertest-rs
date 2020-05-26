@@ -22,6 +22,9 @@ pub struct PendingContainer {
     /// Id of the running container.
     pub(crate) id: String,
 
+    /// Handle used to interact with the container from the user
+    pub(crate) handle: String,
+
     /// The StartPolicy of this Container, is provided from its Composition.
     pub(crate) start_policy: StartPolicy,
 
@@ -112,9 +115,10 @@ impl RunningContainer {
 
 impl PendingContainer {
     /// Creates a new Container object with the given values.
-    pub(crate) fn new<T: ToString, R: ToString>(
+    pub(crate) fn new<T: ToString, R: ToString, H: ToString>(
         name: T,
         id: R,
+        handle: H,
         start_policy: StartPolicy,
         wait: Box<dyn WaitFor>,
         client: Docker,
@@ -123,6 +127,7 @@ impl PendingContainer {
             client,
             name: name.to_string(),
             id: id.to_string(),
+            handle: handle.to_string(),
             wait: Some(wait),
             start_policy,
         }
