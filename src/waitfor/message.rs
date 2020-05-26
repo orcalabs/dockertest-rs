@@ -11,6 +11,7 @@ use tracing::{event, Level};
 
 /// The MessageWait `WaitFor` implementation for containers.
 /// This variant will wait until the message appears in the requested source.
+#[derive(Clone)]
 pub struct MessageWait {
     /// The message to be contained in source.
     pub message: String,

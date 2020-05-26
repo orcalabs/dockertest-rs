@@ -3,7 +3,9 @@
 
 use crate::container::{PendingContainer, RunningContainer};
 use crate::DockerTestError;
+
 pub use async_trait::async_trait;
+use dyn_clone::DynClone;
 
 mod message;
 mod nowait;
@@ -15,7 +17,7 @@ pub use status::{ExitedWait, RunningWait};
 
 /// Trait to wait for a container to be ready for service.
 #[async_trait]
-pub trait WaitFor: Send {
+pub trait WaitFor: Send + DynClone {
     /// Method implementation should return a future that resolves once the condition
     /// described by the implementing structure is fulfilled. Once this successfully resolves,
     /// the container is marked as ready.
@@ -26,3 +28,5 @@ pub trait WaitFor: Send {
         container: PendingContainer,
     ) -> Result<RunningContainer, DockerTestError>;
 }
+
+dyn_clone::clone_trait_object!(WaitFor);

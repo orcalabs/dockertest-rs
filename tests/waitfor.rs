@@ -10,6 +10,7 @@ use bollard::{container::InspectContainerOptions, Docker};
 use futures::future::TryFutureExt;
 use test_env_log::test;
 
+#[derive(Clone)]
 struct FailWait {}
 
 #[async_trait]
