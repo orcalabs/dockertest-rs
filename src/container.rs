@@ -146,9 +146,7 @@ impl PendingContainer {
 
         // Issue WaitFor operation
         let res = waitfor.wait_for_ready(self);
-        res.await.map_err(|e| {
-            DockerTestError::Startup(format!("failed to wait for container to be ready: {}", e))
-        })
+        res.await
     }
 }
 
