@@ -2,7 +2,7 @@
 
 use crate::DockerTestError;
 
-use bollard::{image::CreateImageOptions, Docker};
+use bollard::{image::{CreateImageResults, CreateImageOptions}, Docker};
 use futures::stream::StreamExt;
 use std::rc::Rc;
 use std::sync::RwLock;
@@ -105,17 +105,31 @@ impl Image {
             ..Default::default()
         });
 
-        // NOTE: create_image for some reason returns a stream of items.
-        match client.create_image(options, None, None).next().await {
-            Some(_) => {
-                event!(Level::DEBUG, "successfully pulled image");
-                Ok(())
+        let mut stream = client.create_image(options, None, None);
+        // This stream will intermittently yield a progress update.
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(intermitten_result) => {
+                    match intermitten_result {
+                        CreateImageResults::CreateImageProgressResponse {status, progress_detail, id, progress } => {
+                            event!(Level::TRACE, "pull progress {} {:?} {:?} {:?}", status, id, progress, progress_detail);
+                        },
+                        CreateImageResults::CreateImageError {error_detail, error} => {
+                            event!(Level::ERROR, "pull error {} - `{:?}`", error, error_detail);
+                        },
+                    }
+                    event!(Level::DEBUG, "successfully pulled image");
+                },
+                Err(_) => {
+                return Err(DockerTestError::Pull(format!(
+                    "failed to pull image: {}:{}, reason: empty stream result",
+                    self.repository, self.tag)));
+
+                }
             }
-            None => Err(DockerTestError::Pull(format!(
-                "failed to pull image: {}:{}, reason: empty stream result",
-                self.repository, self.tag
-            ))),
         }
+
+        Ok(())
     }
 
     // Retrieves the id of the image from the local docker daemon and
