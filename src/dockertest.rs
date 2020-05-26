@@ -265,10 +265,8 @@ impl DockerTest {
             match self.create_containers(compositions).await {
                 Ok(p) => p,
                 Err(e) => {
-                    self.teardown(e, true).await;
-                    return Err(DockerTestError::Startup(
-                        "failed to create containers".to_string(),
-                    ));
+                    self.teardown(e.1, true).await;
+                    return Err(e.0);
                 }
             };
         // Start the PendingContainers
@@ -462,7 +460,7 @@ impl DockerTest {
     async fn create_containers(
         &self,
         compositions: Keeper<Composition>,
-    ) -> Result<Keeper<PendingContainer>, Vec<CleanupContainer>> {
+    ) -> Result<Keeper<PendingContainer>, (DockerTestError, Vec<CleanupContainer>)> {
         event!(Level::TRACE, "creating containers");
 
         // NOTE: The insertion order is preserved.
@@ -471,13 +469,13 @@ impl DockerTest {
         for instance in compositions.kept.into_iter() {
             match instance.create(&self.client, &self.network).await {
                 Ok(c) => pending.push(c),
-                Err(_) => {
+                Err(e) => {
                     // Error condition arose - we return the successfully created containers
                     // (for cleanup purposes)
-                    return Err(pending
+                    return Err((e, pending
                         .into_iter()
                         .map(|x| x.into())
-                        .collect::<Vec<CleanupContainer>>());
+                        .collect::<Vec<CleanupContainer>>()));
                 }
             }
         }

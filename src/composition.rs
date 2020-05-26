@@ -288,7 +288,7 @@ impl Composition {
         client: &Docker,
         network: &str,
     ) -> Result<PendingContainer, DockerTestError> {
-        event!(Level::INFO, "starting container: {}", self.container_name);
+        event!(Level::INFO, "creating container: {}", self.container_name);
 
         let start_policy_clone = self.start_policy.clone();
         let container_name_clone = self.container_name.clone();
