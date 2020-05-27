@@ -75,7 +75,7 @@
 //! a new impl of the `#[test]` attribute.
 //!
 //! .Cargo.toml
-//! ```
+//! ```no_compile
 //! [dev-dependencies]
 //! tracing = "0.1.13"
 //! tracing-subscriber = "0.2"
@@ -101,17 +101,18 @@
 //! let mut test = DockerTest::new().with_default_source(source);
 //!
 //! // Define our Composition - the Image we will start and end up as our RunningContainer
-//! let postgres = Composition::with_repository("postgres").with_wait_for(Box::new(MessageWait {
+//! let mut postgres = Composition::with_repository("postgres").with_wait_for(Box::new(MessageWait {
 //!     message: "database system is ready to accept connections".to_string(),
 //!     source: MessageSource::Stderr,
 //!     timeout: 20,
 //! }));
+//! postgres.env("POSTGRES_PASSWORD", "password");
 //! test.add_composition(postgres);
 //!
 //! // Run the test body
-//! test.run(|ops| {
+//! test.run(|ops| async move {
 //!     let container = ops.handle("postgres");
-//!     let conn_string = format!("postgres://postgres:postgres@{}:{}", container.ip(), 5432);
+//!     let conn_string = format!("postgres://postgres:password@{}:{}", container.ip(), 5432);
 //!     let pgconn = PgConnection::establish(&conn_string);
 //!
 //!     // Perform your database operations here
