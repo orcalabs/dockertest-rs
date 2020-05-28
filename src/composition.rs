@@ -52,6 +52,7 @@ pub enum StartPolicy {
 ///
 /// [Image]: struct.Image.html
 /// [RunningContainer]: struct.RunningContainer.html
+#[derive(Clone)]
 pub struct Composition {
     /// User provided name of the container.
     /// This will dictate the final container_name and the container_handle_key of the container
