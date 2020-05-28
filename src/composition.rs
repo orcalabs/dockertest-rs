@@ -303,6 +303,14 @@ impl Composition {
             },
         }
 
+        let image_id = self.image.retrieved_id();
+        // Additional programming guard.
+        // This Composition cannot be created without an image id, which
+        // is set through `Image::pull`
+        if image_id.is_empty() {
+            return Err(DockerTestError::Processing("`Composition::create()` invoked without populatting its image through `Image::pull()`".to_string()));
+        }
+
         // As we can't return temporary values owned by this closure
         // we have to first convert our map into a vector of owned strings,
         // then convert it to a vector of borrowed strings (&str).
@@ -318,7 +326,6 @@ impl Composition {
         for v in self.volumes.iter() {
             volumes.insert(v.as_str(), HashMap::new());
         }
-        let image_id = self.image.retrieved_id();
 
         // Construct host config
         let host_config = network.map(|n| HostConfig {
