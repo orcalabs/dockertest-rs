@@ -286,7 +286,7 @@ impl Composition {
     pub(crate) async fn create(
         self,
         client: &Docker,
-        network: &str,
+        network: Option<&str>,
     ) -> Result<PendingContainer, DockerTestError> {
         event!(Level::INFO, "creating container: {}", self.container_name);
 
@@ -321,10 +321,10 @@ impl Composition {
         let image_id = self.image.retrieved_id();
 
         // Construct host config
-        let host_config = HostConfig {
-            network_mode: Some(network),
+        let host_config = network.map(|n| HostConfig {
+            network_mode: Some(n),
             ..Default::default()
-        };
+        });
 
         // Construct options for create container
         let options = Some(CreateContainerOptions {
@@ -335,7 +335,7 @@ impl Composition {
             cmd: Some(cmds),
             env: Some(envs),
             volumes: Some(volumes),
-            host_config: Some(host_config),
+            host_config: host_config,
             ..Default::default()
         };
 
