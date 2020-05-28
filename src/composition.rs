@@ -113,7 +113,7 @@ impl Composition {
         Composition {
             user_provided_container_name: None,
             image: Image::with_repository(&copy),
-            container_name: copy,
+            container_name: copy.replace("/", "-"),
             wait: Box::new(NoWait {}),
             env: HashMap::new(),
             cmd: Vec::new(),
@@ -132,7 +132,7 @@ impl Composition {
     pub fn with_image(image: Image) -> Composition {
         Composition {
             user_provided_container_name: None,
-            container_name: image.repository().to_string(),
+            container_name: image.repository().to_string().replace("/", "-"),
             image,
             wait: Box::new(NoWait {}),
             env: HashMap::new(),
