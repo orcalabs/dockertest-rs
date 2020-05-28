@@ -3,6 +3,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- `DockerTest::source()` is now puplic.
+- `Composition` is now clonable.
+
 ### Changed
 - BREAKING: `FnOnce` argument to `DockerTest::run` changed its return type to
     `Future<Output = ()> + Send + 'static`.
