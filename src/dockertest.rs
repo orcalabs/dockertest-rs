@@ -896,20 +896,10 @@ fn generate_random_string(len: i32) -> String {
 #[cfg(test)]
 mod tests {
     use super::Keeper;
-    use crate::container::{CleanupContainer, PendingContainer, RunningContainer};
-    use crate::dockertest::{
-        start_relaxed_containers, start_strict_containers, wait_for_relaxed_containers,
-    };
-    use crate::image::{Image, PullPolicy, Source};
-    use crate::test_utils;
-    use crate::{Composition, DockerTest, StartPolicy};
+    use crate::container::PendingContainer;
+    use crate::{Composition, DockerTest, DockerTestError, PullPolicy, Source, StartPolicy};
 
-    use futures::channel::mpsc;
-    use futures::future::Future;
-    use futures::sink::Sink;
-    use futures::stream::Stream;
-    use std::rc::Rc;
-    use tokio::runtime::current_thread;
+    //use bollard::Docker;
 
     // Tests that the default DockerTest constructor produces a valid instance with the correct values set
     #[test]
@@ -963,251 +953,67 @@ mod tests {
         assert!(equal, "default_source was not set correctly");
     }
 
-    // Tests that the pull_images method pulls images with strict startup policy
-    #[test]
-    fn test_pull_images() {
-        // meta
-        let repository = "hello-world".to_string();
-        let tag = "latest".to_string();
-        let image = Image::with_repository(&repository);
-        let composition = Composition::with_image(image).with_start_policy(StartPolicy::Relaxed);
-
-        // setup
-        let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
-        let client = Rc::new(shiplift::Docker::new());
-        let mut test =
-            DockerTest::new().with_default_source(Source::DockerHub(PullPolicy::IfNotPresent));
+    /// Test that failure condition in starting relaxed container is reported on error
+    #[tokio::test]
+    async fn test_start_relaxed_containers_start_failure() {
+        let repository = "dockertest-rs/hello";
+        let mut test = DockerTest::new();
+        let mut composition =
+            Composition::with_repository(repository).with_start_policy(StartPolicy::Relaxed);
+        composition.container_name = "dockertest_start_relaxed_containers_start_failure".to_string();
         test.add_composition(composition);
-        let compositions: Keeper<Composition> = test.validate_composition_handlers();
 
-        // Ensure image is not present
-        let res = rt.block_on(test_utils::delete_image_if_present(
-            &repository,
-            &tag,
-            &client,
+        // Create the containers without all prep-work
+        let compositions: Keeper<Composition> = test.validate_composition_handlers();
+        test.pull_images(&compositions)
+            .await
+            .expect("failed to pull images");
+        let containers: Keeper<PendingContainer> = test
+            .create_containers(compositions)
+            .await
+            .expect("failed to create containers");
+        // issue start for StartPolicy::Relaxed operation WITHOUT constructing the network.
+        // This will result in a 404 network not found daemon error.
+        let result = test.start_containers(containers).await;
+        let expected = DockerTestError::Startup(format!(
+            "failed to start container due to `network {} not found`",
+            test.network
         ));
-        assert!(
-            res.is_ok(),
-            format!("failed to delete existing image {}", res.unwrap_err())
-        );
-
-        // Issue test operation
-        let output = test.pull_images(&mut rt, &compositions);
-        assert!(output.is_ok(), format!("{}", output.unwrap_err()));
-
-        // Verify
-        let exists = rt.block_on(test_utils::image_exists_locally(&repository, &tag, &client));
-        assert!(
-            exists.is_ok(),
-            format!(
-                "image should exists locally after pulling: {}",
-                exists.unwrap_err()
-            )
-        );
-    }
-
-    // Tests that the start_relaxed_containers function starts all the relaxed containers
-    #[test]
-    fn test_start_relaxed_containers() {
-        // meta
-        let repository = "hello-world".to_string();
-        let image = Image::with_repository(&repository);
-
-        // setup
-        let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
-        let client = Rc::new(shiplift::Docker::new());
-        let mut test =
-            DockerTest::new().with_default_source(Source::DockerHub(PullPolicy::IfNotPresent));
-        rt.block_on(image.pull(client.clone(), test.source()))
-            .expect("failed to pull relaxed container image");
-
-        // Add Composition to test
-        let image_id = image.retrieved_id();
-        let composition = Composition::with_image(image).with_start_policy(StartPolicy::Relaxed);
-        test.add_composition(composition);
-
-        // Ensure that that previous instances of the container is removed
-        rt.block_on(test_utils::remove_containers(image_id, &client))
-            .expect("failed to remove existing containers");
-
-        // Create the container and retrieve its new id
-        let compositions: Keeper<Composition> = test.validate_composition_handlers();
-        let mut containers: Keeper<PendingContainer> = test
-            .create_containers(&mut rt, compositions)
-            .expect("failed to create containers");
-        let container_id = containers
-            .kept
-            .first()
-            .expect("failed to get container from vector")
-            .id
-            .to_string();
-        let pending = std::mem::replace(&mut containers.kept, vec![]);
-
-        // Issue the test operation
-        let (sender, receiver) = mpsc::channel(0);
-        start_relaxed_containers(&sender, &mut rt, pending);
-
-        // Wait for the operation to complete
-        let mut result = rt
-            .block_on(
-                receiver
-                    .take(1)
-                    .collect()
-                    .map_err(|e| format!("failed to retrieve started relaxed container: {:?}", e)),
-            )
-            .expect("failed to retrieve result of startup procedure");
-        let result = result
-            .pop()
-            .expect("failed to retrieve the first result from vector");
-
-        assert!(result.is_ok(), format!("failed to start relaxed container"));
-
-        let is_running = rt
-            .block_on(test_utils::is_container_running(container_id, &client))
-            .expect("failed to check liveness of relaxed container");
-
-        assert!(
-            is_running,
-            "relaxed container should be running after starting it"
-        );
-    }
-
-    // Tests that the start_strict_containers method starts all the strict containers
-    // TODO: Add failure test for starting strict containers
-    #[test]
-    fn test_start_strict_containers() {
-        // meta
-        let repository = "hello-world".to_string();
-        let image = Image::with_repository(&repository);
-
-        // setup
-        let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
-        let client = Rc::new(shiplift::Docker::new());
-        let mut test =
-            DockerTest::new().with_default_source(Source::DockerHub(PullPolicy::IfNotPresent));
-        rt.block_on(image.pull(client.clone(), test.source()))
-            .expect("failed to pull relaxed container image");
-
-        // Add Composition to test
-        let image_id = image.retrieved_id();
-        let composition = Composition::with_image(image).with_start_policy(StartPolicy::Strict);
-        test.add_composition(composition);
-
-        // Ensure that that previous instances of the container is removed
-        rt.block_on(test_utils::remove_containers(image_id, &client))
-            .expect("failed to remove existing containers");
-
-        // Create the container and retrieve its new id
-        let compositions: Keeper<Composition> = test.validate_composition_handlers();
-        let mut containers: Keeper<PendingContainer> = test
-            .create_containers(&mut rt, compositions)
-            .expect("failed to create containers");
-        let container_id = containers
-            .kept
-            .first()
-            .expect("failed to get container from vector")
-            .id
-            .to_string();
-        let pending = std::mem::replace(&mut containers.kept, vec![]);
-
-        // Issue the operation
-        let res = start_strict_containers(&mut rt, pending);
-
-        assert!(res.is_ok(), format!("failed to start relaxed container"));
-
-        let is_running = rt
-            .block_on(test_utils::is_container_running(container_id, &client))
-            .expect("failed to check liveness of relaxed container");
-
-        assert!(
-            is_running,
-            "relaxed container should be running after starting it"
-        );
-    }
-
-    // Tests that `wait_for_relaxed_containers` function successfully waits the set.
-    // TODO: Add failure test for starting relaxed containers
-    #[test]
-    fn test_wait_for_relaxed_container() {
-        let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
-        let (sender, receiver) = mpsc::channel(0);
-        let sender_ref = &sender;
-
-        // Spawn X running containers and receive the result
-        for i in 1..10 {
-            let running = RunningContainer {
-                id: i.to_string(),
-                name: i.to_string(),
-                ip: std::net::Ipv4Addr::UNSPECIFIED,
-            };
-            let sender = sender_ref.clone();
-            let send_fut = sender
-                .send(Ok(running))
-                .map_err(|e| eprintln!("failed to send empty OK through channel {}", e))
-                .map(|_| ());
-
-            rt.spawn(send_fut);
-        }
-
-        let cleanup = (1..10)
-            .into_iter()
-            .map(|x| CleanupContainer { id: x.to_string() })
-            .collect();
-        let res = wait_for_relaxed_containers(&mut rt, receiver, cleanup);
-        assert!(res.is_ok(), "failed to receive results through channel");
-    }
-
-    // Tests that the teardown method removes all containers
-    #[test]
-    fn test_teardown_with_exited_containers() {
-        // meta
-        let repository = "hello-world".to_string();
-        let image = Image::with_repository(&repository);
-
-        // setup
-        let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
-        let client = Rc::new(shiplift::Docker::new());
-        let mut test =
-            DockerTest::new().with_default_source(Source::DockerHub(PullPolicy::IfNotPresent));
-        rt.block_on(image.pull(client.clone(), test.source()))
-            .expect("failed to pull relaxed container image");
-
-        // Add Composition to test
-        let composition = Composition::with_image(image).with_start_policy(StartPolicy::Relaxed);
-        test.add_composition(composition);
-
-        // Create
-        // XXX: This does NOT ensure that the created container does not already exist, no?
-        let compositions: Keeper<Composition> = test.validate_composition_handlers();
-        let pending: Keeper<PendingContainer> = test
-            .create_containers(&mut rt, compositions)
-            .expect("failed to create containers");
-
-        // Start
-        let running = test
-            .start_containers(&mut rt, pending)
-            .expect("failed to start containers");
-
-        // Issue the test operation
-        let cleanup: Vec<CleanupContainer> = running.kept.into_iter().map(|x| x.into()).collect();
-        let cleanup_copy = cleanup.clone();
-        test.teardown(&mut rt, cleanup);
-        // NOTE: Currently, teardown does not return a result
-
-        // Check that containers are not running
-        for c in cleanup_copy {
-            let is_running = rt
-                .block_on(test_utils::is_container_running(c.id.to_string(), &client))
-                .expect("failed to check for container liveness");
-            assert!(
-                !is_running,
-                "container should not be running after teardown"
-            );
+        match result {
+            Ok(_) => panic!("start should fail due to missing network"),
+            Err((e, _)) => assert_eq!(e, expected),
         }
     }
 
-    /*
-     * TODO: Implement tests for handle resolution on on the Keeper<T> object, especially after
-     * the convertion into RunningContainer.
-     */
+    /// Test that failure condition in starting strict container is reported on error
+    #[tokio::test]
+    async fn test_start_strict_containers_start_failure() {
+        let repository = "dockertest-rs/hello";
+        let mut test = DockerTest::new();
+        let mut composition =
+            Composition::with_repository(repository).with_start_policy(StartPolicy::Strict);
+        composition.container_name = "dockertest_start_strict_containers_start_failure".to_string();
+        test.add_composition(composition);
+
+        // Create the containers without all prep-work
+        let compositions: Keeper<Composition> = test.validate_composition_handlers();
+        test.pull_images(&compositions)
+            .await
+            .expect("failed to pull images");
+        let containers: Keeper<PendingContainer> = test
+            .create_containers(compositions)
+            .await
+            .expect("failed to create containers");
+        // issue start for StartPolicy::Strict operation WITHOUT constructing the network.
+        // This will result in a 404 network not found daemon error.
+        let result = test.start_containers(containers).await;
+        let expected = DockerTestError::Startup(format!(
+            "failed to start container due to `network {} not found`",
+            test.network
+        ));
+        match result {
+            Ok(_) => panic!("start should fail due to missing network"),
+            Err((e, _)) => assert_eq!(e, expected),
+        }
+    }
 }

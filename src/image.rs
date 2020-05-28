@@ -276,36 +276,28 @@ impl Remote {
     }
 }
 
-// TODO: Maybe use the docker cli to perform existence checks, deletion,
-// and pulling of images instead of using shiplift to not have cyclic
-// dependencies in our tests.
 #[cfg(test)]
 mod tests {
     use crate::image::{Image, PullPolicy, Remote, Source};
-    use crate::test_utils;
-    use shiplift;
-    use std::rc::Rc;
-    use tokio::runtime::current_thread;
+    use crate::DockerTestError;
+    use crate::{test_utils, test_utils::CONCURRENT_IMAGE_ACCESS_QUEUE};
 
-    // Tests that our exposed pull method succeeds
-    // with a valid local source.
-    // A valid local source is just that the image
-    // exists locally.
-    #[test]
-    fn test_pull_succeeds_with_valid_local_source() {
-        let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
-        let client = Rc::new(shiplift::Docker::new());
-        let client_clone = client.clone();
+    use bollard::Docker;
 
-        let tag = "latest".to_string();
-        let repository = "hello-world".to_string();
-        let image = Image::with_repository(&repository).tag(&tag);
+    /// Tests that our `Image::pull` method succeeds with a valid `Source::Local` repository image.
+    /// After the pull operation has been performed the image id shall be sat on the object.
+    #[tokio::test]
+    async fn test_pull_succeeds_with_valid_local_source() {
+        let client = Docker::connect_with_local_defaults().expect("local docker daemon connection");
 
-        let res = rt.block_on(test_utils::pull_if_not_present(&repository, &tag, &client));
-        assert!(
-            res.is_ok(),
-            format!("failed to pull image: {}", res.unwrap_err())
-        );
+        let repository = "dockertest-rs/hello";
+        let tag = "latest";
+        let image = Image::with_repository(&repository);
+
+        // This repository image exists locally (pre-requisuite build.rs)
+        assert!(test_utils::image_exists_locally(&client, repository, tag)
+            .await
+            .unwrap());
 
         assert_eq!(
             image.retrieved_id(),
@@ -313,18 +305,20 @@ mod tests {
             "image id should not be set before pulling"
         );
 
-        let res = rt.block_on(image.pull(client, &Source::Local));
+        // Attempting to pull the image from local source should success, with
+        // its id populated.
+        let result = image.pull(&client, &Source::Local).await;
         assert!(
-            res.is_ok(),
+            result.is_ok(),
             format!(
                 "should not fail pull process with local source and existing image: {}",
-                res.unwrap_err()
+                result.unwrap_err()
             )
         );
-        let expected_id = rt
-            .block_on(test_utils::image_id(&repository, &tag, &client_clone))
-            .expect("failed to get image_id");
 
+        let expected_id = test_utils::image_id(&client, repository, tag)
+            .await
+            .expect("failed to get image_id");
         assert_eq!(
             image.retrieved_id(),
             expected_id,
@@ -332,75 +326,57 @@ mod tests {
         );
     }
 
-    // Tests that our exposed pull method fails with an
-    // invalid local source.
-    // An invalid local source is just that the
-    // image does not exist locally.
-    #[test]
-    fn test_pull_fails_with_invalid_local_source() {
-        let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
-        let client = Rc::new(shiplift::Docker::new());
-
-        let tag = "latest".to_string();
-        let repository = "hello-world".to_string();
-        let image = Image::with_repository(&repository).tag(&tag);
-
-        let res = rt.block_on(test_utils::delete_image_if_present(
-            &repository,
-            &tag,
-            &client,
-        ));
+    /// Tests that when attempting to `Image::pull` on an non-existing image with
+    /// `PullPolicy::Local`, the operation fails with a descriptive error message.
+    #[tokio::test]
+    async fn test_pull_fails_with_invalid_local_source() {
+        let client = Docker::connect_with_local_defaults().expect("local docker daemon connection");
+        let repository = CONCURRENT_IMAGE_ACCESS_QUEUE.access().await;
+        let tag = "latest";
+        let image = Image::with_repository(*repository).tag(&tag);
+        let result = test_utils::delete_image_if_present(&client, *repository, tag).await;
         assert!(
-            res.is_ok(),
-            format!("failed to delete image: {}", res.unwrap_err())
+            result.is_ok(),
+            format!("failed to delete image: {}", result.unwrap_err())
         );
 
-        let res = rt.block_on(image.pull(client, &Source::Local));
-        assert!(
-            res.is_err(),
-            "should fail pull process with local source and non-existing image"
-        );
+        // Pull operation should fail since local pull on non-existent image
+        let result = image.pull(&client, &Source::Local).await;
+        let expected = DockerTestError::Pull("image source was set to local, but the provided image does not exists on the local host".to_string());
+        assert_eq!(result.unwrap_err(), expected);
     }
 
-    // Tests that our exposed pull method succeeds
-    // with a valid remote source
-    #[test]
-    fn test_pull_succeeds_with_valid_remote_source() {
-        let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
-        let client = Rc::new(shiplift::Docker::new());
-        let client_clone = client.clone();
-
-        let tag = "latest".to_string();
+    /// Tests that our exposed pull method succeeds with a valid remote source.
+    #[tokio::test]
+    async fn test_pull_succeeds_with_valid_remote_source() {
+        let client = Docker::connect_with_local_defaults().expect("local docker daemon connection");
+        let repository = CONCURRENT_IMAGE_ACCESS_QUEUE.access().await;
+        let tag = "latest";
         let source = Source::DockerHub(PullPolicy::Always);
-        let repository = "hello-world".to_string();
-        let image = Image::with_repository(&repository).tag(&tag);
+        let image = Image::with_repository(*repository).tag(&tag);
 
-        let res = rt.block_on(test_utils::delete_image_if_present(
-            &repository,
-            &tag,
-            &client,
-        ));
+        let result = test_utils::delete_image_if_present(&client, *repository, tag).await;
         assert!(
-            res.is_ok(),
-            format!("failed to delete image: {}", res.unwrap_err())
+            result.is_ok(),
+            format!("failed to delete image: {}", result.unwrap_err())
         );
-
         assert_eq!(
             image.retrieved_id(),
             "",
             "image id should not be set before pulling"
         );
 
-        let res = rt.block_on(image.pull(client, &source));
+        let result = image.pull(&client, &source).await;
         assert!(
-            res.is_ok(),
+            result.is_ok(),
             format!(
                 "should not fail pull process with valid remote source: {}",
-                res.unwrap_err()
+                result.unwrap_err()
             )
         );
-        let expected_id = rt
-            .block_on(test_utils::image_id(&repository, &tag, &client_clone))
+
+        let expected_id = test_utils::image_id(&client, *repository, &tag)
+            .await
             .expect("failed to get image_id");
 
         assert_eq!(
@@ -410,42 +386,35 @@ mod tests {
         );
     }
 
-    // Tests that our exposed pull method fails
-    // with an invalid remote source
-    #[test]
-    fn test_pull_fails_with_invalid_remote_source() {
-        let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
-
-        let remote = Remote::new(&"".to_string(), PullPolicy::Always);
+    /// Tests that `Image::pull` fails with an invalid remote source.
+    #[tokio::test]
+    async fn test_pull_fails_with_invalid_remote_source() {
+        let client = Docker::connect_with_local_defaults().expect("local docker daemon connection");
+        let remote = Remote::new(&"example.com".to_string(), PullPolicy::Always);
         let source = Source::Remote(remote);
 
-        let tag = "this_is_not_a_tag".to_string();
-        let repository = "non_existing_repo_yepsi_pepsi".to_string();
-        let image = Image::with_repository(&repository).tag(&tag);
+        let tag = "this_is_not_a_tag";
+        let repository = "dockertest_pull_fails_with_invalid_remote_source";
+        let image = Image::with_repository(repository).tag(tag);
 
-        let client = Rc::new(shiplift::Docker::new());
-
-        assert_eq!(
-            image.retrieved_id(),
-            "",
-            "image id should not be set before pulling"
-        );
-
-        let res = rt.block_on(image.pull(client, &source));
+        let result = image.pull(&client, &source).await;
+        let expected = DockerTestError::Pull(format!(
+            "unknown registry or image: `{}:{}`",
+            repository, tag
+        ));
         assert!(
-            res.is_err(),
+            result.is_err(),
             "should fail pull process with an invalid remote source",
         );
+        assert_eq!(result.unwrap_err(), expected);
     }
 
     // Tests that the retrieve_and_set_id method sets the image id
-    #[test]
-    fn test_set_image_id() {
-        let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
-        let client = Rc::new(shiplift::Docker::new());
-
-        let tag = "latest".to_string();
-        let repository = "hello-world".to_string();
+    #[tokio::test]
+    async fn test_set_image_id() {
+        let client = Docker::connect_with_local_defaults().expect("local docker daemon connection");
+        let repository = "dockertest-rs/hello";
+        let tag = "latest";
         let image = Image::with_repository(&repository).tag(&tag);
 
         assert_eq!(
@@ -453,18 +422,11 @@ mod tests {
             "",
             "image id should be empty before pulling"
         );
+        let image_id = test_utils::image_id(&client, repository, tag)
+            .await
+            .expect("failed to get image id");
 
-        let image_id = rt.block_on(test_utils::pull_if_not_present(&repository, &tag, &client));
-        assert!(
-            image_id.is_ok(),
-            format!(
-                "failed to pull image: {}",
-                image_id.err().expect("failed to get error")
-            )
-        );
-        let image_id = image_id.expect("failed to get image id");
-
-        let res = rt.block_on(image.retrieve_and_set_id(client));
+        let res = image.retrieve_and_set_id(&client).await;
         assert!(
             res.is_ok(),
             format!("failed to set image id: {}", res.unwrap_err())
@@ -477,100 +439,78 @@ mod tests {
         );
     }
 
-    // Tests that we can check if an image exists locally with
-    // the does_image_exist method.
-    #[test]
-    fn test_image_existence() {
-        let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
-        let client = Rc::new(shiplift::Docker::new());
+    // Tests that we can check if an image exists locally with the does_image_exist method.
+    #[tokio::test]
+    async fn test_image_existence() {
+        let client = Docker::connect_with_local_defaults().expect("local docker daemon connection");
+        let repository = CONCURRENT_IMAGE_ACCESS_QUEUE.access().await;
+        let tag = "latest";
+        let image = Image::with_repository(*repository).tag(&tag);
 
-        let tag = "latest".to_string();
-        let repository = "hello-world".to_string();
-        let image = Image::with_repository(&repository).tag(&tag);
+        // Ensure image is present first
+        // If it is already present, we skip the download time.
+        image
+            .pull(&client, &Source::DockerHub(PullPolicy::Always))
+            .await
+            .expect("failed to pull image");
 
-        let res = rt.block_on(test_utils::delete_image_if_present(
-            &repository,
-            &tag,
-            &client,
-        ));
+        // Test image is present
+        let result = image.does_image_exist(&client).await;
         assert!(
-            res.is_ok(),
-            format!("failed to delete image: {}", res.unwrap_err())
+            result.is_ok(),
+            format!("failure checking image exists {}", result.unwrap_err())
         );
-
-        let client_clone = client.clone();
-
-        let res = rt
-            .block_on(image.does_image_exist(client))
-            .expect("failed to set image id");
         assert!(
-            !res,
+            result.unwrap(),
             "should return false when image does not exist locally"
         );
 
-        let res = rt.block_on(test_utils::pull_image(&repository, &tag, &client_clone));
-        assert!(
-            res.is_ok(),
-            format!("failed to pull image: {}", res.unwrap_err())
-        );
+        // Remove the image for the next existence test
+        test_utils::delete_image_if_present(&client, *repository, tag)
+            .await
+            .expect("failed to remove image");
 
-        let res = rt
-            .block_on(image.does_image_exist(client_clone))
-            .expect("failed to check image existence");
-        assert!(res, "should return true when image exists locally");
+        // Test image is not present
+        let result = image.does_image_exist(&client).await;
+        assert!(
+            result.is_ok(),
+            format!("failure checking image exists {}", result.unwrap_err())
+        );
+        assert!(
+            !result.unwrap(),
+            "should return false when image does not exist locally"
+        );
     }
 
-    // Tests that the do_pull method fails when pulling
-    // a non-exsiting image
-    #[test]
-    fn test_pull_remote_non_existing_image() {
-        let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
+    /// Tests that the `Image::pull` method succesfully pulls a image from DockerHub.
+    #[tokio::test]
+    async fn test_pull_remote_image_from_dockerhub() {
+        let client = Docker::connect_with_local_defaults().expect("local docker daemon connection");
+        let repository = CONCURRENT_IMAGE_ACCESS_QUEUE.access().await;
+        let tag = "latest";
+        let image = Image::with_repository(*repository).tag(&tag);
 
-        let remote = Remote::new(&"not_an_address", PullPolicy::Always);
-        let repository = "non_existing_repo_yepsi_pepsi".to_string();
-        let image = Image::with_repository(&repository).source(Source::Remote(remote));
+        test_utils::delete_image_if_present(&client, *repository, &tag)
+            .await
+            .expect("failed to delete image");
 
-        let client = Rc::new(shiplift::Docker::new());
-        let res = rt.block_on(image.do_pull(&client));
-        assert!(res.is_err(), "should fail when pulling non-existing image");
-    }
-    // Tests that the do_pull method succesfully pulls a remote image
-    #[test]
-    fn test_pull_remote_image() {
-        let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
-        let client = Rc::new(shiplift::Docker::new());
-
-        let tag = "latest".to_string();
-        let repository = "hello-world".to_string();
-        let image = Image::with_repository(&repository).tag(&tag);
-
-        let res = rt.block_on(test_utils::delete_image_if_present(
-            &repository,
-            &tag,
-            &client,
-        ));
+        let result = image
+            .pull(&client, &Source::DockerHub(PullPolicy::Always))
+            .await;
         assert!(
-            res.is_ok(),
-            format!("failed to delete image: {}", res.unwrap_err())
+            result.is_ok(),
+            format!("failed to pull image: {}", result.unwrap_err())
         );
 
-        let res = rt.block_on(image.do_pull(&client));
-        assert!(
-            res.is_ok(),
-            format!("failed to pull image: {}", res.err().unwrap())
-        );
-
-        let res = rt.block_on(test_utils::image_exists_locally(&repository, &tag, &client));
-        assert!(
-            res.is_ok(),
-            "failed to check image existence: {}",
-            res.err().expect("failed to get error")
-        );
-        let exists = res.expect("failed to get existence result");
-        assert!(
-            exists,
-            "image still exists on the local host after removing it"
-        );
+        match test_utils::image_exists_locally(&client, *repository, &tag).await {
+            Ok(exists) => {
+                assert!(
+                    exists,
+                    "image should exist on local daemon after pull operation"
+                );
+            }
+            Err(e) => panic!(format!("failed to check image existence: {}", e)),
+        }
     }
 
     // Tests that we can new up a remote with correct variables
@@ -578,7 +518,6 @@ mod tests {
     fn test_new_remote() {
         let address = "this_is_a_remote_registry".to_string();
         let pull_policy = PullPolicy::Always;
-
         let remote = Remote::new(&address, pull_policy);
 
         let equal = match remote.pull_policy {
@@ -743,35 +682,31 @@ mod tests {
     // A slight downside by this setup is that the test will fail if pulling from the valid source
     // fails.
     // Could not come up with a better way to test this scenario.
-    #[test]
-    fn test_image_source_overrides_default_source_in_pull() {
-        let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
-        let client = Rc::new(shiplift::Docker::new());
-
-        let tag = "latest".to_string();
-        let repository = "hello-world".to_string();
-        let image = Image::with_repository(&repository)
+    #[tokio::test]
+    async fn test_image_source_overrides_default_source_in_pull() {
+        let client = Docker::connect_with_local_defaults().expect("local docker daemon connection");
+        let repository = CONCURRENT_IMAGE_ACCESS_QUEUE.access().await;
+        let tag = "latest";
+        let image = Image::with_repository(*repository)
             .tag(&tag)
+            // Source is overridden to be DockerHub, a valid source.
             .source(Source::DockerHub(PullPolicy::Always));
 
-        let unvalid_source = Source::Remote(Remote::new(
+        // Deinve a custom Remove registry that is invalid.
+        let invalid_source = Source::Remote(Remote::new(
             &"this_is_not_a_registry".to_string(),
             PullPolicy::Always,
         ));
 
-        let res = rt.block_on(test_utils::delete_image_if_present(
-            &repository,
-            &tag,
-            &client,
-        ));
-        assert!(
-            res.is_ok(),
-            format!("failed to delete image: {}", res.unwrap_err())
-        );
+        // Cleanup to force pull operation
+        test_utils::delete_image_if_present(&client, *repository, tag)
+            .await
+            .expect("failed to delete image");
 
-        let res = rt.block_on(image.pull(client, &unvalid_source));
+        // Perform operation with a invalid default source
+        let result = image.pull(&client, &invalid_source).await;
         assert!(
-            res.is_ok(),
+            result.is_ok(),
             "the invalid source should be overriden by the provided valid source,
             which should result in a successful pull"
         );

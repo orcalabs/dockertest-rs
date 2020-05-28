@@ -169,22 +169,17 @@ impl PendingContainer {
 #[cfg(test)]
 mod tests {
     use crate::container::{PendingContainer, RunningContainer};
-    use crate::image::{Image, PullPolicy, Source};
-    use crate::waitfor::{NoWait, WaitFor};
+    use crate::image::Source;
+    use crate::waitfor::{async_trait, NoWait, WaitFor};
     use crate::{Composition, DockerTestError, StartPolicy};
 
-    use futures::future::{self, Future};
-    use shiplift;
-    use std::rc::Rc;
-    use std::sync::RwLock;
-    use tokio::runtime::current_thread;
+    use bollard::Docker;
+    use std::sync::{Arc, RwLock};
 
-    // Tests that we can create a new container with the new method, and
-    // that the correct struct members are set.
-    #[test]
-    fn test_new_container() {
-        let client = Rc::new(shiplift::Docker::new());
-
+    /// Tests `PendingContainer::new` with associated struct member field values.
+    #[tokio::test]
+    async fn test_new_pending_container() {
+        let client = Docker::connect_with_local_defaults().expect("local docker daemon connection");
         let id = "this_is_an_id".to_string();
         let name = "this_is_a_container_name".to_string();
         let handle_key = "this_is_a_handle_key";
@@ -194,7 +189,7 @@ mod tests {
             &id,
             handle_key,
             StartPolicy::Relaxed,
-            Rc::new(NoWait {}),
+            Box::new(NoWait {}),
             client,
         );
         assert_eq!(id, container.id, "wrong id set in container creation");
@@ -204,56 +199,57 @@ mod tests {
             "container name getter returns wrong value"
         );
         assert_eq!(
-            handle_key, container.handle_key,
+            handle_key, container.handle,
             "wrong handle_key set in container creation"
         );
     }
 
+    #[derive(Clone)]
     struct TestWaitFor {
-        invoked: Rc<RwLock<bool>>,
+        invoked: Arc<RwLock<bool>>,
     }
 
+    #[async_trait]
     impl WaitFor for TestWaitFor {
-        fn wait_for_ready(
+        async fn wait_for_ready(
             &self,
             container: PendingContainer,
-        ) -> Box<dyn Future<Item = RunningContainer, Error = DockerTestError>> {
+        ) -> Result<RunningContainer, DockerTestError> {
             let mut invoked = self.invoked.write().expect("failed to take invoked lock");
             *invoked = true;
-            Box::new(future::ok(container.into()))
+            Ok(container.into())
         }
     }
+
     // Tests that the provided WaitFor trait object is invoked
     // during the start method of Composition
-    #[test]
-    fn test_wait_for_invoked_during_start() {
+    #[tokio::test]
+    async fn test_wait_for_invoked_during_start() {
         let wait_for = TestWaitFor {
-            invoked: Rc::new(RwLock::new(false)),
+            invoked: Arc::new(RwLock::new(false)),
         };
 
-        let wrapped_wait_for = Rc::new(wait_for);
+        let wrapped_wait_for = Box::new(wait_for);
 
-        let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
-        let repository = "hello-world".to_string();
+        let client = Docker::connect_with_local_defaults().expect("local docker daemon connection");
+        let repository = "dockertest-rs/hello".to_string();
+        let mut composition =
+            Composition::with_repository(repository).with_wait_for(wrapped_wait_for.clone());
+        composition.container_name = "dockertest_wait_for_invoked_during_start".to_string();
 
-        let source = Source::DockerHub(PullPolicy::IfNotPresent);
-        let image = Image::with_repository(&repository);
-        let instance = Composition::with_image(image).with_wait_for(wrapped_wait_for.clone());
+        // Ensure image is present with id populated
+        composition
+            .image()
+            .pull(&client, &Source::Local)
+            .await
+            .expect("failed to pull image");
 
-        let client = Rc::new(shiplift::Docker::new());
-
-        let res = rt.block_on(instance.image().pull(client.clone(), &source));
-        assert!(
-            res.is_ok(),
-            format!("failed to pull image: {}", res.unwrap_err())
-        );
-
-        let container = rt
-            .block_on(instance.create(client))
+        // Create and start the container
+        let container = composition
+            .create(&client, None)
+            .await
             .expect("failed to create container");
-
-        rt.block_on(container.start())
-            .expect("failed to start container");
+        container.start().await.expect("failed to start container");
 
         let was_invoked = wrapped_wait_for
             .invoked

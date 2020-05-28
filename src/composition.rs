@@ -398,12 +398,11 @@ async fn remove_container_if_exists(client: &Docker, name: &str) -> Result<(), D
 #[cfg(test)]
 mod tests {
     use crate::composition::{remove_container_if_exists, Composition, StartPolicy};
-    use crate::image::{Image, PullPolicy, Source};
+    use crate::image::{Image, Source};
     use crate::DockerTestError;
 
+    use bollard::Docker;
     use std::collections::HashMap;
-    use std::rc::Rc;
-    use tokio::runtime::current_thread;
 
     // Tests that the with_repository constructor creates
     // a Composition with the correct values
@@ -444,7 +443,6 @@ mod tests {
     #[test]
     fn test_with_image_constructor() {
         let repository = "this_is_a_repository".to_string();
-
         let image = Image::with_repository(&repository);
 
         let instance = Composition::with_image(image);
@@ -564,147 +562,141 @@ mod tests {
         );
     }
 
-    // Tests that we fail to create the Container if its associated image has
-    // not been pulled yet.
-    // If it exists locally, but the pull process has no been invoked
-    // its id will be empty.
-    #[test]
-    fn test_create_with_non_existing_image() {
-        let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
-        let repository = "this_repo_does_not_exist".to_string();
-        let instance = Composition::with_repository(&repository);
+    /// Tests that we cannot create a container from a non-existent local repository image.
+    #[tokio::test]
+    async fn test_create_with_non_existing_local_image() {
+        let client = Docker::connect_with_local_defaults().expect("local docker daemon connection");
+        let repository = "dockertest_create_with_non_existing_local_image";
+        let composition = Composition::with_repository(repository);
 
-        let client = Rc::new(shiplift::Docker::new());
-        let res = rt.block_on(instance.create(client));
+        // Invoking image pull to populate the image id should err
+        // TODO: assert a proper error message
+        assert!(composition
+            .image
+            .pull(&client, &Source::Local)
+            .await
+            .is_err());
 
+        // This will then fail due to missing image id
+        let result = composition.create(&client, None).await;
+        // TODO: assert a proper error message
         assert!(
-            res.is_err(),
+            result.is_err(),
             "should fail to start a Composition with non-exisiting image"
         );
     }
 
-    // Tests that we can successfully create a Container from a Composition
-    // resulting in a Container with correct values.
-    #[test]
-    fn test_create_with_existing_image() {
-        let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
-        let repository = "hello-world".to_string();
+    /// Check that a simple composition from repository can be successfully created.
+    #[tokio::test]
+    async fn test_simple_create_composition_from_repository_success() {
+        let client = Docker::connect_with_local_defaults().expect("local docker daemon connection");
+        let repository = "dockertest-rs/hello";
+        let mut composition = Composition::with_repository(repository);
+        composition.container_name = "test_simple_create_composition_from_repository_success".to_string();
 
-        let source = Source::DockerHub(PullPolicy::Always);
-        let image = Image::with_repository(&repository);
-        let instance = Composition::with_image(image);
+        // ensure image metadata is populated (through pull infrastructure)
+        composition
+            .image
+            .pull(&client, &Source::Local)
+            .await
+            .unwrap();
 
-        let client = Rc::new(shiplift::Docker::new());
-
-        let res = rt.block_on(instance.image().pull(client.clone(), &source));
+        let result = composition.create(&client, None).await;
         assert!(
-            res.is_ok(),
-            format!("failed to pull image: {}", res.unwrap_err())
-        );
-
-        let res = rt.block_on(instance.create(client));
-        assert!(
-            res.is_ok(),
-            format!("failed to start Composition: {}", res.err().unwrap())
+            result.is_ok(),
+            format!("failed to start Composition: {}", result.err().unwrap())
         );
     }
 
-    // Tests that we can successfully create a Contaienr from a Composition,
-    // even if there exists a container with the same name.
-    // The start method should detect that there already
-    // exists a container with the same name,
-    // remove it, and create ours.
-    #[test]
-    fn test_create_with_existing_container() {
-        let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
-        let repository = "hello-world".to_string();
+    /// Tests that two consecutive Compositions creating a container with the exact same
+    /// `container_name` will still be allowed to be created.
+    ///
+    /// The expected behaviour is thus to remove the old container
+    /// (since we assume it will be an _old_ name collision).
+    #[tokio::test]
+    async fn test_create_with_existing_container() {
+        let client = Docker::connect_with_local_defaults().expect("local docker daemon connection");
+        let repository = "dockertest-rs/hello";
+        let container_name = "dockertest_create_with_existing_container".to_string();
 
-        let container_name = "this_is_a_container".to_string();
+        let mut composition1 = Composition::with_repository(repository);
+        // configure the `container_name` inline instead of through `with_container_name`,
+        // to avoid the user provided container name logic.
+        composition1.container_name = container_name;
+        // ensure image metadata is populated (through pull infrastructure)
+        composition1
+            .image
+            .pull(&client, &Source::Local)
+            .await
+            .unwrap();
 
-        let source = Source::DockerHub(PullPolicy::IfNotPresent);
-        let image = Image::with_repository(&repository);
-        let mut instance = Composition::with_image(image);
-        instance.container_name = container_name.clone();
+        let composition2 = composition1.clone();
 
-        let client = Rc::new(shiplift::Docker::new());
-
-        let res = rt.block_on(instance.image().pull(client.clone(), &source));
+        // Initial setup - first container that already exists.
+        let result = composition1.create(&client, None).await;
         assert!(
-            res.is_ok(),
-            format!("failed to pull image: {}", res.unwrap_err())
+            result.is_ok(),
+            format!(
+                "failed to start first composition: {}",
+                result.err().unwrap()
+            )
         );
 
-        let res = rt.block_on(instance.create(client.clone()));
+        // Creating a second one should still be allowed, since we expect the first one
+        // to be removed.
+        let result = composition2.create(&client, None).await;
         assert!(
-            res.is_ok(),
-            format!("failed to start Composition: {}", res.err().unwrap())
-        );
-
-        let source = Source::DockerHub(PullPolicy::IfNotPresent);
-        let image = Image::with_repository(&repository);
-        let mut instance = Composition::with_image(image);
-        instance.container_name = container_name.clone();
-
-        let client = Rc::new(shiplift::Docker::new());
-
-        let res = rt.block_on(instance.image().pull(client.clone(), &source));
-        assert!(
-            res.is_ok(),
-            format!("failed to pull image: {}", res.unwrap_err())
-        );
-
-        let res = rt.block_on(instance.create(client));
-        assert!(
-            res.is_ok(),
-            format!("failed to start Composition: {}", res.err().unwrap())
+            result.is_ok(),
+            format!(
+                "failed to start second composition: {}",
+                result.err().unwrap()
+            )
         );
     }
 
-    // Tests that we can remove an existing container.
-    #[test]
-    fn test_remove_existing_container() {
-        let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
-        let repository = "hello-world".to_string();
+    /// Tests the `remove_container_if_exists` method when container exists.
+    #[tokio::test]
+    async fn test_remove_existing_container() {
+        let client = Docker::connect_with_local_defaults().expect("local docker daemon connection");
+        let repository = "dockertest-rs/hello";
+        let container_name = "dockertest_remove_existing_container_test_name";
+        let mut composition = Composition::with_repository(repository);
+        composition.container_name = container_name.to_string();
 
-        let source = Source::DockerHub(PullPolicy::IfNotPresent);
-        let image = Image::with_repository(&repository);
-        let instance = Composition::with_image(image);
+        // ensure image metadata is populated (through pull infrastructure)
+        composition
+            .image
+            .pull(&client, &Source::Local)
+            .await
+            .unwrap();
 
-        let container_name = instance.container_name.clone();
-
-        let client = Rc::new(shiplift::Docker::new());
-
-        let res = rt.block_on(instance.image().pull(client.clone(), &source));
+        // Create out composition
+        let result = composition.create(&client, None).await;
         assert!(
-            res.is_ok(),
-            format!("failed to pull image: {}", res.unwrap_err())
+            result.is_ok(),
+            format!("failed to start composition: {}", result.err().unwrap())
         );
 
-        let res = rt.block_on(instance.create(client.clone()));
+        // Remove it by name
+        let result = remove_container_if_exists(&client, container_name).await;
         assert!(
-            res.is_ok(),
-            format!("failed to start Composition: {}", res.err().unwrap())
-        );
-
-        let res = rt.block_on(remove_container_if_exists(client, container_name));
-        assert!(
-            res.is_ok(),
-            format!("failed to remove existing container: {}", res.unwrap_err())
+            result.is_ok(),
+            format!(
+                "failed to remove existing container: {}",
+                result.unwrap_err()
+            )
         );
     }
 
-    // Tests that we fail when trying to remove a non-existing container.
-    #[test]
-    fn test_remove_non_existing_container() {
-        let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
-        let client = Rc::new(shiplift::Docker::new());
+    /// Tests that we fail when trying to remove a non-existing container through
+    /// `remove_container_if_exists`.
+    #[tokio::test]
+    async fn test_remove_non_existing_container() {
+        let client = Docker::connect_with_local_defaults().expect("local docker daemon connection");
 
-        let res = rt.block_on(remove_container_if_exists(
-            client,
-            "non_existing_container".to_string(),
-        ));
+        let result = remove_container_if_exists(&client, "dockertest_non_existing_container").await;
 
-        let res = match res {
+        let res = match result {
             Ok(_) => false,
             Err(e) => match e {
                 DockerTestError::Recoverable(_) => true,
@@ -719,17 +711,17 @@ mod tests {
     #[test]
     fn test_configurate_container_name_without_user_supplied_name() {
         let repository = "hello-world";
-        let composition = Composition::with_repository(&repository);
+        let mut composition = Composition::with_repository(&repository);
 
         let suffix = "test123";
         let namespace = "namespace";
 
         let expected_output = format!("{}-{}-{}", namespace, repository, suffix);
 
-        let new_instance = composition.configure_container_name(&namespace, suffix);
+        composition.configure_container_name(&namespace, suffix);
 
         assert_eq!(
-            new_instance.container_name, expected_output,
+            composition.container_name, expected_output,
             "container_name not configurated correctly"
         );
     }
@@ -740,7 +732,7 @@ mod tests {
     fn test_configurate_container_name_with_user_supplied_name() {
         let repository = "hello-world";
         let container_name = "this_is_a_container";
-        let composition =
+        let mut composition =
             Composition::with_repository(&repository).with_container_name(container_name);
 
         let suffix = "test123";
@@ -748,10 +740,10 @@ mod tests {
 
         let expected_output = format!("{}-{}-{}", namespace, container_name, suffix);
 
-        let new_instance = composition.configure_container_name(&namespace, suffix);
+        composition.configure_container_name(&namespace, suffix);
 
         assert_eq!(
-            new_instance.container_name, expected_output,
+            composition.container_name, expected_output,
             "container_name not configurated correctly"
         );
     }
@@ -765,7 +757,7 @@ mod tests {
         let container_name = "this/is/a_container";
         let expected_container_name = "this_is_a_container";
 
-        let composition =
+        let mut composition =
             Composition::with_repository(&repository).with_container_name(container_name);
 
         let suffix = "test123";
@@ -773,10 +765,10 @@ mod tests {
 
         let expected_output = format!("{}-{}-{}", namespace, expected_container_name, suffix);
 
-        let new_instance = composition.configure_container_name(&namespace, suffix);
+        composition.configure_container_name(&namespace, suffix);
 
         assert_eq!(
-            new_instance.container_name, expected_output,
+            composition.container_name, expected_output,
             "container_name not configurated correctly"
         );
     }
@@ -789,17 +781,17 @@ mod tests {
         let repository = "hello/world";
         let expected_container_name = "hello_world";
 
-        let composition = Composition::with_repository(&repository);
+        let mut composition = Composition::with_repository(&repository);
 
         let suffix = "test123";
         let namespace = "namespace";
 
         let expected_output = format!("{}-{}-{}", namespace, expected_container_name, suffix);
 
-        let new_instance = composition.configure_container_name(&namespace, suffix);
+        composition.configure_container_name(&namespace, suffix);
 
         assert_eq!(
-            new_instance.container_name, expected_output,
+            composition.container_name, expected_output,
             "container_name not configurated correctly"
         );
     }
