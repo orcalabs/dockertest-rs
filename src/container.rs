@@ -3,7 +3,7 @@
 use crate::waitfor::WaitFor;
 use crate::{DockerTestError, StartPolicy};
 
-use bollard::{container::StartContainerOptions, Docker};
+use bollard::{container::StartContainerOptions, errors::ErrorKind, Docker};
 
 /// Represent a docker container object in a pending phase between
 /// it being created on the daemon, but may not be running.
@@ -140,7 +140,23 @@ impl PendingContainer {
         self.client
             .start_container(&self.name, None::<StartContainerOptions<String>>)
             .await
-            .map_err(|e| DockerTestError::Startup(format!("failed to start container: {}", e)))?;
+            .map_err(|e| match e.kind() {
+                ErrorKind::DockerResponseNotFoundError { message } => {
+                    let json: Result<serde_json::Value, serde_json::error::Error> =
+                        serde_json::from_str(message);
+                    match json {
+                        Ok(json) => DockerTestError::Startup(format!(
+                            "failed to start container due to `{}`",
+                            json["message"].as_str().unwrap()
+                        )),
+                        Err(e) => DockerTestError::Daemon(format!(
+                            "daemon json response decode failure: {}",
+                            e
+                        )),
+                    }
+                }
+                _ => DockerTestError::Daemon(format!("failed to start container: {}", e)),
+            })?;
 
         let waitfor = self.wait.take().unwrap();
 
