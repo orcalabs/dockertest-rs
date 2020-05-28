@@ -273,11 +273,9 @@ impl DockerTest {
         let mut running_containers: Keeper<RunningContainer> =
             match self.start_containers(pending_containers).await {
                 Ok(r) => r,
-                Err(e) => {
-                    self.teardown(e, true).await;
-                    return Err(DockerTestError::Startup(
-                        "failed to start containers".to_string(),
-                    ));
+                Err((e, containers)) => {
+                    self.teardown(containers, true).await;
+                    return Err(e);
                 }
             };
 
@@ -467,15 +465,18 @@ impl DockerTest {
         let mut pending: Vec<PendingContainer> = Vec::new();
 
         for instance in compositions.kept.into_iter() {
-            match instance.create(&self.client, &self.network).await {
+            match instance.create(&self.client, Some(&self.network)).await {
                 Ok(c) => pending.push(c),
                 Err(e) => {
                     // Error condition arose - we return the successfully created containers
                     // (for cleanup purposes)
-                    return Err((e, pending
-                        .into_iter()
-                        .map(|x| x.into())
-                        .collect::<Vec<CleanupContainer>>()));
+                    return Err((
+                        e,
+                        pending
+                            .into_iter()
+                            .map(|x| x.into())
+                            .collect::<Vec<CleanupContainer>>(),
+                    ));
                 }
             }
         }
@@ -494,7 +495,7 @@ impl DockerTest {
     async fn start_containers(
         &mut self,
         mut pending_containers: Keeper<PendingContainer>,
-    ) -> Result<Keeper<RunningContainer>, Vec<CleanupContainer>> {
+    ) -> Result<Keeper<RunningContainer>, (DockerTestError, Vec<CleanupContainer>)> {
         // We have one issue we would like to solve here:
         // Start all pending containers, and retain the ordered indices used
         // for the Keeper::<T> structure, whilst going though the whole transformation
@@ -531,33 +532,36 @@ impl DockerTest {
         // Each completed container will signal back on the mpsc channel.
         let starting_relaxed = start_relaxed_containers(relaxed);
 
-        let success = match start_strict_containers(strict).await {
+        let strict_success = match start_strict_containers(strict).await {
             Ok(mut r) => {
                 running_containers.append(&mut r);
-                true
+                Ok(())
             }
-            Err(_) => false,
+            Err(e) => Err(e),
         };
-        let success = match wait_for_relaxed_containers(starting_relaxed, !success).await {
-            Ok(mut r) => {
-                running_containers.append(&mut r);
-                true
-            }
-            Err(_) => false,
-        };
+        let relaxed_success =
+            match wait_for_relaxed_containers(starting_relaxed, strict_success.is_err()).await {
+                Ok(mut r) => {
+                    running_containers.append(&mut r);
+                    Ok(())
+                }
+                Err(e) => Err(e),
+            };
 
-        if success {
-            sort_running_containers_into_insertion_order(
-                &mut running_containers,
-                original_ordered_ids,
-            );
-            Ok(Keeper::<RunningContainer> {
-                kept: running_containers,
-                lookup_collisions: pending_containers.lookup_collisions,
-                lookup_handlers: pending_containers.lookup_handlers,
-            })
-        } else {
-            Err(cleanup)
+        // Calculate the first error from strict then relaxed, and return that if present.
+        match strict_success.err().or(relaxed_success.err()) {
+            None => {
+                sort_running_containers_into_insertion_order(
+                    &mut running_containers,
+                    original_ordered_ids,
+                );
+                Ok(Keeper::<RunningContainer> {
+                    kept: running_containers,
+                    lookup_collisions: pending_containers.lookup_collisions,
+                    lookup_handlers: pending_containers.lookup_handlers,
+                })
+            }
+            Some(e) => Err((e, cleanup)),
         }
     }
 
@@ -791,21 +795,17 @@ fn start_relaxed_containers(
 
 async fn start_strict_containers(
     pending: Vec<PendingContainer>,
-) -> Result<Vec<RunningContainer>, ()> {
+) -> Result<Vec<RunningContainer>, DockerTestError> {
     let mut running = vec![];
-    let mut success = true;
+    let mut first_error = None;
 
     event!(Level::TRACE, "beginning starting strict containers");
     for c in pending.into_iter() {
         match c.start().await {
             Ok(r) => running.push(r),
-            Err(_e) => {
-                // TODO: Retrieve container id from error message on container.start() failure.
-                // Currently, this will leak the strict container that fails to start
-                // and will not clean it up.
-                // cleanup.push(e);
-                event!(Level::ERROR, "starting strict container failed {}", _e);
-                success = false;
+            Err(e) => {
+                event!(Level::ERROR, "starting strict container failed {}", e);
+                first_error = Some(e);
                 break;
             }
         }
@@ -814,13 +814,12 @@ async fn start_strict_containers(
     event!(
         Level::TRACE,
         "finished starting strict containers with result: {}",
-        success
+        first_error.is_none()
     );
 
-    if success {
-        Ok(running)
-    } else {
-        Err(())
+    match first_error {
+        None => Ok(running),
+        Some(e) => Err(e),
     }
 }
 
@@ -830,18 +829,20 @@ async fn start_strict_containers(
 async fn wait_for_relaxed_containers(
     starting_relaxed: Vec<JoinHandle<Result<RunningContainer, DockerTestError>>>,
     cancel_futures: bool,
-) -> Result<Vec<RunningContainer>, ()> {
+) -> Result<Vec<RunningContainer>, DockerTestError> {
     if cancel_futures {
         event!(
             Level::ERROR,
             "cancel futures requested - dropping relaxed join handles"
         );
         drop(starting_relaxed);
-        return Err(());
+        return Err(DockerTestError::Processing(
+            "cancelling all relaxed container join operations".to_string(),
+        ));
     }
 
     let mut running_relaxed: Vec<RunningContainer> = Vec::new();
-    let mut success = true;
+    let mut first_error = None;
 
     for join_handle in join_all(starting_relaxed).await {
         match join_handle {
@@ -853,12 +854,18 @@ async fn wait_for_relaxed_containers(
                         "starting relaxed container result error: {}",
                         e
                     );
-                    success = false
+                    if first_error.is_none() {
+                        first_error = Some(e);
+                    }
                 }
             },
             Err(_) => {
                 event!(Level::ERROR, "join errror on gathering relaxed containers");
-                success = false;
+                if first_error.is_none() {
+                    first_error = Some(DockerTestError::Processing(
+                        "join error gathering".to_string(),
+                    ));
+                }
             }
         }
     }
@@ -866,13 +873,12 @@ async fn wait_for_relaxed_containers(
     event!(
         Level::TRACE,
         "finished waiting for started relaxed containers with result: {}",
-        success
+        first_error.is_none()
     );
 
-    if success {
-        Ok(running_relaxed)
-    } else {
-        Err(())
+    match first_error {
+        None => Ok(running_relaxed),
+        Some(e) => Err(e),
     }
 }
 
