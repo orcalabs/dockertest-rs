@@ -3,10 +3,10 @@
 use thiserror::Error;
 
 /// Public library error conditions.
-#[derive(Error, Debug)]
+#[derive(Error, Debug, PartialEq)]
 #[allow(missing_docs)]
 pub enum DockerTestError {
-    #[error("docker daemon interaction error")]
+    #[error("docker daemon interaction error `{0}`")]
     Daemon(String),
     #[error("recoverable error condition")]
     Recoverable(String),
@@ -20,11 +20,4 @@ pub enum DockerTestError {
     Processing(String),
     #[error("test body failure `{0}`")]
     TestBody(String),
-
-    /// Catch-all IO error condition
-    #[error("IO error condition")]
-    Io {
-        #[from]
-        source: std::io::Error,
-    },
 }
