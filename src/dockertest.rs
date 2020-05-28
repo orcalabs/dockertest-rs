@@ -371,8 +371,8 @@ impl DockerTest {
         self.compositions.push(instance);
     }
 
-    #[cfg(test)]
-    pub(crate) fn source(&self) -> &Source {
+    /// Retrieve the default source for Images unless explicitly specified per Image.
+    pub fn source(&self) -> &Source {
         &self.default_source
     }
 
