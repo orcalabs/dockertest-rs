@@ -1,6 +1,6 @@
 //! Represents a docker `Container`.
 
-use crate::waitfor::WaitFor;
+use crate::waitfor::{MessageSource, WaitFor, wait_for_message};
 use crate::{DockerTestError, StartPolicy};
 
 use bollard::{container::StartContainerOptions, errors::ErrorKind, Docker};
@@ -114,6 +114,17 @@ impl RunningContainer {
     /// [ExitedWait]: waitfor/struct.ExitedWait.html
     pub fn ip(&self) -> &std::net::Ipv4Addr {
         &self.ip
+    }
+
+    /// Inspect the output of this container and await the presence of a log line.
+    ///
+    /// # Panics
+    /// This function panics if the log message is not present on the log output
+    /// within the specified timeout.
+    pub async fn assert_message<T: ToString>(&self, message: T, source: MessageSource, timeout: u16) {
+        if let Err(e) = wait_for_message(&self.client, &self.id, &self.handle, source, message, timeout).await {
+            panic!(e.to_string())
+        }
     }
 }
 
