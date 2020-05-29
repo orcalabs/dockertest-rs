@@ -960,7 +960,8 @@ mod tests {
         let mut test = DockerTest::new();
         let mut composition =
             Composition::with_repository(repository).with_start_policy(StartPolicy::Relaxed);
-        composition.container_name = "dockertest_start_relaxed_containers_start_failure".to_string();
+        composition.container_name =
+            "dockertest_start_relaxed_containers_start_failure".to_string();
         test.add_composition(composition);
 
         // Create the containers without all prep-work

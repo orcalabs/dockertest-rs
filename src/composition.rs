@@ -592,7 +592,8 @@ mod tests {
         let client = Docker::connect_with_local_defaults().expect("local docker daemon connection");
         let repository = "dockertest-rs/hello";
         let mut composition = Composition::with_repository(repository);
-        composition.container_name = "test_simple_create_composition_from_repository_success".to_string();
+        composition.container_name =
+            "test_simple_create_composition_from_repository_success".to_string();
 
         // ensure image metadata is populated (through pull infrastructure)
         composition
