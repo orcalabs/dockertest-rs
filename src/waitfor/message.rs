@@ -2,7 +2,7 @@ use crate::container::{PendingContainer, RunningContainer};
 use crate::waitfor::{async_trait, WaitFor};
 use crate::DockerTestError;
 
-use bollard::container::{LogOutput, LogsOptions};
+use bollard::{Docker, container::{LogOutput, LogsOptions}};
 use futures::stream::StreamExt;
 use std::sync::atomic::{self, AtomicBool};
 use std::sync::Arc;
@@ -37,16 +37,32 @@ impl WaitFor for MessageWait {
         &self,
         container: PendingContainer,
     ) -> Result<RunningContainer, DockerTestError> {
-        wait_for_message(container, self.source, self.message.clone(), self.timeout).await
+        pending_container_wait_for_message(container, self.source, self.message.clone(), self.timeout).await
     }
 }
 
-async fn wait_for_message(
+async fn pending_container_wait_for_message(
     container: PendingContainer,
     source: MessageSource,
     msg: String,
     timeout: u16,
 ) -> Result<RunningContainer, DockerTestError> {
+    // Must unfortunately clone the client, since the PendingContainer will be consusumed.
+    let client = container.client.clone();
+    match wait_for_message(&client, &container.id, &container.handle, source, msg, timeout).await {
+        Ok(_) => Ok(container.into()),
+        Err(e) => Err(e),
+    }
+}
+
+pub(crate) async fn wait_for_message<T: ToString>(
+    client: &Docker,
+    container_id: &str,
+    handle: &str,
+    source: MessageSource,
+    msg: T,
+    timeout: u16,
+) -> Result<(), DockerTestError> {
     // Construct LogOptions
     let mut log_options = LogsOptions {
         follow: true,
@@ -59,13 +75,13 @@ async fn wait_for_message(
     let log_options = Some(log_options);
 
     // Construct remaining variables
-    let client = container.client.clone();
     let s1 = Arc::new(AtomicBool::new(false));
     let s2 = s1.clone();
+    let msg = msg.to_string();
     let msg_clone = msg.clone();
 
     // Construct the stream
-    let stream = client.logs(&container.id, log_options);
+    let stream = client.logs(container_id, log_options);
 
     // Work configuration
     let work_fut = async {
@@ -98,10 +114,10 @@ async fn wait_for_message(
     match time::timeout(Duration::from_secs(timeout.into()), work_fut).await {
         Ok(_) => {
             if s2.load(atomic::Ordering::SeqCst) {
-                Ok(container.into())
+                Ok(())
             } else {
                 Err(DockerTestError::Startup(
-                    format!("container `{}` ended log stream (terminated) before waitfor message triggered: `{}`", container.handle, msg_clone),
+                    format!("container `{}` ended log stream (terminated) before waitfor message triggered: `{}`", handle, msg_clone),
                 ))
             }
         }
