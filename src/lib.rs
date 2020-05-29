@@ -65,7 +65,7 @@
 //! `DOCKERTEST_PRUNE`:
 //! * "always": [default] remove everything
 //! * "never": leave all containers running
-//! * "stop_on_failure": stop containers on exeuction failure
+//! * "stop_on_failure": stop containers on execution failure
 //! * "running_on_failure": leave containers running on execution failure
 //!
 //! # Viewing logs of test execution
