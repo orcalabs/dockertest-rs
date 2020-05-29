@@ -26,9 +26,8 @@ fn test_inject_container_name_ip_through_env_communication() {
     send.inject_container_name("recv", "SEND_TO_IP");
     test.add_composition(send);
 
-    test.run(|_ops| async move {
-        // This test is executed through the WaitFor mechanism
-        // TODO: assert in the log output for recv that it actually received the data.
-        assert!(true);
+    test.run(|ops| async move {
+        let recv = ops.handle("recv");
+        recv.assert_message("coop send message to container", MessageSource::Stdout, 5).await;
     });
 }
