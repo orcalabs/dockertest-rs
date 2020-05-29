@@ -1,6 +1,7 @@
 #![deny(missing_docs)]
 #![deny(warnings)]
 #![deny(rust_2018_idioms)]
+#![deny(intra_doc_link_resolution_failure)]
 
 //! _dockertest_ is a testing and automation abstraction for Docker.
 //!
@@ -57,6 +58,35 @@
 //! * [NoWait] - don't wait for anything
 //! * [MessageWait] - wait for the following message to appear in the log stream.
 //!
+//! # Prune policy
+//!
+//! By default, _dockertest_ will stop and remove all containers and created volumes
+//! regardless of execution result. You can control this policy by setting the environment variable
+//! `DOCKERTEST_PRUNE`:
+//! * "always": [default] remove everything
+//! * "never": leave all containers running
+//! * "stop_on_failure": stop containers on exeuction failure
+//! * "running_on_failure": leave containers running on execution failure
+//!
+//! # Viewing logs of test execution
+//! _dockertest_ utilizes the `tracing` log infrastructure. To enable this log output,
+//! you must perform enable a subscriber to handle the events.
+//! This can easily be done by for instance the wrapper crate `test-env-log`, that provides
+//! a new impl of the `#[test]` attribute.
+//!
+//! .Cargo.toml
+//! ```no_compile
+//! [dev-dependencies]
+//! tracing = "0.1.13"
+//! tracing-subscriber = "0.2"
+//! test-env-log = { version = "0.2", default-features = false, features = ["trace"] }
+//! ```
+//!
+//! .Top of test file
+//! ```
+//! use test_env_log::test;
+//! ```
+//!
 //! # Example
 //!
 //! ```rust
@@ -71,20 +101,18 @@
 //! let mut test = DockerTest::new().with_default_source(source);
 //!
 //! // Define our Composition - the Image we will start and end up as our RunningContainer
-//! let postgres = Composition::with_repository("postgres").with_wait_for(Rc::new(MessageWait {
+//! let mut postgres = Composition::with_repository("postgres").with_wait_for(Box::new(MessageWait {
 //!     message: "database system is ready to accept connections".to_string(),
 //!     source: MessageSource::Stderr,
 //!     timeout: 20,
 //! }));
+//! postgres.env("POSTGRES_PASSWORD", "password");
 //! test.add_composition(postgres);
 //!
 //! // Run the test body
-//! test.run(|ops| {
-//!     let container = ops.handle("postgres").expect("retrieve postgres container");
-//!     let ip = container.ip();
-//!     // This is the default postgres serve port
-//!     let port = "5432";
-//!     let conn_string = format!("postgres://postgres:postgres@{}:{}", ip, port);
+//! test.run(|ops| async move {
+//!     let container = ops.handle("postgres");
+//!     let conn_string = format!("postgres://postgres:password@{}:{}", container.ip(), 5432);
 //!     let pgconn = PgConnection::establish(&conn_string);
 //!
 //!     // Perform your database operations here
@@ -117,7 +145,7 @@
 mod composition;
 mod container;
 mod dockertest;
-pub mod error;
+mod error;
 mod image;
 pub mod waitfor;
 
@@ -128,4 +156,5 @@ mod test_utils;
 pub use crate::composition::{Composition, StartPolicy};
 pub use crate::container::{PendingContainer, RunningContainer};
 pub use crate::dockertest::{DockerOperations, DockerTest};
+pub use crate::error::DockerTestError;
 pub use crate::image::{Image, PullPolicy, Remote, Source};

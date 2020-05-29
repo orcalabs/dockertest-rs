@@ -1,13 +1,19 @@
 # dockertest-rs
 
-Run docker containers in your Rust integration tests.
+Control docker containers from a rust ingegration test suite. Full fledge management support
+with automatic cleanup.
 
 This crate provides the following features for your docker testing needs:
 
 * Ensure docker containers are invoked and running according to `WaitFor` strategy.
  * Customize your own or use one of the batteries included.
 * Interact with the `RunningContainer` in the test body through its `ip` address.
+* Setup inter-container communication with `inject_container_name` into environment variables.
 * Teardown each started container after test is terminated - both successfully and on test failure.
+* Concurrent capabilies. All tests are isolated into separate networks per test, with uniquely
+generated container names.
+
+See the [crate documentation](https://docs.rs/dockertest) for extensive explainations.
 
 ## Example
 
@@ -26,20 +32,18 @@ let source = Source::DockerHub(PullPolicy::IfNotPresent);
 let mut test = DockerTest::new().with_default_source(source);
 
 // Define our Composition - the Image we will start and end up as our RunningContainer
-let postgres = Composition::with_repository("postgres").with_wait_for(Rc::new(MessageWait {
+let mut postgres = Composition::with_repository("postgres").with_wait_for(Box::new(MessageWait {
     message: "database system is ready to accept connections".to_string(),
     source: MessageSource::Stderr,
     timeout: 20,
 }));
+postgres.env("POSTGRES_PASSWORD", "password");
 test.add_composition(postgres);
 
 // Run the test body
-test.run(|ops| {
-    let container = ops.handle("postgres").expect("retrieve postgres container");
-    let ip = container.ip();
-    // This is the default postgres serve port
-    let port = "5432";
-    let conn_string = format!("postgres://postgres:postgres@{}:{}", ip, port);
+test.run(|ops| async move {
+    let container = ops.handle("postgres");
+    let conn_string = format!("postgres://postgres:password@{}:{}", container.ip(), 5432);
     let pgconn = PgConnection::establish(&conn_string);
 
     // Perform your database operations here
@@ -50,21 +54,11 @@ test.run(|ops| {
 });
 ```
 
-## Development
-
-This library is in its initial inception. Breaking changes are to be expected.
-
 ## Testing
 
 Testing this library requires the following:
 * docker daemon available on localhost.
 * Capable of compiling `diesel` with the postgres feature.
 
-Run the tests with the following command:
-```
-cargo test -- --test-threads=1
-```
-
-Caveats that may fail tests:
-* Exited `hello-world` containers on the system. This will currently make removing
-old images fail and many tests will fail.
+Tests are designed to be run in parallel, and should not conflict with existing system images.
+Local images are build with repository prefix `dockertest-rs/`.

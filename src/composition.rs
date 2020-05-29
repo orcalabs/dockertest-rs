@@ -1,20 +1,28 @@
 //! Represent a concrete instance of an Image, before it is ran as a Container.
 
 use crate::container::PendingContainer;
-use crate::error::{DockerError, DockerErrorKind};
 use crate::image::Image;
 use crate::waitfor::{NoWait, WaitFor};
-use futures;
-use futures::future::{self, Future};
-use shiplift;
-use shiplift::builder::{ContainerOptions, RmContainerOptions};
-use std::collections::HashMap;
-use std::rc::Rc;
+use crate::DockerTestError;
 
-/// Specifies the starting policy of a Composition.
-/// A Strict policy will enforce that the Composition is started in the order
-/// it was added to DockerTest. A Relaxed policy will not enforce any ordering,
+use bollard::{
+    container::{
+        Config, CreateContainerOptions, HostConfig, InspectContainerOptions, RemoveContainerOptions,
+    },
+    Docker,
+};
+use futures::future::TryFutureExt;
+use std::collections::HashMap;
+use tracing::{event, Level};
+
+/// Specifies the starting policy of a `Composition`.
+///
+/// A `Strict` policy will enforce that the Composition is started in the order
+/// it was added to dockertest. A `Relaxed` policy will not enforce any ordering,
 /// all Compositions with a Relaxed policy will be started concurrently.
+///
+/// All relaxed compositions is asynchronously started before sequentially
+/// starting all with a strict `StartPolicy`.
 #[derive(Clone, PartialEq)]
 pub enum StartPolicy {
     /// Concurrently start the Container with other Relaxed instances.
@@ -24,7 +32,8 @@ pub enum StartPolicy {
 }
 
 /// Represents an instance of an [Image].
-/// The Composition is used to specialize an Image whose name, version, tag and source is known,
+///
+/// The `Composition` is used to specialize an Image whose name, version, tag and source is known,
 /// but before one can create a [RunningContainer] from an Image, it must be augmented with
 /// information about how to start it, how to ensure it has been started, environment variables
 /// and runtime commands.
@@ -57,23 +66,21 @@ pub struct Composition {
     /// If the user have provided a user_provided_container_name, the container_name will look like
     /// the following:
     ///     namespace_of_dockerTest - user_provided_container_name - random_generated_suffix
-    container_name: String,
+    pub(crate) container_name: String,
 
     /// Trait object that is responsible for
     /// waiting for the container that will
     /// be created to be ready for service.
     /// Defaults to waiting for the container
     /// to appear as running.
-    wait: Rc<dyn WaitFor>,
+    wait: Box<dyn WaitFor>,
 
     /// The environmentable variables that will be
     /// passed to the container.
-    env: HashMap<String, String>,
+    pub(crate) env: HashMap<String, String>,
 
     /// The command to pass to the container.
     cmd: Vec<String>,
-
-    port: HashMap<u32, u32>,
 
     /// The StartPolicy of this Composition,
     /// defaults to relaxed.
@@ -85,14 +92,19 @@ pub struct Composition {
 
     /// Volumes associated with this composition, are in the form of: "HOST_PATH/CONTAINER_PATH"
     volumes: Vec<String>,
+
+    /// All user specified container name injections as environment variables.
+    /// Tuple contains (handle, env).
+    pub(crate) inject_container_name_env: Vec<(String, String)>,
 }
 
 impl Composition {
-    /// Creates a Composition based on the Image repository name provided.
+    /// Creates a `Composition` based on the `Image` repository name provided.
+    ///
     /// This will internally create the [Image] based on the provided repository name,
     /// and default the tag to `latest`.
     ///
-    /// This is the shortcut method of constructing a Composition.
+    /// This is the shortcut method of constructing a `Composition`.
     /// See [with_image] to create one with a provided [Image].
     ///
     /// [Image]: struct.Image.html
@@ -102,36 +114,38 @@ impl Composition {
         Composition {
             user_provided_container_name: None,
             image: Image::with_repository(&copy),
-            container_name: copy,
-            wait: Rc::new(NoWait {}),
+            container_name: copy.replace("/", "-"),
+            wait: Box::new(NoWait {}),
             env: HashMap::new(),
             cmd: Vec::new(),
-            port: HashMap::new(),
             start_policy: StartPolicy::Relaxed,
             volumes: Vec::new(),
+            inject_container_name_env: Vec::new(),
         }
     }
 
-    /// Creates a Composition with the provided Image.
-    /// This is the long-winded way of defining a Composition.
+    /// Creates a `Composition` with the provided `Image`.
+    ///
+    /// This is the long-winded way of defining a `Composition`.
     /// See [with_repository] to for the shortcut method.
     ///
     /// [with_repository]: struct.Composition.html#method.with_repository
     pub fn with_image(image: Image) -> Composition {
         Composition {
             user_provided_container_name: None,
-            container_name: image.repository().to_string(),
+            container_name: image.repository().to_string().replace("/", "-"),
             image,
-            wait: Rc::new(NoWait {}),
+            wait: Box::new(NoWait {}),
             env: HashMap::new(),
             cmd: Vec::new(),
-            port: HashMap::new(),
             start_policy: StartPolicy::Relaxed,
             volumes: Vec::new(),
+            inject_container_name_env: Vec::new(),
         }
     }
 
-    /// Sets the start_policy for this Composition.
+    /// Sets the `StartPolicy` for this `Composition`.
+    ///
     /// Defaults to a [relaxed] policy.
     ///
     /// [relaxed]: enum.StartPolicy.html#variant.Relaxed
@@ -143,6 +157,7 @@ impl Composition {
     }
 
     /// Assigns the full set of environmental variables available for the [RunningContainer].
+    ///
     /// Each key in the map should be the environmental variable name
     /// and its corresponding value will be set as its value.
     ///
@@ -165,10 +180,11 @@ impl Composition {
     }
 
     /// Sets the name of the container that will eventually be started.
+    ///
     /// This is merely part of the final container name, and the full container name issued
     /// to docker will be generated.
     /// The container name assigned here is also used to resolve the `handle` concept used
-    /// by _dockertest_.
+    /// by dockertest.
     ///
     /// The container name defaults to the repository name.
     pub fn with_container_name<T: ToString>(self, container_name: T) -> Composition {
@@ -178,12 +194,12 @@ impl Composition {
         }
     }
 
-    /// Sets the wait_for trait object for this Composition.
+    /// Sets the `WaitFor` trait object for this `Composition`.
     ///
-    /// The default WaitFor implementation used is [RunningWait].
+    /// The default `WaitFor` implementation used is [RunningWait].
     ///
     /// [RunningWait]: waitfor/struct.RunningWait.html
-    pub fn with_wait_for(self, wait: Rc<dyn WaitFor>) -> Composition {
+    pub fn with_wait_for(self, wait: Box<dyn WaitFor>) -> Composition {
         Composition { wait, ..self }
     }
 
@@ -213,13 +229,6 @@ impl Composition {
         self
     }
 
-    /// Adds the exported -> host port mapping.
-    /// If an exported port already exists, it will be overridden.
-    pub fn port_map(&mut self, exported: u32, host: u32) -> &mut Composition {
-        self.port.insert(exported, host);
-        self
-    }
-
     /// Adds the given volume to the Composition.
     /// The name must match a volume added to the DockerTest instance.
     /// The volume will be mounted into the container on the given path.
@@ -236,12 +245,32 @@ impl Composition {
         self
     }
 
-    // QUESTION: Should this be consuming self??
+    /// Inject the generated container name identified by `handle` into
+    /// this Composition environment variable `env`.
+    ///
+    /// This is used to establish inter communication between running containers
+    /// controlled by dockertest. This is traditionally established through environment variables
+    /// for connection details, and thus the DNS resolving capabilities within docker will
+    /// map the container name into the correct IP address.
+    ///
+    /// To correctly use this feature, the `StartPolicy` between the dependant containers
+    /// must be configured such that these connections can successfully be established.
+    /// Dockertest will not make any attempt to verify the integrity of these dependencies.
+    pub fn inject_container_name<T: ToString, E: ToString>(
+        &mut self,
+        handle: T,
+        env: E,
+    ) -> &mut Composition {
+        self.inject_container_name_env
+            .push((handle.to_string(), env.to_string()));
+        self
+    }
+
     // Configure the container's name with the given namespace as prefix
     // and suffix.
     // We do this to ensure that we do not have overlapping container names
     // and make it clear which containers are run by DockerTest.
-    pub(crate) fn configure_container_name(self, namespace: &str, suffix: &str) -> Composition {
+    pub(crate) fn configure_container_name(&mut self, namespace: &str, suffix: &str) {
         let name = match &self.user_provided_container_name {
             None => self.image.repository(),
             Some(n) => n,
@@ -250,94 +279,87 @@ impl Composition {
         // The docker daemon does not like '/' or '\' in container names
         let stripped_name = name.replace("/", "_");
 
-        Composition {
-            container_name: format!("{}-{}-{}", namespace, stripped_name, suffix),
-            ..self
-        }
+        self.container_name = format!("{}-{}-{}", namespace, stripped_name, suffix);
     }
 
     // Consumes the Composition, creates the container and returns the Container object if it
     // was succesfully created.
-    pub(crate) fn create<'a>(
+    pub(crate) async fn create(
         self,
-        client: Rc<shiplift::Docker>,
-    ) -> impl Future<Item = PendingContainer, Error = DockerError> + 'a {
-        println!("starting container: {}", self.container_name);
+        client: &Docker,
+        network: Option<&str>,
+    ) -> Result<PendingContainer, DockerTestError> {
+        event!(Level::INFO, "creating container: {}", self.container_name);
 
-        let wait_for_clone = self.wait.clone();
         let start_policy_clone = self.start_policy.clone();
-
         let container_name_clone = self.container_name.clone();
 
-        let c1 = client.clone();
+        // Ensure we can remove the previous container instance, if it somehow still exists.
+        // Only bail on non-recoverable failure.
+        match remove_container_if_exists(client, &self.container_name).await {
+            Ok(_) => {}
+            Err(e) => match e {
+                DockerTestError::Recoverable(_) => {}
+                _ => return Err(e),
+            },
+        }
 
-        let handle = match &self.user_provided_container_name {
-            None => self.image.repository().to_string(),
-            Some(n) => n.clone(),
+        let image_id = self.image.retrieved_id();
+        // Additional programming guard.
+        // This Composition cannot be created without an image id, which
+        // is set through `Image::pull`
+        if image_id.is_empty() {
+            return Err(DockerTestError::Processing("`Composition::create()` invoked without populatting its image through `Image::pull()`".to_string()));
+        }
+
+        // As we can't return temporary values owned by this closure
+        // we have to first convert our map into a vector of owned strings,
+        // then convert it to a vector of borrowed strings (&str).
+        // There is probably a better way to do this...
+        let envs: Vec<String> = self
+            .env
+            .iter()
+            .map(|(key, value)| format!("{}={}", key, value))
+            .collect();
+        let envs = envs.iter().map(|s| s.as_ref()).collect();
+        let cmds = self.cmd.iter().map(|s| s.as_ref()).collect();
+        let mut volumes: HashMap<&str, HashMap<(), ()>> = HashMap::new();
+        for v in self.volumes.iter() {
+            volumes.insert(v.as_str(), HashMap::new());
+        }
+
+        // Construct host config
+        let host_config = network.map(|n| HostConfig {
+            network_mode: Some(n),
+            ..Default::default()
+        });
+
+        // Construct options for create container
+        let options = Some(CreateContainerOptions {
+            name: &self.container_name,
+        });
+        let config = Config::<&str> {
+            image: Some(&image_id),
+            cmd: Some(cmds),
+            env: Some(envs),
+            volumes: Some(volumes),
+            host_config,
+            ..Default::default()
         };
 
-        let remove_fut = remove_container_if_exists(client.clone(), self.container_name.clone());
+        let container_info = client
+            .create_container(options, config)
+            .map_err(|e| DockerTestError::Daemon(format!("failed to create container: {}", e)))
+            .await?;
 
-        remove_fut
-            .then(|res| match res {
-                Ok(_) => Ok(()),
-                Err(e) => match e.kind() {
-                    DockerErrorKind::Recoverable(_) => Ok(()),
-                    _ => Err(e),
-                },
-            })
-            .and_then(move |_| {
-                // As we can't return temporary values owned by this closure
-                // we have to first convert our map into a vector of owned strings,
-                // then convert it to a vector of borrowed strings (&str).
-                // There is probably a better way to do this...
-                let envs: Vec<String> = self
-                    .env
-                    .iter()
-                    .map(|(key, value)| format!("{}={}", key, value))
-                    .collect();
-                let envs = envs.iter().map(|s| s.as_ref()).collect();
-                let cmds = self.cmd.iter().map(|s| s.as_ref()).collect();
-
-                let volumes: Vec<&str> = self.volumes.iter().map(|v| v.as_str()).collect();
-
-                let containers = c1.containers();
-
-                let image_id = self.image.retrieved_id();
-                let mut options_builder = ContainerOptions::builder(&image_id);
-                options_builder
-                    .cmd(cmds)
-                    .env(envs)
-                    .volumes(volumes)
-                    .name(&self.container_name);
-
-                // Handle ports
-                if self.port.is_empty() {
-                    // TODO: export ALL ports
-                } else {
-                    // Export the specific ports
-                    for (export, host) in &self.port {
-                        options_builder.expose(*export, "tcp", *host);
-                    }
-                }
-
-                let container_options = options_builder.build();
-                containers
-                    .create(&container_options)
-                    .map_err(|e| DockerError::daemon(format!("failed to create container: {}", e)))
-            })
-            .and_then(move |container_info| {
-                let container = PendingContainer::new(
-                    &container_name_clone,
-                    &container_info.id,
-                    handle,
-                    start_policy_clone,
-                    wait_for_clone,
-                    client.clone(),
-                );
-
-                future::ok(container)
-            })
+        Ok(PendingContainer::new(
+            &container_name_clone,
+            &container_info.id,
+            self.handle(),
+            start_policy_clone,
+            self.wait,
+            client.clone(),
+        ))
     }
 
     // Returns the Image associated with this Composition.
@@ -355,32 +377,32 @@ impl Composition {
 }
 
 // Forcefully removes the given container if it exists.
-fn remove_container_if_exists(
-    client: Rc<shiplift::Docker>,
-    name: String,
-) -> impl Future<Item = (), Error = DockerError> {
+async fn remove_container_if_exists(client: &Docker, name: &str) -> Result<(), DockerTestError> {
     client
-        .containers()
-        .get(&name)
-        .inspect()
-        .map_err(|e| DockerError::recoverable(format!("container did not exist: {}", e)))
-        .and_then(move |_| {
-            let opts = RmContainerOptions::builder().force(true).build();
-            client.containers().get(&name).remove(opts).map_err(|e| {
-                DockerError::daemon(format!("failed to remove existing container: {}", e))
-            })
-        })
-        .map(|_| ())
+        .inspect_container(name, None::<InspectContainerOptions>)
+        .map_err(|e| DockerTestError::Recoverable(format!("container did not exist: {}", e)))
+        .await?;
+
+    // We were able to inspect it successfully, it exists.
+    // Therefore, we can simply force remove it.
+    let options = Some(RemoveContainerOptions {
+        force: true,
+        ..Default::default()
+    });
+    client
+        .remove_container(name, options)
+        .map_err(|e| DockerTestError::Daemon(format!("failed to remove existing container: {}", e)))
+        .await
 }
 
 #[cfg(test)]
 mod tests {
     use crate::composition::{remove_container_if_exists, Composition, StartPolicy};
-    use crate::error::DockerErrorKind;
-    use crate::image::{Image, PullPolicy, Source};
+    use crate::image::{Image, Source};
+    use crate::DockerTestError;
+
+    use bollard::Docker;
     use std::collections::HashMap;
-    use std::rc::Rc;
-    use tokio::runtime::current_thread;
 
     // Tests that the with_repository constructor creates
     // a Composition with the correct values
@@ -421,7 +443,6 @@ mod tests {
     #[test]
     fn test_with_image_constructor() {
         let repository = "this_is_a_repository".to_string();
-
         let image = Image::with_repository(&repository);
 
         let instance = Composition::with_image(image);
@@ -541,150 +562,145 @@ mod tests {
         );
     }
 
-    // Tests that we fail to create the Container if its associated image has
-    // not been pulled yet.
-    // If it exists locally, but the pull process has no been invoked
-    // its id will be empty.
-    #[test]
-    fn test_create_with_non_existing_image() {
-        let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
-        let repository = "this_repo_does_not_exist".to_string();
-        let instance = Composition::with_repository(&repository);
+    /// Tests that we cannot create a container from a non-existent local repository image.
+    #[tokio::test]
+    async fn test_create_with_non_existing_local_image() {
+        let client = Docker::connect_with_local_defaults().expect("local docker daemon connection");
+        let repository = "dockertest_create_with_non_existing_local_image";
+        let composition = Composition::with_repository(repository);
 
-        let client = Rc::new(shiplift::Docker::new());
-        let res = rt.block_on(instance.create(client));
+        // Invoking image pull to populate the image id should err
+        // TODO: assert a proper error message
+        assert!(composition
+            .image
+            .pull(&client, &Source::Local)
+            .await
+            .is_err());
 
+        // This will then fail due to missing image id
+        let result = composition.create(&client, None).await;
+        // TODO: assert a proper error message
         assert!(
-            res.is_err(),
+            result.is_err(),
             "should fail to start a Composition with non-exisiting image"
         );
     }
 
-    // Tests that we can successfully create a Container from a Composition
-    // resulting in a Container with correct values.
-    #[test]
-    fn test_create_with_existing_image() {
-        let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
-        let repository = "hello-world".to_string();
+    /// Check that a simple composition from repository can be successfully created.
+    #[tokio::test]
+    async fn test_simple_create_composition_from_repository_success() {
+        let client = Docker::connect_with_local_defaults().expect("local docker daemon connection");
+        let repository = "dockertest-rs/hello";
+        let mut composition = Composition::with_repository(repository);
+        composition.container_name =
+            "test_simple_create_composition_from_repository_success".to_string();
 
-        let source = Source::DockerHub(PullPolicy::Always);
-        let image = Image::with_repository(&repository);
-        let instance = Composition::with_image(image);
+        // ensure image metadata is populated (through pull infrastructure)
+        composition
+            .image
+            .pull(&client, &Source::Local)
+            .await
+            .unwrap();
 
-        let client = Rc::new(shiplift::Docker::new());
-
-        let res = rt.block_on(instance.image().pull(client.clone(), &source));
+        let result = composition.create(&client, None).await;
         assert!(
-            res.is_ok(),
-            format!("failed to pull image: {}", res.unwrap_err())
-        );
-
-        let res = rt.block_on(instance.create(client));
-        assert!(
-            res.is_ok(),
-            format!("failed to start Composition: {}", res.err().unwrap())
+            result.is_ok(),
+            format!("failed to start Composition: {}", result.err().unwrap())
         );
     }
 
-    // Tests that we can successfully create a Contaienr from a Composition,
-    // even if there exists a container with the same name.
-    // The start method should detect that there already
-    // exists a container with the same name,
-    // remove it, and create ours.
-    #[test]
-    fn test_create_with_existing_container() {
-        let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
-        let repository = "hello-world".to_string();
+    /// Tests that two consecutive Compositions creating a container with the exact same
+    /// `container_name` will still be allowed to be created.
+    ///
+    /// The expected behaviour is thus to remove the old container
+    /// (since we assume it will be an _old_ name collision).
+    #[tokio::test]
+    async fn test_create_with_existing_container() {
+        let client = Docker::connect_with_local_defaults().expect("local docker daemon connection");
+        let repository = "dockertest-rs/hello";
+        let container_name = "dockertest_create_with_existing_container".to_string();
 
-        let container_name = "this_is_a_container".to_string();
+        let mut composition1 = Composition::with_repository(repository);
+        // configure the `container_name` inline instead of through `with_container_name`,
+        // to avoid the user provided container name logic.
+        composition1.container_name = container_name;
+        // ensure image metadata is populated (through pull infrastructure)
+        composition1
+            .image
+            .pull(&client, &Source::Local)
+            .await
+            .unwrap();
 
-        let source = Source::DockerHub(PullPolicy::IfNotPresent);
-        let image = Image::with_repository(&repository);
-        let mut instance = Composition::with_image(image);
-        instance.container_name = container_name.clone();
+        let composition2 = composition1.clone();
 
-        let client = Rc::new(shiplift::Docker::new());
-
-        let res = rt.block_on(instance.image().pull(client.clone(), &source));
+        // Initial setup - first container that already exists.
+        let result = composition1.create(&client, None).await;
         assert!(
-            res.is_ok(),
-            format!("failed to pull image: {}", res.unwrap_err())
+            result.is_ok(),
+            format!(
+                "failed to start first composition: {}",
+                result.err().unwrap()
+            )
         );
 
-        let res = rt.block_on(instance.create(client.clone()));
+        // Creating a second one should still be allowed, since we expect the first one
+        // to be removed.
+        let result = composition2.create(&client, None).await;
         assert!(
-            res.is_ok(),
-            format!("failed to start Composition: {}", res.err().unwrap())
-        );
-
-        let source = Source::DockerHub(PullPolicy::IfNotPresent);
-        let image = Image::with_repository(&repository);
-        let mut instance = Composition::with_image(image);
-        instance.container_name = container_name.clone();
-
-        let client = Rc::new(shiplift::Docker::new());
-
-        let res = rt.block_on(instance.image().pull(client.clone(), &source));
-        assert!(
-            res.is_ok(),
-            format!("failed to pull image: {}", res.unwrap_err())
-        );
-
-        let res = rt.block_on(instance.create(client));
-        assert!(
-            res.is_ok(),
-            format!("failed to start Composition: {}", res.err().unwrap())
+            result.is_ok(),
+            format!(
+                "failed to start second composition: {}",
+                result.err().unwrap()
+            )
         );
     }
 
-    // Tests that we can remove an existing container.
-    #[test]
-    fn test_remove_existing_container() {
-        let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
-        let repository = "hello-world".to_string();
+    /// Tests the `remove_container_if_exists` method when container exists.
+    #[tokio::test]
+    async fn test_remove_existing_container() {
+        let client = Docker::connect_with_local_defaults().expect("local docker daemon connection");
+        let repository = "dockertest-rs/hello";
+        let container_name = "dockertest_remove_existing_container_test_name";
+        let mut composition = Composition::with_repository(repository);
+        composition.container_name = container_name.to_string();
 
-        let source = Source::DockerHub(PullPolicy::IfNotPresent);
-        let image = Image::with_repository(&repository);
-        let instance = Composition::with_image(image);
+        // ensure image metadata is populated (through pull infrastructure)
+        composition
+            .image
+            .pull(&client, &Source::Local)
+            .await
+            .unwrap();
 
-        let container_name = instance.container_name.clone();
-
-        let client = Rc::new(shiplift::Docker::new());
-
-        let res = rt.block_on(instance.image().pull(client.clone(), &source));
+        // Create out composition
+        let result = composition.create(&client, None).await;
         assert!(
-            res.is_ok(),
-            format!("failed to pull image: {}", res.unwrap_err())
+            result.is_ok(),
+            format!("failed to start composition: {}", result.err().unwrap())
         );
 
-        let res = rt.block_on(instance.create(client.clone()));
+        // Remove it by name
+        let result = remove_container_if_exists(&client, container_name).await;
         assert!(
-            res.is_ok(),
-            format!("failed to start Composition: {}", res.err().unwrap())
-        );
-
-        let res = rt.block_on(remove_container_if_exists(client, container_name));
-        assert!(
-            res.is_ok(),
-            format!("failed to remove existing container: {}", res.unwrap_err())
+            result.is_ok(),
+            format!(
+                "failed to remove existing container: {}",
+                result.unwrap_err()
+            )
         );
     }
 
-    // Tests that we fail when trying to remove a non-existing container.
-    #[test]
-    fn test_remove_non_existing_container() {
-        let mut rt = current_thread::Runtime::new().expect("failed to start tokio runtime");
-        let client = Rc::new(shiplift::Docker::new());
+    /// Tests that we fail when trying to remove a non-existing container through
+    /// `remove_container_if_exists`.
+    #[tokio::test]
+    async fn test_remove_non_existing_container() {
+        let client = Docker::connect_with_local_defaults().expect("local docker daemon connection");
 
-        let res = rt.block_on(remove_container_if_exists(
-            client,
-            "non_existing_container".to_string(),
-        ));
+        let result = remove_container_if_exists(&client, "dockertest_non_existing_container").await;
 
-        let res = match res {
+        let res = match result {
             Ok(_) => false,
-            Err(e) => match e.kind() {
-                DockerErrorKind::Recoverable(_) => true,
+            Err(e) => match e {
+                DockerTestError::Recoverable(_) => true,
                 _ => false,
             },
         };
@@ -696,17 +712,17 @@ mod tests {
     #[test]
     fn test_configurate_container_name_without_user_supplied_name() {
         let repository = "hello-world";
-        let composition = Composition::with_repository(&repository);
+        let mut composition = Composition::with_repository(&repository);
 
         let suffix = "test123";
         let namespace = "namespace";
 
         let expected_output = format!("{}-{}-{}", namespace, repository, suffix);
 
-        let new_instance = composition.configure_container_name(&namespace, suffix);
+        composition.configure_container_name(&namespace, suffix);
 
         assert_eq!(
-            new_instance.container_name, expected_output,
+            composition.container_name, expected_output,
             "container_name not configurated correctly"
         );
     }
@@ -717,7 +733,7 @@ mod tests {
     fn test_configurate_container_name_with_user_supplied_name() {
         let repository = "hello-world";
         let container_name = "this_is_a_container";
-        let composition =
+        let mut composition =
             Composition::with_repository(&repository).with_container_name(container_name);
 
         let suffix = "test123";
@@ -725,10 +741,10 @@ mod tests {
 
         let expected_output = format!("{}-{}-{}", namespace, container_name, suffix);
 
-        let new_instance = composition.configure_container_name(&namespace, suffix);
+        composition.configure_container_name(&namespace, suffix);
 
         assert_eq!(
-            new_instance.container_name, expected_output,
+            composition.container_name, expected_output,
             "container_name not configurated correctly"
         );
     }
@@ -742,7 +758,7 @@ mod tests {
         let container_name = "this/is/a_container";
         let expected_container_name = "this_is_a_container";
 
-        let composition =
+        let mut composition =
             Composition::with_repository(&repository).with_container_name(container_name);
 
         let suffix = "test123";
@@ -750,10 +766,10 @@ mod tests {
 
         let expected_output = format!("{}-{}-{}", namespace, expected_container_name, suffix);
 
-        let new_instance = composition.configure_container_name(&namespace, suffix);
+        composition.configure_container_name(&namespace, suffix);
 
         assert_eq!(
-            new_instance.container_name, expected_output,
+            composition.container_name, expected_output,
             "container_name not configurated correctly"
         );
     }
@@ -766,17 +782,17 @@ mod tests {
         let repository = "hello/world";
         let expected_container_name = "hello_world";
 
-        let composition = Composition::with_repository(&repository);
+        let mut composition = Composition::with_repository(&repository);
 
         let suffix = "test123";
         let namespace = "namespace";
 
         let expected_output = format!("{}-{}-{}", namespace, expected_container_name, suffix);
 
-        let new_instance = composition.configure_container_name(&namespace, suffix);
+        composition.configure_container_name(&namespace, suffix);
 
         assert_eq!(
-            new_instance.container_name, expected_output,
+            composition.container_name, expected_output,
             "container_name not configurated correctly"
         );
     }

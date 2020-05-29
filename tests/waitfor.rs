@@ -1,32 +1,41 @@
-use dockertest::waitfor::{ExitedWait, MessageSource, MessageWait, RunningWait, WaitFor};
-use dockertest::{
-    Composition, DockerTest, PendingContainer, PullPolicy, RunningContainer, Source, StartPolicy,
+use dockertest::waitfor::{
+    async_trait, ExitedWait, MessageSource, MessageWait, RunningWait, WaitFor,
 };
-use failure::{format_err, Error};
-use futures::future::{self, Future};
-use std::rc::Rc;
-use tokio::runtime::current_thread;
+use dockertest::{
+    Composition, DockerTest, DockerTestError, PendingContainer, PullPolicy, RunningContainer,
+    Source, StartPolicy,
+};
 
+use bollard::{container::InspectContainerOptions, Docker};
+use futures::future::TryFutureExt;
+use test_env_log::test;
+
+#[derive(Clone)]
 struct FailWait {}
 
+#[async_trait]
 impl WaitFor for FailWait {
-    fn wait_for_ready(
+    async fn wait_for_ready(
         &self,
         _container: PendingContainer,
-    ) -> Box<dyn Future<Item = RunningContainer, Error = Error>> {
-        Box::new(future::err(format_err!("this FailWait shall fail")))
+    ) -> Result<RunningContainer, DockerTestError> {
+        Err(DockerTestError::Processing(
+            "this FailWait shall fail".to_string(),
+        ))
     }
 }
 
 /// Returns whether the container is in a running state.
-pub fn is_running(id: String) -> impl Future<Item = bool, Error = Error> {
-    let client = shiplift::Docker::new();
-    client
-        .containers()
-        .get(&id)
-        .inspect()
-        .map_err(|e| format_err!("inspecting container: {}", e))
-        .and_then(|c| future::ok(c.state.running))
+pub async fn is_running(id: String) -> Result<bool, DockerTestError> {
+    let client = Docker::connect_with_local_defaults()
+        .map_err(|_| DockerTestError::Daemon("connection to local default".to_string()))?;
+
+    let container = client
+        .inspect_container(&id, None::<InspectContainerOptions>)
+        .map_err(|e| DockerTestError::Recoverable(format!("container did not exist: {}", e)))
+        .await?;
+
+    Ok(container.state.running)
 }
 
 // Tests that the RunningWait implementation waits for the container to appear as running.
@@ -36,21 +45,17 @@ fn test_running_wait_for() {
     let mut test = DockerTest::new().with_default_source(source);
 
     let repo = "luca3m/sleep";
-    let sleep_container = Composition::with_repository(repo).with_wait_for(Rc::new(RunningWait {
+    let sleep_container = Composition::with_repository(repo).with_wait_for(Box::new(RunningWait {
         max_checks: 10,
-        check_interval: 1000,
+        check_interval: 6,
     }));
 
     test.add_composition(sleep_container);
 
-    test.run(|ops| {
-        let handle = ops.handle(repo).expect("failed to get container handle");
+    test.run(|ops| async move {
+        let handle = ops.handle(repo);
 
-        let mut rt = current_thread::Runtime::new().expect("failed to start runtime");
-
-        let is_running = rt
-            .block_on(is_running(handle.id().to_string()))
-            .expect("failed to get container state");
+        let is_running = is_running(handle.id().to_string()).await.unwrap();
 
         assert!(
             is_running,
@@ -66,21 +71,17 @@ fn test_exit_wait_for() {
     let mut test = DockerTest::new().with_default_source(source);
 
     let repo = "hello-world";
-    let sleep_container = Composition::with_repository(repo).with_wait_for(Rc::new(ExitedWait {
+    let sleep_container = Composition::with_repository(repo).with_wait_for(Box::new(ExitedWait {
         max_checks: 10,
-        check_interval: 1000,
+        check_interval: 6,
     }));
 
     test.add_composition(sleep_container);
 
-    test.run(|ops| {
-        let handle = ops.handle(repo).expect("failed to get container handle");
+    test.run(|ops| async move {
+        let handle = ops.handle(repo);
 
-        let mut rt = current_thread::Runtime::new().expect("failed to start runtime");
-
-        let is_running = rt
-            .block_on(is_running(handle.id().to_string()))
-            .expect("failed to get container state");
+        let is_running = is_running(handle.id().to_string()).await.unwrap();
 
         assert!(
             !is_running,
@@ -98,12 +99,12 @@ fn test_wait_for_relaxed_failed() {
 
     let repo = "hello-world";
     let hello_container = Composition::with_repository(repo)
-        .with_wait_for(Rc::new(FailWait {}))
+        .with_wait_for(Box::new(FailWait {}))
         .with_start_policy(StartPolicy::Relaxed);
 
     test.add_composition(hello_container);
 
-    test.run(|_ops| {
+    test.run(|_ops| async {
         assert!(false);
     });
 }
@@ -117,12 +118,12 @@ fn test_wait_for_strict_failed() {
 
     let repo = "hello-world";
     let hello_container = Composition::with_repository(repo)
-        .with_wait_for(Rc::new(FailWait {}))
+        .with_wait_for(Box::new(FailWait {}))
         .with_start_policy(StartPolicy::Strict);
 
     test.add_composition(hello_container);
 
-    test.run(|_ops| {
+    test.run(|_ops| async {
         assert!(false);
     });
 }
@@ -134,7 +135,7 @@ fn test_message_wait_for_success_on_stdout() {
     let mut test = DockerTest::new().with_default_source(source);
 
     let repo = "hello-world";
-    let hello_container = Composition::with_repository(repo).with_wait_for(Rc::new(MessageWait {
+    let hello_container = Composition::with_repository(repo).with_wait_for(Box::new(MessageWait {
         message: "Hello from Docker!".to_string(),
         source: MessageSource::Stdout,
         timeout: 5,
@@ -142,7 +143,7 @@ fn test_message_wait_for_success_on_stdout() {
 
     test.add_composition(hello_container);
 
-    test.run(|_ops| {
+    test.run(|_ops| async {
         // TODO: Determine how we can assert that this wait for was successful?
         assert!(true);
     });
@@ -156,7 +157,7 @@ fn test_message_wait_for_not_found_on_stream() {
     let mut test = DockerTest::new().with_default_source(source);
 
     let repo = "hello-world";
-    let hello_container = Composition::with_repository(repo).with_wait_for(Rc::new(MessageWait {
+    let hello_container = Composition::with_repository(repo).with_wait_for(Box::new(MessageWait {
         message: "MESSAGE NOT PRESENT IN OUTPUT".to_string(),
         source: MessageSource::Stdout,
         timeout: 5,
@@ -164,7 +165,7 @@ fn test_message_wait_for_not_found_on_stream() {
 
     test.add_composition(hello_container);
 
-    test.run(|_ops| {
+    test.run(|_ops| async {
         assert!(false);
     });
 }
