@@ -36,6 +36,8 @@ pub struct PendingContainer {
 // NOTE: Fields within this structure are pub(crate) only for testability
 #[derive(Clone, Debug)]
 pub struct RunningContainer {
+    pub(crate) client: Docker,
+    pub(crate) handle: String,
     /// The unique docker container identifier assigned at creation.
     pub(crate) id: String,
     /// The generated docker name for this running container.
@@ -56,6 +58,8 @@ pub(crate) struct CleanupContainer {
 impl From<PendingContainer> for RunningContainer {
     fn from(container: PendingContainer) -> RunningContainer {
         RunningContainer {
+            client: container.client,
+            handle: container.handle,
             id: container.id,
             name: container.name,
             ip: std::net::Ipv4Addr::UNSPECIFIED,
