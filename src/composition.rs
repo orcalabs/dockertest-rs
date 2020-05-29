@@ -343,7 +343,7 @@ impl Composition {
             cmd: Some(cmds),
             env: Some(envs),
             volumes: Some(volumes),
-            host_config: host_config,
+            host_config,
             ..Default::default()
         };
 

@@ -549,7 +549,7 @@ impl DockerTest {
             };
 
         // Calculate the first error from strict then relaxed, and return that if present.
-        match strict_success.err().or(relaxed_success.err()) {
+        match strict_success.err().or_else(|| relaxed_success.err()) {
             None => {
                 sort_running_containers_into_insertion_order(
                     &mut running_containers,
