@@ -1,6 +1,6 @@
 [package]
 name = "dockertest"
-version = "0.0.5-alpha.0"
+version = "0.1.0"
 authors = ["Vegard Sandengen <vegard@orcalabs.no>", "Jon Foss Mikalsen <jon@orcalabs.no>"]
 edition = "2018"
 license = "MIT"
