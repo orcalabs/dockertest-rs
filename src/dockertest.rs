@@ -232,6 +232,35 @@ impl DockerTest {
         }
     }
 
+    /// Async version of of `run`, if your test already uses a runtime e.g. you tagged your test with
+    /// tokio::test, then use this version.
+    // Having a separate method for the async version is a workaround to enable users to run async
+    // tests.
+    // The sync run version will panic if its already running on a runtime.
+    // Getting a handle to a runtime if it exists and then running the 'run_impl' on that runtime
+    // currently does not work.
+    pub async fn run_async<T, Fut>(self, test: T)
+    where
+        T: FnOnce(DockerOperations) -> Fut,
+        Fut: Future<Output = ()> + Send + 'static,
+    {
+        let span = span!(Level::ERROR, "run");
+        let _guard = span.enter();
+
+        match self.run_impl(test).in_current_span().await {
+            Ok(_) => event!(Level::DEBUG, "dockertest successfully executed"),
+            Err(e) => {
+                event!(
+                    Level::ERROR,
+                    "internal dockertest condition failure: {:?}",
+                    e
+                );
+                event!(Level::WARN, "dockertest failure");
+                panic!(e.to_string());
+            }
+        }
+    }
+
     /// Internal impl of the public `run` method, to catch internal panics
     async fn run_impl<T, Fut>(mut self, test: T) -> Result<(), DockerTestError>
     where
