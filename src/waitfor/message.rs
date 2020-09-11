@@ -2,7 +2,10 @@ use crate::container::{PendingContainer, RunningContainer};
 use crate::waitfor::{async_trait, WaitFor};
 use crate::DockerTestError;
 
-use bollard::{Docker, container::{LogOutput, LogsOptions}};
+use bollard::{
+    container::{LogOutput, LogsOptions},
+    Docker,
+};
 use futures::stream::StreamExt;
 use std::sync::atomic::{self, AtomicBool};
 use std::sync::Arc;
@@ -37,7 +40,13 @@ impl WaitFor for MessageWait {
         &self,
         container: PendingContainer,
     ) -> Result<RunningContainer, DockerTestError> {
-        pending_container_wait_for_message(container, self.source, self.message.clone(), self.timeout).await
+        pending_container_wait_for_message(
+            container,
+            self.source,
+            self.message.clone(),
+            self.timeout,
+        )
+        .await
     }
 }
 
@@ -49,7 +58,16 @@ async fn pending_container_wait_for_message(
 ) -> Result<RunningContainer, DockerTestError> {
     // Must unfortunately clone the client, since the PendingContainer will be consusumed.
     let client = container.client.clone();
-    match wait_for_message(&client, &container.id, &container.handle, source, msg, timeout).await {
+    match wait_for_message(
+        &client,
+        &container.id,
+        &container.handle,
+        source,
+        msg,
+        timeout,
+    )
+    .await
+    {
         Ok(_) => Ok(container.into()),
         Err(e) => Err(e),
     }
