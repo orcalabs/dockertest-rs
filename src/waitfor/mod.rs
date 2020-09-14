@@ -11,10 +11,10 @@ mod message;
 mod nowait;
 mod status;
 
+pub(crate) use message::wait_for_message;
 pub use message::{MessageSource, MessageWait};
 pub use nowait::NoWait;
 pub use status::{ExitedWait, RunningWait};
-pub(crate) use message::{wait_for_message};
 
 /// Trait to wait for a container to be ready for service.
 #[async_trait]

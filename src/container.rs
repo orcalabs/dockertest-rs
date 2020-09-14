@@ -1,6 +1,6 @@
 //! Represents a docker `Container`.
 
-use crate::waitfor::{MessageSource, WaitFor, wait_for_message};
+use crate::waitfor::{wait_for_message, MessageSource, WaitFor};
 use crate::{DockerTestError, StartPolicy};
 
 use bollard::{container::StartContainerOptions, errors::ErrorKind, Docker};
@@ -121,8 +121,22 @@ impl RunningContainer {
     /// # Panics
     /// This function panics if the log message is not present on the log output
     /// within the specified timeout.
-    pub async fn assert_message<T: ToString>(&self, message: T, source: MessageSource, timeout: u16) {
-        if let Err(e) = wait_for_message(&self.client, &self.id, &self.handle, source, message, timeout).await {
+    pub async fn assert_message<T: ToString>(
+        &self,
+        message: T,
+        source: MessageSource,
+        timeout: u16,
+    ) {
+        if let Err(e) = wait_for_message(
+            &self.client,
+            &self.id,
+            &self.handle,
+            source,
+            message,
+            timeout,
+        )
+        .await
+        {
             panic!(e.to_string())
         }
     }

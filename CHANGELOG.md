@@ -3,6 +3,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## 0.1.1
+
+### Added
+- `DockerTest::run` now has an async version: `DockerTest::run_async`.
+    This allows us to run async tests that are already scheduled on a runtime, e.g. async tests
+    annotated with `#[tokio::test]`.
+
 ## 0.1
 
 ### Added

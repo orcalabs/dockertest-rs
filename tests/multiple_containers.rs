@@ -28,6 +28,7 @@ fn test_inject_container_name_ip_through_env_communication() {
 
     test.run(|ops| async move {
         let recv = ops.handle("recv");
-        recv.assert_message("coop send message to container", MessageSource::Stdout, 5).await;
+        recv.assert_message("coop send message to container", MessageSource::Stdout, 5)
+            .await;
     });
 }
