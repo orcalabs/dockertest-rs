@@ -59,6 +59,7 @@ test.run(|ops| async move {
 Testing this library requires the following:
 * docker daemon available on localhost.
 * Capable of compiling `diesel` with the postgres feature.
+* Set `DOCKERTEST_BUILD_TEST_IMAGES=1` in your environment, will triger the test images to be built.
 
 Tests are designed to be run in parallel, and should not conflict with existing system images.
 Local images are build with repository prefix `dockertest-rs/`.
