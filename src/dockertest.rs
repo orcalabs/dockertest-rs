@@ -6,7 +6,7 @@ use crate::{Composition, DockerTestError, StartPolicy};
 
 use bollard::{
     container::{InspectContainerOptions, RemoveContainerOptions, StopContainerOptions},
-    network::CreateNetworkOptions,
+    network::{CreateNetworkOptions, DisconnectNetworkOptions},
     volume::{CreateVolumeOptions, RemoveVolumeOptions},
     Docker,
 };
@@ -55,6 +55,9 @@ pub struct DockerTest {
     volumes: Vec<String>,
     /// The associated network created for this test, that all containers run within.
     network: String,
+    /// Retrieved internally by an env variable the user has to set.
+    /// Will only be used in environments where dockertest itself is running inside a container.
+    container_id: Option<String>,
 }
 
 impl Default for DockerTest {
@@ -66,6 +69,7 @@ impl Default for DockerTest {
             client: Docker::connect_with_local_defaults().expect("local docker daemon connection"),
             volumes: Vec::new(),
             network: format!("dockertest-rs-{}", generate_random_string(20)),
+            container_id: None,
         }
     }
 }
@@ -201,6 +205,8 @@ impl DockerTest {
     /// Execute the test body within the provided function closure.
     /// All Compositions added to the DockerTest has successfully completed their WaitFor clause
     /// once the test body is executed.
+    // NOTE(clippy): tracing generates cognitive complexity due to macro expansion.
+    #[allow(clippy::cognitive_complexity)]
     pub fn run<T, Fut>(self, test: T)
     where
         T: FnOnce(DockerOperations) -> Fut,
@@ -267,6 +273,9 @@ impl DockerTest {
         T: FnOnce(DockerOperations) -> Fut,
         Fut: Future<Output = ()> + Send + 'static,
     {
+        // If we are inside a container, we need to retrieve our container ID.
+        self.check_if_inside_container()?;
+
         // Before constructing the compositions, we ensure that all configured
         // docker volumes have been created.
         self.create_volumes().await?;
@@ -411,6 +420,16 @@ impl DockerTest {
         }
     }
 
+    /// Checks if we are inside a container, and if so sets our container ID.
+    /// The user of dockertest is responsible for setting these env variables.
+    fn check_if_inside_container(&mut self) -> Result<(), DockerTestError> {
+        if let Ok(id) = std::env::var("DOCKERTEST_CONTAINER_ID_INJECT_TO_NETWORK") {
+            self.container_id = Some(id);
+        }
+
+        Ok(())
+    }
+
     /// This function assumes that `resolve_final_container_name` has already been called.
     fn resolve_inject_container_name_env(
         &self,
@@ -477,7 +496,28 @@ impl DockerTest {
             res.is_ok()
         );
 
+        if let Some(id) = self.container_id.clone() {
+            self.add_self_to_network(id).await?;
+        }
+
         res
+    }
+
+    async fn add_self_to_network(&self, id: String) -> Result<(), DockerTestError> {
+        let opts = bollard::network::ConnectNetworkOptions {
+            container: id,
+            endpoint_config: bollard::network::EndpointSettings::default(),
+        };
+
+        self.client
+            .connect_network(&self.network, opts)
+            .await
+            .map_err(|e| {
+                DockerTestError::Startup(format!(
+                    "failed to add internal container to dockertest network: {}",
+                    e
+                ))
+            })
     }
 
     /// Creates the set of `PendingContainer`s from the `Composition`s.
@@ -706,6 +746,20 @@ impl DockerTest {
 
     /// Make sure we remove the network we have previously created.
     async fn teardown_network(&self) {
+        if let Some(id) = self.container_id.clone() {
+            let opts = DisconnectNetworkOptions::<&str> {
+                container: &id,
+                force: true,
+            };
+            if let Err(e) = self.client.disconnect_network(&self.network, opts).await {
+                event!(
+                    Level::ERROR,
+                    "unable to remove dockertest-container from network: {}",
+                    e
+                );
+            }
+        }
+
         if let Err(e) = self.client.remove_network(&self.network).await {
             event!(
                 Level::ERROR,
