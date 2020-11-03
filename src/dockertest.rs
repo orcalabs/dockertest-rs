@@ -7,7 +7,7 @@ use crate::{Composition, DockerTestError, StartPolicy};
 use bollard::{
     container::{InspectContainerOptions, RemoveContainerOptions, StopContainerOptions},
     network::{CreateNetworkOptions, DisconnectNetworkOptions},
-    volume::{CreateVolumeOptions, RemoveVolumeOptions},
+    volume::RemoveVolumeOptions,
     Docker,
 };
 use futures::future::{join_all, Future};
@@ -52,24 +52,35 @@ pub struct DockerTest {
     /// Images with a specified source will override this default.
     default_source: Source,
     /// All user specified named volumes, will be created on dockertest startup.
-    volumes: Vec<String>,
+    /// Each volume named is suffixed with the dockertest ID.
+    /// This vector ONLY contains named_volumes and only their names, the container_path is stored
+    /// in the Composition.
+    named_volumes: Vec<String>,
     /// The associated network created for this test, that all containers run within.
     network: String,
     /// Retrieved internally by an env variable the user has to set.
     /// Will only be used in environments where dockertest itself is running inside a container.
     container_id: Option<String>,
+    /// ID of this DockerTest instance.
+    /// When tests are run in parallel multiple DockerTest instances will exist at the same time,
+    /// to distinguish which resources belongs to each test environment the resource name should be
+    /// suffixed with this ID.
+    /// This applies to resouces such as docker network names and named volumes.
+    id: String,
 }
 
 impl Default for DockerTest {
     fn default() -> DockerTest {
+        let id = generate_random_string(20);
         DockerTest {
             default_source: Source::Local,
             compositions: Vec::new(),
             namespace: "dockertest-rs".to_string(),
             client: Docker::connect_with_local_defaults().expect("local docker daemon connection"),
-            volumes: Vec::new(),
-            network: format!("dockertest-rs-{}", generate_random_string(20)),
             container_id: None,
+            named_volumes: Vec::new(),
+            network: format!("dockertest-rs-{}", id.clone()),
+            id,
         }
     }
 }
@@ -192,16 +203,6 @@ impl DockerTest {
         }
     }
 
-    /// Creates the given named volumes.
-    /// Each of these volumes can be used by any container by specifying the volume
-    /// name in Composition creation.
-    pub fn with_named_volumes(self, names: Vec<String>) -> DockerTest {
-        DockerTest {
-            volumes: names,
-            ..self
-        }
-    }
-
     /// Execute the test body within the provided function closure.
     /// All Compositions added to the DockerTest has successfully completed their WaitFor clause
     /// once the test body is executed.
@@ -278,7 +279,7 @@ impl DockerTest {
 
         // Before constructing the compositions, we ensure that all configured
         // docker volumes have been created.
-        self.create_volumes().await?;
+        self.resolve_named_volumes().await?;
 
         // Resolve all name mappings prior to creation.
         // We might want to support refering to a Composition handler name
@@ -737,10 +738,13 @@ impl DockerTest {
 
         // Cleanup volumes now
         let mut volume_futs = Vec::new();
-        for v in &self.volumes {
+
+        for v in &self.named_volumes {
+            event!(Level::INFO, "removing named volume: {:?}", &v);
             let options = Some(RemoveVolumeOptions { force: true });
             volume_futs.push(self.client.remove_volume(v, options))
         }
+
         join_all(volume_futs).await;
     }
 
@@ -803,17 +807,44 @@ impl DockerTest {
         }
     }
 
-    async fn create_volumes(&self) -> Result<(), DockerTestError> {
-        let mut volume_futs = Vec::new();
-        for v in &self.volumes {
-            let config = CreateVolumeOptions {
-                name: v.as_str(),
-                ..Default::default()
-            };
-            volume_futs.push(self.client.create_volume(config));
-        }
+    // Determines the final name for all named volumes, and modifies the Compositions accordingly.
+    // Named volumes will have the following form: "USER_PROVIDED_VOLUME_NAME-DOCKERTEST_ID:PATH_IN_CONTAINER".
+    async fn resolve_named_volumes(&mut self) -> Result<(), DockerTestError> {
+        // Maps the original volume name to the suffixed ones
+        // Key: "USER_PROVIDED_VOLUME_NAME"
+        // Value: "USER_PROVIDED_VOLUME_NAME-DOCKERTEST_ID"
+        let mut volume_name_map: HashMap<String, String> = HashMap::new();
 
-        join_all(volume_futs).await;
+        let suffix = self.id.clone();
+
+        // Add the dockertest ID as a suffix to all named volume names.
+        self.compositions.iter_mut().for_each(|mut c| {
+            // Includes path aswell: "USER_PROVIDED_VOLUME_NAME-DOCKERTEST_ID:PATH_IN_CONTAINER"
+            let mut volume_names_with_path: Vec<String> = Vec::new();
+
+            c.named_volumes.iter().for_each(|(id, path)| {
+                if let Some(suffixed_name) = volume_name_map.get(id) {
+                    volume_names_with_path.push(format!("{}:{}", &suffixed_name, &path));
+                } else {
+                    let volume_name_with_path = format!("{}-{}:{}", id, &suffix, path);
+                    volume_names_with_path.push(volume_name_with_path);
+
+                    let suffixed_volume_name = format!("{}-{}", id, &suffix);
+                    volume_name_map.insert(id.to_string(), suffixed_volume_name);
+                }
+            });
+
+            c.final_named_volume_names = volume_names_with_path;
+        });
+
+        // Add all the suffixed volumes names to dockertest such that we can clean them up later.
+        self.named_volumes = volume_name_map.drain().map(|(_k, v)| v).collect();
+
+        event!(
+            Level::DEBUG,
+            "added named volumes to cleanup list: {:?}",
+            &self.named_volumes
+        );
 
         Ok(())
     }
