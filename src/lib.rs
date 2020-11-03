@@ -1,7 +1,7 @@
 #![deny(missing_docs)]
 #![deny(warnings)]
 #![deny(rust_2018_idioms)]
-#![deny(intra_doc_link_resolution_failure)]
+#![deny(broken_intra_doc_links)]
 
 //! _dockertest_ is a testing and automation abstraction for Docker.
 //!
