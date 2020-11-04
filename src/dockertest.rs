@@ -336,16 +336,22 @@ impl DockerTest {
             {
                 Ok(details) => {
                     // Get the ip address from the network
-                    c.ip = if let Some(network) =
-                        details.network_settings.networks.get(&self.network)
+                    c.ip = if let Some(network) = details
+                        .network_settings
+                        .unwrap()
+                        .networks
+                        .unwrap()
+                        .get(&self.network)
                     {
                         event!(
                             Level::DEBUG,
                             "container ip from inspect: {}",
-                            network.ip_address
+                            network.clone().ip_address.unwrap()
                         );
                         network
+                            .clone()
                             .ip_address
+                            .unwrap()
                             .parse::<std::net::Ipv4Addr>()
                             // Exited containers will not have an IP address
                             .unwrap_or_else(|e| {

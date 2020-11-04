@@ -6,11 +6,11 @@ use crate::waitfor::{NoWait, WaitFor};
 use crate::DockerTestError;
 
 use bollard::{
-    container::{
-        Config, CreateContainerOptions, HostConfig, InspectContainerOptions, RemoveContainerOptions,
-    },
+    container::{Config, CreateContainerOptions, InspectContainerOptions, RemoveContainerOptions},
+    models::HostConfig,
     Docker,
 };
+
 use futures::future::TryFutureExt;
 use std::collections::HashMap;
 use tracing::{event, Level};
@@ -379,7 +379,7 @@ impl Composition {
         }
         // Construct host config
         let host_config = network.map(|n| HostConfig {
-            network_mode: Some(n),
+            network_mode: Some(n.to_string()),
             binds: Some(volumes),
             ..Default::default()
         });

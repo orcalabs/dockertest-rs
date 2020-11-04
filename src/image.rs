@@ -2,11 +2,8 @@
 
 use crate::DockerTestError;
 
-use bollard::{
-    errors::ErrorKind,
-    image::{CreateImageOptions, CreateImageResults},
-    Docker,
-};
+use bollard::{errors::Error, image::CreateImageOptions, models::BuildInfo, Docker};
+
 use futures::stream::StreamExt;
 use std::rc::Rc;
 use std::sync::RwLock;
@@ -115,33 +112,40 @@ impl Image {
             match result {
                 Ok(intermitten_result) => {
                     match intermitten_result {
-                        CreateImageResults::CreateImageProgressResponse {
+                        BuildInfo {
                             status,
                             progress_detail,
+                            error_detail,
+                            error,
+                            stream: _,
+                            aux: _,
                             id,
                             progress,
                         } => {
-                            event!(
-                                Level::TRACE,
-                                "pull progress {} {:?} {:?} {:?}",
-                                status,
-                                id,
-                                progress,
-                                progress_detail
-                            );
-                        }
-                        CreateImageResults::CreateImageError {
-                            error_detail,
-                            error,
-                        } => {
-                            event!(Level::ERROR, "pull error {} - `{:?}`", error, error_detail);
+                            if error.is_some() {
+                                event!(
+                                    Level::ERROR,
+                                    "pull error {} - `{:?}`",
+                                    error.clone().unwrap(),
+                                    error_detail.clone().unwrap()
+                                );
+                            } else {
+                                event!(
+                                    Level::TRACE,
+                                    "pull progress {} {:?} {:?} {:?}",
+                                    status.clone().unwrap(),
+                                    id.clone().unwrap(),
+                                    progress.clone().unwrap(),
+                                    progress_detail.clone().unwrap()
+                                );
+                            }
                         }
                     }
                     event!(Level::DEBUG, "successfully pulled image");
                 }
                 Err(e) => {
-                    let msg = match e.kind() {
-                        ErrorKind::DockerResponseNotFoundError { .. } => {
+                    let msg = match e {
+                        Error::DockerResponseNotFoundError { .. } => {
                             "unknown registry or image".to_string()
                         }
                         _ => e.to_string(),
@@ -187,8 +191,8 @@ impl Image {
             .await
         {
             Ok(_) => Ok(true),
-            Err(e) => match e.kind() {
-                ErrorKind::DockerResponseNotFoundError { .. } => Ok(false),
+            Err(e) => match e {
+                Error::DockerResponseNotFoundError { .. } => Ok(false),
                 _ => Err(DockerTestError::Daemon(e.to_string())),
             },
         }

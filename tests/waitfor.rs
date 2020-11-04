@@ -35,7 +35,7 @@ pub async fn is_running(id: String) -> Result<bool, DockerTestError> {
         .map_err(|e| DockerTestError::Recoverable(format!("container did not exist: {}", e)))
         .await?;
 
-    Ok(container.state.running)
+    Ok(container.state.unwrap().running.unwrap())
 }
 
 // Tests that the RunningWait implementation waits for the container to appear as running.
