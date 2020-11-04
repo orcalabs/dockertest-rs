@@ -90,8 +90,18 @@ pub struct Composition {
     /// stems from.
     image: Image,
 
-    /// Volumes associated with this composition, are in the form of: "HOST_PATH/CONTAINER_PATH"
-    volumes: Vec<String>,
+    /// Named volumes associated with this composition, are in the form of: "(VOLUME_NAME,CONTAINER_PATH)"
+    pub(crate) named_volumes: Vec<(String, String)>,
+
+    /// Final form of named volume names, dockertest run_impl is responsible for constructing the
+    /// final names and adding them to this vector.
+    /// The final name will be on the form "VOLUME_NAME-RANDOM_SUFFIX/CONTAINER_PATH".
+    pub(crate) final_named_volume_names: Vec<String>,
+
+    /// Bind mounts associated with this composition, are in the form of: "HOST_PATH:CONTAINER_PATH"
+    /// NOTE: As bind mounts do not outlive the container they are mounted in they do not need to
+    /// be cleaned up.
+    bind_mounts: Vec<String>,
 
     /// All user specified container name injections as environment variables.
     /// Tuple contains (handle, env).
@@ -119,8 +129,10 @@ impl Composition {
             env: HashMap::new(),
             cmd: Vec::new(),
             start_policy: StartPolicy::Relaxed,
-            volumes: Vec::new(),
+            bind_mounts: Vec::new(),
+            named_volumes: Vec::new(),
             inject_container_name_env: Vec::new(),
+            final_named_volume_names: Vec::new(),
         }
     }
 
@@ -139,8 +151,10 @@ impl Composition {
             env: HashMap::new(),
             cmd: Vec::new(),
             start_policy: StartPolicy::Relaxed,
-            volumes: Vec::new(),
+            bind_mounts: Vec::new(),
+            named_volumes: Vec::new(),
             inject_container_name_env: Vec::new(),
+            final_named_volume_names: Vec::new(),
         }
     }
 
@@ -229,17 +243,36 @@ impl Composition {
         self
     }
 
-    /// Adds the given volume to the Composition.
-    /// The name must match a volume added to the DockerTest instance.
-    /// The volume will be mounted into the container on the given path.
+    /// Adds the given named volume to the Composition.
+    /// Named volumes can be shared between containers, specifying the same named volume for
+    /// another Composition will give both access to the volume.
+    /// `path_in_container` has to be an absolute path.
     pub fn named_volume<T: ToString, S: ToString>(
         &mut self,
         volume_name: T,
         path_in_container: S,
     ) -> &mut Composition {
-        self.volumes.push(format!(
-            "{}:{}",
-            volume_name.to_string(),
+        self.named_volumes
+            .push((volume_name.to_string(), path_in_container.to_string()));
+        self
+    }
+    /// Adds the given bind mount to the Composition.
+    /// A bind mount only exists for a single container and maps a given file or directory from the
+    /// host to the container.
+    /// Use named volumes if you want to share data between containers.
+    /// The `host_path` can either point to a directory or a file that MUST exist on the local host.
+    /// `path_in_container` has to be an absolute path.
+    pub fn bind_mount<T: ToString, S: ToString>(
+        &mut self,
+        host_path: T,
+        path_in_container: S,
+    ) -> &mut Composition {
+        // The ':Z' is needed due to permission issues, see
+        // https://stackoverflow.com/questions/24288616/permission-denied-on-accessing-host-directory-in-docker
+        // for more details
+        self.bind_mounts.push(format!(
+            "{}:{}:Z",
+            host_path.to_string(),
             path_in_container.to_string()
         ));
         self
@@ -323,14 +356,31 @@ impl Composition {
             .collect();
         let envs = envs.iter().map(|s| s.as_ref()).collect();
         let cmds = self.cmd.iter().map(|s| s.as_ref()).collect();
-        let mut volumes: HashMap<&str, HashMap<(), ()>> = HashMap::new();
-        for v in self.volumes.iter() {
-            volumes.insert(v.as_str(), HashMap::new());
+
+        let mut volumes: Vec<&str> = Vec::new();
+        for v in self.bind_mounts.iter() {
+            event!(
+                Level::DEBUG,
+                "creating host_mounted_volume: {} for container {}",
+                v.as_str(),
+                self.container_name
+            );
+            volumes.push(&v);
         }
 
+        for v in self.final_named_volume_names.iter() {
+            event!(
+                Level::DEBUG,
+                "creating named_volume: {} for container {}",
+                &v,
+                self.container_name
+            );
+            volumes.push(&v);
+        }
         // Construct host config
         let host_config = network.map(|n| HostConfig {
             network_mode: Some(n),
+            binds: Some(volumes),
             ..Default::default()
         });
 
@@ -342,7 +392,6 @@ impl Composition {
             image: Some(&image_id),
             cmd: Some(cmds),
             env: Some(envs),
-            volumes: Some(volumes),
             host_config,
             ..Default::default()
         };
