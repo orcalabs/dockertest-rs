@@ -5,7 +5,7 @@
 use anyhow::Error;
 use std::process::Command;
 
-const BUILD_IMAGES_ENV: &'static str = "DOCKERTEST_BUILD_TEST_IMAGES";
+const BUILD_IMAGES_ENV: &str = "DOCKERTEST_BUILD_TEST_IMAGES";
 
 fn main() -> Result<(), Error> {
     println!("cargo:rerun-if-env-changed={}", BUILD_IMAGES_ENV);

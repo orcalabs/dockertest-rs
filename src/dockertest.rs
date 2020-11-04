@@ -79,7 +79,7 @@ impl Default for DockerTest {
             client: Docker::connect_with_local_defaults().expect("local docker daemon connection"),
             container_id: None,
             named_volumes: Vec::new(),
-            network: format!("dockertest-rs-{}", id.clone()),
+            network: format!("dockertest-rs-{}", id),
             id,
         }
     }
