@@ -63,3 +63,9 @@ Testing this library requires the following:
 
 Tests are designed to be run in parallel, and should not conflict with existing system images.
 Local images are build with repository prefix `dockertest-rs/`.
+
+## Running dockertest inside docker
+To run `dockertest` inside docker you will have to set the following env variable:
+- `DOCKERTEST_CONTAINER_ID_INJECT_TO_NETWORK=your_container_id/name`
+
+`DOCKERTEST_CONTAINER_ID_INJECT_TO_NETWORK` has to be set to the ID or name of the container `dockertest` is running in.
