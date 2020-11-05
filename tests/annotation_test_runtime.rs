@@ -13,5 +13,6 @@ async fn test_with_tokio_test() {
 
     test.run_async(|_ops| async {
         assert!(true);
-    }).await;
+    })
+    .await;
 }
