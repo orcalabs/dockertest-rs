@@ -7,6 +7,7 @@ use bollard::{
     Docker,
 };
 use futures::stream::StreamExt;
+use serde::Serialize;
 use std::sync::atomic::{self, AtomicBool};
 use std::sync::Arc;
 use tokio::{time, time::Duration};
@@ -73,16 +74,19 @@ async fn pending_container_wait_for_message(
     }
 }
 
-pub(crate) async fn wait_for_message<T: ToString>(
+pub(crate) async fn wait_for_message<T>(
     client: &Docker,
     container_id: &str,
     handle: &str,
     source: MessageSource,
     msg: T,
     timeout: u16,
-) -> Result<(), DockerTestError> {
+) -> Result<(), DockerTestError>
+where
+    T: Into<String> + Serialize,
+{
     // Construct LogOptions
-    let mut log_options = LogsOptions {
+    let mut log_options = LogsOptions::<String> {
         follow: true,
         ..Default::default()
     };
@@ -95,8 +99,8 @@ pub(crate) async fn wait_for_message<T: ToString>(
     // Construct remaining variables
     let s1 = Arc::new(AtomicBool::new(false));
     let s2 = s1.clone();
-    let msg = msg.to_string();
-    let msg_clone = msg.clone();
+    let msg_clone1: String = msg.into();
+    let msg_clone2: String = msg_clone1.clone();
 
     // Construct the stream
     let stream = client.logs(container_id, log_options);
@@ -115,7 +119,11 @@ pub(crate) async fn wait_for_message<T: ToString>(
                             LogOutput::Console { message: _ } => None,
                         };
                         match content {
-                            Some(content) if content.contains(&msg) => {
+                            Some(content)
+                                if String::from_utf8(content.to_vec())
+                                    .unwrap()
+                                    .contains(&msg_clone1) =>
+                            {
                                 s1.store(true, atomic::Ordering::SeqCst);
                                 futures::future::ready(false)
                             }
@@ -135,7 +143,7 @@ pub(crate) async fn wait_for_message<T: ToString>(
                 Ok(())
             } else {
                 Err(DockerTestError::Startup(
-                    format!("container `{}` ended log stream (terminated) before waitfor message triggered: `{}`", handle, msg_clone),
+                   format!("container `{}` ended log stream (terminated) before waitfor message triggered: `{}`", handle, msg_clone2),
                 ))
             }
         }

@@ -4,7 +4,8 @@ use crate::container::{PendingContainer, RunningContainer};
 use crate::waitfor::{async_trait, WaitFor};
 use crate::DockerTestError;
 
-use bollard::container::{InspectContainerOptions, State};
+use bollard::container::InspectContainerOptions;
+use bollard::models::ContainerState;
 use futures::stream::StreamExt;
 use std::sync::atomic::{self, AtomicBool};
 use std::sync::Arc;
@@ -38,7 +39,7 @@ impl WaitFor for RunningWait {
         container: PendingContainer,
     ) -> Result<RunningContainer, DockerTestError> {
         wait_for_container_state(container, self.check_interval, self.max_checks, |state| {
-            state.running
+            state.running.unwrap()
         })
         .await
     }
@@ -51,7 +52,7 @@ impl WaitFor for ExitedWait {
         container: PendingContainer,
     ) -> Result<RunningContainer, DockerTestError> {
         wait_for_container_state(container, self.check_interval, self.max_checks, |state| {
-            !state.running
+            !state.running.unwrap()
         })
         .await
     }
@@ -61,7 +62,7 @@ async fn wait_for_container_state(
     container: PendingContainer,
     check_interval: u64,
     max_checks: u64,
-    container_state_compare: fn(&State) -> bool,
+    container_state_compare: fn(&ContainerState) -> bool,
 ) -> Result<RunningContainer, DockerTestError> {
     let client = &container.client;
 
@@ -89,7 +90,9 @@ async fn wait_for_container_state(
                         .inspect_container(&n2, None::<InspectContainerOptions>)
                         .await
                     {
-                        Ok(container) if container_state_compare(&container.state) => {
+                        Ok(container)
+                            if container_state_compare(&container.clone().state.unwrap()) =>
+                        {
                             s3.store(true, atomic::Ordering::SeqCst);
                             false
                         }

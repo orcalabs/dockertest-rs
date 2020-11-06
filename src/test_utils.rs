@@ -3,7 +3,7 @@ use crate::DockerTestError;
 use access_queue::AccessQueue;
 use bollard::{
     container::{ListContainersOptions, RemoveContainerOptions},
-    errors::ErrorKind,
+    errors::Error,
     image::RemoveImageOptions,
     Docker,
 };
@@ -62,8 +62,8 @@ pub(crate) async fn image_exists_locally(
         .inspect_image(&format!("{}:{}", repository, tag))
         .map(|result| match result {
             Ok(_) => Ok(true),
-            Err(e) => match e.kind() {
-                ErrorKind::DockerResponseNotFoundError { .. } => Ok(false),
+            Err(e) => match e {
+                Error::DockerResponseNotFoundError { .. } => Ok(false),
                 _ => Err(DockerTestError::Daemon(e.to_string())),
             },
         })
@@ -112,7 +112,7 @@ pub(crate) async fn remove_containers(
             ..Default::default()
         };
         client
-            .remove_container(&container.id, Some(options))
+            .remove_container(&container.id.unwrap(), Some(options))
             .await
             .map_err(|e| DockerTestError::Daemon(e.to_string()))?;
     }

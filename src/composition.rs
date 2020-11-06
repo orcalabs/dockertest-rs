@@ -6,11 +6,11 @@ use crate::waitfor::{NoWait, WaitFor};
 use crate::DockerTestError;
 
 use bollard::{
-    container::{
-        Config, CreateContainerOptions, HostConfig, InspectContainerOptions, RemoveContainerOptions,
-    },
+    container::{Config, CreateContainerOptions, InspectContainerOptions, RemoveContainerOptions},
+    models::HostConfig,
     Docker,
 };
+
 use futures::future::TryFutureExt;
 use std::collections::HashMap;
 use tracing::{event, Level};
@@ -357,7 +357,7 @@ impl Composition {
         let envs = envs.iter().map(|s| s.as_ref()).collect();
         let cmds = self.cmd.iter().map(|s| s.as_ref()).collect();
 
-        let mut volumes: Vec<&str> = Vec::new();
+        let mut volumes: Vec<String> = Vec::new();
         for v in self.bind_mounts.iter() {
             event!(
                 Level::DEBUG,
@@ -365,7 +365,7 @@ impl Composition {
                 v.as_str(),
                 self.container_name
             );
-            volumes.push(&v);
+            volumes.push(v.to_string());
         }
 
         for v in self.final_named_volume_names.iter() {
@@ -375,11 +375,11 @@ impl Composition {
                 &v,
                 self.container_name
             );
-            volumes.push(&v);
+            volumes.push(v.to_string());
         }
         // Construct host config
         let host_config = network.map(|n| HostConfig {
-            network_mode: Some(n),
+            network_mode: Some(n.to_string()),
             binds: Some(volumes),
             ..Default::default()
         });

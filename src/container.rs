@@ -3,7 +3,8 @@
 use crate::waitfor::{wait_for_message, MessageSource, WaitFor};
 use crate::{DockerTestError, StartPolicy};
 
-use bollard::{container::StartContainerOptions, errors::ErrorKind, Docker};
+use bollard::{container::StartContainerOptions, errors::Error, Docker};
+use serde::Serialize;
 
 /// Represent a docker container object in a pending phase between
 /// it being created on the daemon, but may not be running.
@@ -121,12 +122,10 @@ impl RunningContainer {
     /// # Panics
     /// This function panics if the log message is not present on the log output
     /// within the specified timeout.
-    pub async fn assert_message<T: ToString>(
-        &self,
-        message: T,
-        source: MessageSource,
-        timeout: u16,
-    ) {
+    pub async fn assert_message<T>(&self, message: T, source: MessageSource, timeout: u16)
+    where
+        T: Into<String> + Serialize,
+    {
         if let Err(e) = wait_for_message(
             &self.client,
             &self.id,
@@ -169,10 +168,10 @@ impl PendingContainer {
         self.client
             .start_container(&self.name, None::<StartContainerOptions<String>>)
             .await
-            .map_err(|e| match e.kind() {
-                ErrorKind::DockerResponseNotFoundError { message } => {
+            .map_err(|e| match e {
+                Error::DockerResponseNotFoundError { message } => {
                     let json: Result<serde_json::Value, serde_json::error::Error> =
-                        serde_json::from_str(message);
+                        serde_json::from_str(message.as_str());
                     match json {
                         Ok(json) => DockerTestError::Startup(format!(
                             "failed to start container due to `{}`",
