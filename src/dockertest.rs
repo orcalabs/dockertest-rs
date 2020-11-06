@@ -513,7 +513,7 @@ impl DockerTest {
     async fn add_self_to_network(&self, id: String) -> Result<(), DockerTestError> {
         let opts = bollard::network::ConnectNetworkOptions {
             container: id,
-            endpoint_config: bollard::network::EndpointSettings::default(),
+            endpoint_config: bollard::models::EndpointSettings::default(),
         };
 
         self.client

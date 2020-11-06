@@ -98,6 +98,8 @@ impl Image {
     }
 
     // Pulls the image from its source with the given docker client.
+    // NOTE(lint): uncertain how to structure this otherwise
+    #[allow(clippy::match_single_binding)]
     async fn do_pull(&self, client: &Docker) -> Result<(), DockerTestError> {
         let options = Some(CreateImageOptions::<&str> {
             from_image: &self.repository,
