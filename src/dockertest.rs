@@ -1006,7 +1006,7 @@ fn generate_random_string(len: i32) -> String {
     let mut random_string = String::new();
     let mut rng = rand::thread_rng();
     for _i in 0..len {
-        let letter: char = rng.gen_range(b'A', b'Z') as char;
+        let letter: char = rng.gen_range(b'a', b'z') as char;
         random_string.push(letter);
     }
 
