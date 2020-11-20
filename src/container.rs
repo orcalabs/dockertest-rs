@@ -111,6 +111,9 @@ impl RunningContainer {
     /// will, somewhat contradictory to its name, be in an exited status when the test body
     /// is entered. For this scenarion, this function will return [Ipv4Addr::UNSPECIFIED].
     ///
+    /// On Windows this method always returns `127.0.0.1` due to Windows not supporting using
+    /// container IPs outside a container-context.
+    ///
     /// [Ipv4Addr::UNSPECIFIED]: https://doc.rust-lang.org/std/net/struct.Ipv4Addr.html#associatedconstant.UNSPECIFIED
     /// [ExitedWait]: waitfor/struct.ExitedWait.html
     pub fn ip(&self) -> &std::net::Ipv4Addr {
