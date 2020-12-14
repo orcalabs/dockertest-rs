@@ -431,7 +431,17 @@ impl DockerTest {
     /// The user of dockertest is responsible for setting these env variables.
     fn check_if_inside_container(&mut self) -> Result<(), DockerTestError> {
         if let Ok(id) = std::env::var("DOCKERTEST_CONTAINER_ID_INJECT_TO_NETWORK") {
+            event!(
+                Level::TRACE,
+                "dockertest container id env is set, we are running inside a container, id: {}",
+                id
+            );
             self.container_id = Some(id);
+        } else {
+            event!(
+                Level::TRACE,
+                "dockertest container id env is not set, running native on host"
+            );
         }
 
         Ok(())
@@ -511,6 +521,12 @@ impl DockerTest {
     }
 
     async fn add_self_to_network(&self, id: String) -> Result<(), DockerTestError> {
+        event!(
+            Level::TRACE,
+            "adding dockertest container to created network, container_id: {}, network_id: {}",
+            &id,
+            &self.network
+        );
         let opts = bollard::network::ConnectNetworkOptions {
             container: id,
             endpoint_config: bollard::models::EndpointSettings::default(),
