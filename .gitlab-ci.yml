@@ -9,7 +9,6 @@ variables:
 .setup_rust: &setup_rust |
   rustup component add clippy
   rustup component add rustfmt
-  cargo install cargo-deadlinks
 
 rust_precheck:
   stage: build
@@ -22,7 +21,6 @@ rust_precheck:
     - cargo clippy
     - cargo fmt -- --check
     - cargo doc
-    - cargo deadlinks
 
 test_dockertest:
   stage: test
