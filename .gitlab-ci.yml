@@ -20,7 +20,7 @@ rust_precheck:
     - *setup_rust
     - cargo clippy
     - cargo fmt -- --check
-    - cargo doc
+    - cargo doc --no-deps
 
 test_dockertest:
   stage: test
