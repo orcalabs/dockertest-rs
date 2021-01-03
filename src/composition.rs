@@ -50,8 +50,7 @@ pub enum StartPolicy {
 /// hello.cmd("appended_to_original_cmd!");
 /// ```
 ///
-/// [Image]: struct.Image.html
-/// [RunningContainer]: struct.RunningContainer.html
+/// [RunningContainer]: crate::container::RunningContainer
 #[derive(Clone)]
 pub struct Composition {
     /// User provided name of the container.
@@ -115,10 +114,7 @@ impl Composition {
     /// and default the tag to `latest`.
     ///
     /// This is the shortcut method of constructing a `Composition`.
-    /// See [with_image] to create one with a provided [Image].
-    ///
-    /// [Image]: struct.Image.html
-    /// [with_image]: struct.Composition.html#method.with_image
+    /// See [with_image](Composition::with_image) to create one with a provided [Image].
     pub fn with_repository<T: ToString>(repository: T) -> Composition {
         let copy = repository.to_string();
         Composition {
@@ -139,9 +135,7 @@ impl Composition {
     /// Creates a `Composition` with the provided `Image`.
     ///
     /// This is the long-winded way of defining a `Composition`.
-    /// See [with_repository] to for the shortcut method.
-    ///
-    /// [with_repository]: struct.Composition.html#method.with_repository
+    /// See [with_repository](Composition::with_repository) to for the shortcut method.
     pub fn with_image(image: Image) -> Composition {
         Composition {
             user_provided_container_name: None,
@@ -160,9 +154,7 @@ impl Composition {
 
     /// Sets the `StartPolicy` for this `Composition`.
     ///
-    /// Defaults to a [relaxed] policy.
-    ///
-    /// [relaxed]: enum.StartPolicy.html#variant.Relaxed
+    /// Defaults to a [relaxed](StartPolicy::Relaxed) policy.
     pub fn with_start_policy(self, start_policy: StartPolicy) -> Composition {
         Composition {
             start_policy,
@@ -177,7 +169,7 @@ impl Composition {
     ///
     /// This method replaces the entire existing env map provided.
     ///
-    /// [RunningContainer]: struct.RunningContainer.html
+    /// [RunningContainer]: crate::container::RunningContainer
     pub fn with_env(self, env: HashMap<String, String>) -> Composition {
         Composition { env, ..self }
     }
@@ -186,9 +178,6 @@ impl Composition {
     ///
     /// If no entries in the command vector is provided to the [Composition],
     /// the command within the [Image] will be used, if any.
-    ///
-    /// [Composition]: struct.Composition.html
-    /// [Image]: struct.Image.html
     pub fn with_cmd(self, cmd: Vec<String>) -> Composition {
         Composition { cmd, ..self }
     }
@@ -212,7 +201,7 @@ impl Composition {
     ///
     /// The default `WaitFor` implementation used is [RunningWait].
     ///
-    /// [RunningWait]: waitfor/struct.RunningWait.html
+    /// [RunningWait]: crate::waitfor::RunningWait
     pub fn with_wait_for(self, wait: Box<dyn WaitFor>) -> Composition {
         Composition { wait, ..self }
     }
@@ -221,8 +210,8 @@ impl Composition {
     ///
     /// NOTE: if [with_env] is called after a call to [env], all values added by [env] will be overwritten.
     ///
-    /// [env]: struct.Composition.html#method.env
-    /// [with_env]: struct.Composition.html#method.with_env
+    /// [env]: Composition::env
+    /// [with_env]: Composition::with_env
     pub fn env<T: ToString, S: ToString>(&mut self, name: T, value: S) -> &mut Composition {
         self.env.insert(name.to_string(), value.to_string());
         self
@@ -236,8 +225,8 @@ impl Composition {
     /// NOTE: if [with_cmd] is called after a call to [cmd], all entries to the command vector
     /// added with [cmd] will be overwritten.
     ///
-    /// [cmd]: struct.Composition.html#method.cmd
-    /// [with_cmd]: struct.Composition.html#method.with_cmd
+    /// [cmd]: Composition::cmd
+    /// [with_cmd]: Composition::with_cmd
     pub fn cmd<T: ToString>(&mut self, cmd: T) -> &mut Composition {
         self.cmd.push(cmd.to_string());
         self

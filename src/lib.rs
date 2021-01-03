@@ -28,7 +28,7 @@
 //! The closure is provided with one [DockerOperations] parameter, allowing the test body
 //! to interact with [DockerTest] and each individual [RunningContainer].
 //! The reference to each [RunningContainer] is queried through a handle, which is the user-provided
-//! container name, specified in [Composition] through [with_container_name]. See the Handle
+//! container name, specified in [Composition] through [Composition::with_container_name]. See the Handle
 //! section.
 //!
 //! # Handle - referencing the same container throughout your test
@@ -41,16 +41,16 @@
 //!
 //! The user may change the handle by changing the container name (as seen from the user
 //! - the final container name will be disambiguated for each _dockertest_) through the
-//! [with_container_name] builder method on [Composition].
+//! [Composition::with_container_name] builder method on [Composition].
 //!
 //! If the test includes multiple [Composition]s with the same handle,
 //! attempting to reference one that has multiple occurrences will fail the test at runtime.
 //!
 //! # WaitFor - Control how to determine when the container is ready
 //!
-//! Each [Composition] require a trait object of [WaitFor] whose method [wait_for_ready]
-//! must resolve until the container can become a [RunningContainer].
-//! This trait may be implemented and supplied to [Composition] through [with_wait_for].
+//! Each [Composition] require a trait object of [WaitFor] whose method
+//! [WaitFor::wait_for_ready] must resolve until the container can become a [RunningContainer].
+//! This trait may be implemented and supplied to [Composition] through [Composition::with_wait_for].
 //!
 //! The batteries included implementations are:
 //! * [RunningWait] - wait for the container to report _running_ status.
@@ -63,7 +63,7 @@
 //! By default, _dockertest_ will stop and remove all containers and created volumes
 //! regardless of execution result. You can control this policy by setting the environment variable
 //! `DOCKERTEST_PRUNE`:
-//! * "always": [default] remove everything
+//! * "always": default remove everything
 //! * "never": leave all containers running
 //! * "stop_on_failure": stop containers on execution failure
 //! * "running_on_failure": leave containers running on execution failure
@@ -123,24 +123,12 @@
 //! });
 //! ```
 //!
-//! [Composition]: struct.Composition.html
-//! [DockerOperations]: struct.DockerOperations.html
-//! [DockerTest]: struct.DockerTest.html
-//! [ExitedWait]: waitfor/struct.ExitedWait.html
-//! [host_port]: struct.Container.html#method.host_port
-//! [Image]: struct.Image.html
-//! [MessageWait]: waitfor/struct.MessageWait.html
-//! [NoWait]: waitfor/struct.NoWait.html
-//! [PendingContainer]: struct.Container.html
-//! [PullPolicy]: enum.PullPolicy.html
-//! [Remote]: struct.Remote.html
-//! [RunningContainer]: struct.RunningContainer.html
-//! [RunningWait]: waitfor/struct.RunningWait.html
-//! [StartPolicy]: enum.StartPolicy.html
-//! [WaitFor]: waitfor/trait.WaitFor.html
-//! [wait_for_ready]: waitfor/trait.WaitFor.html#method.wait_for_ready
-//! [with_container_name]: struct.Composition.html#method.with_container_name
-//! [with_wait_for]: struct.Composition.html#method.with_wait_for
+//! [ExitedWait]: waitfor::ExitedWait;
+//! [MessageWait]: waitfor::MessageWait;
+//! [NoWait]: waitfor::NoWait;
+//! [RunningWait]: waitfor::RunningWait;
+//! [WaitFor]: waitfor::WaitFor;
+//! [WaitFor::wait_for_ready]: waitfor::WaitFor::wait_for_ready;
 
 mod composition;
 mod container;

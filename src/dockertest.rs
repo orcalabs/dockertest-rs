@@ -25,18 +25,13 @@ use tracing_futures::Instrument;
 /// After constructing an instance of this, we will have established a local
 /// docker daemon connection with default installation properties.
 ///
-/// Before running the test body through [run], one should configure
+/// Before running the test body through [run](DockerTest::run), one should configure
 /// the docker container dependencies through adding [Composition] with the configured
 /// environment the running container should end up representing.
 ///
 /// By default, all images will have the local [Source], meaning that unless otherwise specified
-/// in the composition stage, we expect the [Image] referenced must be available on the local
-/// docker daemon.
-///
-/// [Source]: enum.Source.html
-/// [Image]: struct.Image.html
-/// [Composition]: struct.Composition.html
-/// [run]: struct.DockerTest.html#method.run
+/// in the composition stage, we expect the [Image](crate::image::Image) referenced must be
+/// available on the local docker daemon.
 pub struct DockerTest {
     /// All Compositions that have been added to this test run.
     /// They are stored in the order they where added by `add_composition`.
@@ -88,8 +83,6 @@ impl Default for DockerTest {
 /// The test body parameter provided in the [DockerTest::run] argument closure.
 ///
 /// This object allows one to interact with the containers within the test environment.
-///
-/// [Dockertest::run]: struct.DockerTest.html#method.run
 #[derive(Clone)]
 pub struct DockerOperations {
     /// Map with all started containers,
@@ -131,7 +124,7 @@ impl DockerOperations {
     /// Retrieve the `RunningContainer` identified by this handle.
     ///
     /// A handle for a [RunningContainer] will be either:
-    /// a) the `repository` name for the [Image] when creating the `Composition`
+    /// a) the `repository` name for the [Image](crate::image::Image) when creating the `Composition`
     /// b) the container name configured on `Composition` [with_container_name].
     ///
     /// # Panics
@@ -139,9 +132,7 @@ impl DockerOperations {
     /// are conflicting containers with the same repository name is present without custom
     /// configured container names.
     ///
-    /// [RunningContainer]: struct.RunningContainer.html
-    /// [Image]: struct.Image.html
-    /// [with_container_name]: struct.Composition.html#method.with_container_name
+    /// [with_container_name]: Composition::with_container_name
     pub fn handle<'a>(&'a self, handle: &'a str) -> &'a RunningContainer {
         event!(Level::DEBUG, "requesting handle '{}", handle);
         match self.try_handle(handle) {
