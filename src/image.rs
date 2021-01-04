@@ -21,7 +21,7 @@ pub struct Image {
 }
 
 /// Represents the `Source` of an `Image`.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum Source {
     /// Use the local docker daemon storage.
     Local,
@@ -34,14 +34,14 @@ pub enum Source {
 /// Represents a custom remote docker registry.
 ///
 /// NOTE: This is currently not properly supported.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Remote {
     address: String,
     pull_policy: PullPolicy,
 }
 
 /// The policy for pulling from remote locations.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum PullPolicy {
     /// Never pull - expect image to be present locally.
     Never,
@@ -177,10 +177,19 @@ impl Image {
                 *id = details.id;
                 Ok(())
             }
-            Err(e) => Err(DockerTestError::Pull(format!(
-                "failed to retrieve id of image: {}",
-                e
-            ))),
+            Err(e) => {
+                event!(
+                    Level::TRACE,
+                    "failed to retrieve ID of image: {}, tag: {}, source: {:?} ",
+                    self.repository,
+                    self.tag,
+                    self.source
+                );
+                Err(DockerTestError::Pull(format!(
+                    "failed to retrieve id of image: {}",
+                    e
+                )))
+            }
         }
     }
 
