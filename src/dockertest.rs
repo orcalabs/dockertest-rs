@@ -329,6 +329,17 @@ impl DockerTest {
 
         // Lets inspect each container for their ip address
         for c in running_containers.kept.iter_mut() {
+            // On Windows container IPs cannot be resolved from outside a container.
+            // So container IPs in the test body are useless and the only way to contact a
+            // container is through a port map and localhost.
+            // To avoid have users to have cfg!(windows) in their test bodies, we simply set all
+            // container ips to localhost
+            //
+            // TODO: Find another strategy to contact containers from the test body on Windows.
+            if cfg!(windows) {
+                c.ip = std::net::Ipv4Addr::new(127, 0, 0, 1);
+                continue;
+            }
             match self
                 .client
                 .inspect_container(&c.id, None::<InspectContainerOptions>)
