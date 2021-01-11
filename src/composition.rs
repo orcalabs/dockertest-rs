@@ -5,6 +5,7 @@ use crate::image::Image;
 use crate::waitfor::{NoWait, WaitFor};
 use crate::DockerTestError;
 
+use bollard::service::PortBinding;
 use bollard::{
     container::{Config, CreateContainerOptions, InspectContainerOptions, RemoveContainerOptions},
     models::HostConfig,
@@ -105,6 +106,9 @@ pub struct Composition {
     /// All user specified container name injections as environment variables.
     /// Tuple contains (handle, env).
     pub(crate) inject_container_name_env: Vec<(String, String)>,
+
+    /// Port mapping (used for Windows-compatibility)
+    port: Vec<(String, String)>,
 }
 
 impl Composition {
@@ -129,6 +133,7 @@ impl Composition {
             named_volumes: Vec::new(),
             inject_container_name_env: Vec::new(),
             final_named_volume_names: Vec::new(),
+            port: Vec::new(),
         }
     }
 
@@ -149,6 +154,7 @@ impl Composition {
             named_volumes: Vec::new(),
             inject_container_name_env: Vec::new(),
             final_named_volume_names: Vec::new(),
+            port: Vec::new(),
         }
     }
 
@@ -180,6 +186,19 @@ impl Composition {
     /// the command within the [Image] will be used, if any.
     pub fn with_cmd(self, cmd: Vec<String>) -> Composition {
         Composition { cmd, ..self }
+    }
+
+    /// Adds the exported -> host port mapping.
+    /// If an exported port already exists, it will be overridden.
+    ///
+    /// NOTE: This method should *ONLY* be used on Windows as its not possible to contact
+    /// containers within the test body using their IP.
+    /// This is strictly only used in the scenario on Windows then you need to contact a container
+    /// within the test body.
+    pub fn port_map(&mut self, exported: u32, host: u32) -> &mut Composition {
+        self.port
+            .push((format!("{}/tcp", exported), format!("{}", host)));
+        self
     }
 
     /// Sets the name of the container that will eventually be started.
@@ -366,10 +385,25 @@ impl Composition {
             );
             volumes.push(v.to_string());
         }
+
+        let mut port_map: HashMap<String, Option<Vec<PortBinding>>> = HashMap::new();
+        let mut exposed_ports: HashMap<&str, HashMap<(), ()>> = HashMap::new();
+
+        for (exposed, host) in &self.port {
+            let mut dest_port: Vec<PortBinding> = Vec::new();
+            dest_port.push(PortBinding {
+                host_ip: Some("127.0.0.1".to_string()),
+                host_port: Some(host.clone()),
+            });
+            port_map.insert(exposed.to_string(), Some(dest_port));
+            exposed_ports.insert(exposed, HashMap::new());
+        }
+
         // Construct host config
         let host_config = network.map(|n| HostConfig {
             network_mode: Some(n.to_string()),
             binds: Some(volumes),
+            port_bindings: Some(port_map),
             ..Default::default()
         });
 
@@ -377,11 +411,13 @@ impl Composition {
         let options = Some(CreateContainerOptions {
             name: &self.container_name,
         });
+
         let config = Config::<&str> {
             image: Some(&image_id),
             cmd: Some(cmds),
             env: Some(envs),
             host_config,
+            exposed_ports: Some(exposed_ports),
             ..Default::default()
         };
 
