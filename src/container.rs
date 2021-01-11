@@ -115,7 +115,7 @@ impl RunningContainer {
     /// container IPs outside a container-context.
     ///
     /// [Ipv4Addr::UNSPECIFIED]: https://doc.rust-lang.org/std/net/struct.Ipv4Addr.html#associatedconstant.UNSPECIFIED
-    /// [ExitedWait]: waitfor/struct.ExitedWait.html
+    /// [ExitedWait]: crate::waitfor::ExitedWait
     pub fn ip(&self) -> &std::net::Ipv4Addr {
         &self.ip
     }
