@@ -74,7 +74,7 @@
 //! This can easily be done by for instance the wrapper crate `test-env-log`, that provides
 //! a new impl of the `#[test]` attribute.
 //!
-//! .Cargo.toml
+//! `Cargo.toml`
 //! ```no_compile
 //! [dev-dependencies]
 //! tracing = "0.1.13"
@@ -82,7 +82,7 @@
 //! test-env-log = { version = "0.2", default-features = false, features = ["trace"] }
 //! ```
 //!
-//! .Top of test file
+//! `Top of test file`
 //! ```
 //! use test_env_log::test;
 //! ```
@@ -90,37 +90,38 @@
 //! # Example
 //!
 //! ```rust
-//! use diesel::pg::PgConnection;
-//! use diesel::prelude::*;
-//! use dockertest::waitfor::{MessageSource, MessageWait};
-//! use dockertest::{Composition, DockerTest, PullPolicy, Source};
-//! use std::rc::Rc;
+//! use dockertest::{Composition, DockerTest};
+//! use std::sync::{Arc, Mutex};
 //!
-//! // Define our test
-//! let source = Source::DockerHub(PullPolicy::IfNotPresent);
-//! let mut test = DockerTest::new().with_default_source(source);
+//! #[test]
+//! fn hello_world_test() {
+//!     // Define our test instance
+//!     let mut test = DockerTest::new();
 //!
-//! // Define our Composition - the Image we will start and end up as our RunningContainer
-//! let mut postgres = Composition::with_repository("postgres").with_wait_for(Box::new(MessageWait {
-//!     message: "database system is ready to accept connections".to_string(),
-//!     source: MessageSource::Stderr,
-//!     timeout: 20,
-//! }));
-//! postgres.env("POSTGRES_PASSWORD", "password");
-//! test.add_composition(postgres);
+//!     // Construct the Composition to be added to the test.
+//!     // A Composition is an Image configured with environment, arguments, StartPolicy, etc.,
+//!     // seen as an instance of the Image prior to constructing the Container.
+//!     let hello = Composition::with_repository("hello-world");
 //!
-//! // Run the test body
-//! test.run(|ops| async move {
-//!     let container = ops.handle("postgres");
-//!     let conn_string = format!("postgres://postgres:password@{}:{}", container.ip(), 5432);
-//!     let pgconn = PgConnection::establish(&conn_string);
+//!     // Populate the test instance.
+//!     // The order of compositions added reflect the execution order (depending on StartPolicy).
+//!     test.add_composition(hello);
 //!
-//!     // Perform your database operations here
-//!     assert!(
-//!         pgconn.is_ok(),
-//!         "failed to establish connection to postgres docker"
-//!     );
-//! });
+//!     let has_ran: Arc<Mutex<bool>> = Arc::new(Mutex::new(false));
+//!     let has_ran_test = has_ran.clone();
+//!     test.run(|ops| async move {
+//!         // A handle to operate on the Container.
+//!         let _container = ops.handle("hello-world");
+//!
+//!         // The container is in a running state at this point.
+//!         // Depending on the Image, it may exit on its own (like this hello-world image)
+//!         let mut ran = has_ran_test.lock().unwrap();
+//!         *ran = true;
+//!     });
+//!
+//!     let ran = has_ran.lock().unwrap();
+//!     assert!(*ran);
+//! }
 //! ```
 //!
 //! [ExitedWait]: waitfor::ExitedWait;
