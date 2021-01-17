@@ -39,9 +39,9 @@
 //!
 //! By default, the handle is auto-assigned to be the repository name of the [Composition].
 //!
-//! The user may change the handle by changing the container name (as seen from the user
-//! - the final container name will be disambiguated for each _dockertest_) through the
-//! [Composition::with_container_name] builder method on [Composition].
+//! The user may change the handle by changing the container name
+//! (as seen from the user - the final container name will be disambiguated for each _dockertest_)
+//! through the [Composition::with_container_name] builder method on [Composition].
 //!
 //! If the test includes multiple [Composition]s with the same handle,
 //! attempting to reference one that has multiple occurrences will fail the test at runtime.
