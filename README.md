@@ -1,6 +1,6 @@
 # dockertest-rs
 
-Control docker containers from a rust ingegration test suite. Full fledge management support
+Control docker containers from a Rust integration test suite. Full fledge management support
 with automatic cleanup.
 
 This crate provides the following features for your docker testing needs:
@@ -10,62 +10,61 @@ This crate provides the following features for your docker testing needs:
 * Interact with the `RunningContainer` in the test body through its `ip` address.
 * Setup inter-container communication with `inject_container_name` into environment variables.
 * Teardown each started container after test is terminated - both successfully and on test failure.
-* Concurrent capabilies. All tests are isolated into separate networks per test, with uniquely
+* Concurrent capabilities. All tests are isolated into separate networks per test, with uniquely
 generated container names.
 
-See the [crate documentation](https://docs.rs/dockertest) for extensive explainations.
+See the [crate documentation](https://docs.rs/dockertest) for extensive explanations.
 
 ## Example
 
-The canonical example and motivation for this crate can be expressed with the following
-use-case example - host a database used by your test in a container, which is fresh between each test.
+This is a trivial example showing of the general structure of a naive test.
 
  ```rust
-use diesel::pg::PgConnection;
-use diesel::prelude::*;
-use dockertest::waitfor::{MessageSource, MessageWait};
-use dockertest::{Composition, DockerTest, PullPolicy, Source};
-use std::rc::Rc;
+use dockertest::{Composition, DockerTest};
+use std::sync::{Arc, Mutex};
 
-// Define our test
-let source = Source::DockerHub(PullPolicy::IfNotPresent);
-let mut test = DockerTest::new().with_default_source(source);
+#[test]
+fn hello_world_test() {
+    // Define our test instance
+    let mut test = DockerTest::new();
 
-// Define our Composition - the Image we will start and end up as our RunningContainer
-let mut postgres = Composition::with_repository("postgres").with_wait_for(Box::new(MessageWait {
-    message: "database system is ready to accept connections".to_string(),
-    source: MessageSource::Stderr,
-    timeout: 20,
-}));
-postgres.env("POSTGRES_PASSWORD", "password");
-test.add_composition(postgres);
+    // Construct the Composition to be added to the test.
+    // A Composition is an Image configured with environment, arguments, StartPolicy, etc.,
+    // seen as an instance of the Image prior to constructing the Container.
+    let hello = Composition::with_repository("hello-world");
 
-// Run the test body
-test.run(|ops| async move {
-    let container = ops.handle("postgres");
-    let conn_string = format!("postgres://postgres:password@{}:{}", container.ip(), 5432);
-    let pgconn = PgConnection::establish(&conn_string);
+    // Populate the test instance.
+    // The order of compositions added reflect the execution order (depending on StartPolicy).
+    test.add_composition(hello);
 
-    // Perform your database operations here
-    assert!(
-        pgconn.is_ok(),
-        "failed to establish connection to postgres docker"
-    );
-});
+    let has_ran: Arc<Mutex<bool>> = Arc::new(Mutex::new(false));
+    let has_ran_test = has_ran.clone();
+    test.run(|ops| async move {
+        // A handle to operate on the Container.
+        let _container = ops.handle("hello-world");
+
+        // The container is in a running state at this point.
+        // Depending on the Image, it may exit on its own (like this hello-world image)
+        let mut ran = has_ran_test.lock().unwrap();
+        *ran = true;
+    });
+
+    let ran = has_ran.lock().unwrap();
+    assert!(*ran);
+}
 ```
 
 ## Testing
 
 Testing this library requires the following:
 * docker daemon available on localhost.
-* Capable of compiling `diesel` with the postgres feature.
-* Set `DOCKERTEST_BUILD_TEST_IMAGES=1` in your environment, will triger the test images to be built.
+* Set `DOCKERTEST_BUILD_TEST_IMAGES=1` in your environment, will trigger the test images to be built.
 
 Tests are designed to be run in parallel, and should not conflict with existing system images.
 Local images are build with repository prefix `dockertest-rs/`.
 
 ## Running dockertest inside docker
-To run `dockertest` inside docker you will have to set the following env variable:
+To run `dockertest` inside docker you will have to set the following environment variable:
 - `DOCKERTEST_CONTAINER_ID_INJECT_TO_NETWORK=your_container_id/name`
 
 `DOCKERTEST_CONTAINER_ID_INJECT_TO_NETWORK` has to be set to the ID or name of the container `dockertest` is running in.
