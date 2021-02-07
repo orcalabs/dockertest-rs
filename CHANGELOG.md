@@ -3,6 +3,28 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## 0.2.0
+
+### Added
+- Ability to communicate with containers when dockertest is ran within a docker container environment.
+- Added host port mapping support. Usecase is for Windows where intra-container communication is not feasable with the same API used on Linux.
+
+### Changed
+- Upgraded to bollard 0.8
+- Fixed compiling on stable
+- BREAKING: Reworked volume API
+- Container id generation is now all lowercase.
+- BREAKING: Set container ip to localhost when running under windows. Network support is lacking on Windows.
+- Documentation clarifications and spelling errors.
+
+### Removed
+- Diesel dev-dependency.
+
+## 0.1.2
+
+### Added
+- Ability to conditionally build docker test images used for running DockerTest's own test suite.
+
 ## 0.1.1
 
 ### Added
