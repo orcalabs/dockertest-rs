@@ -1033,9 +1033,7 @@ fn generate_random_string(len: i32) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::Keeper;
-    use crate::container::PendingContainer;
-    use crate::{Composition, DockerTest, DockerTestError, PullPolicy, Source, StartPolicy};
+    use crate::{DockerTest, PullPolicy, Source};
 
     //use bollard::Docker;
 
@@ -1089,70 +1087,5 @@ mod tests {
         };
 
         assert!(equal, "default_source was not set correctly");
-    }
-
-    /// Test that failure condition in starting relaxed container is reported on error
-    #[tokio::test]
-    async fn test_start_relaxed_containers_start_failure() {
-        let repository = "dockertest-rs/hello";
-        let mut test = DockerTest::new();
-        let mut composition =
-            Composition::with_repository(repository).with_start_policy(StartPolicy::Relaxed);
-        composition.container_name =
-            "dockertest_start_relaxed_containers_start_failure".to_string();
-        test.add_composition(composition);
-
-        // Create the containers without all prep-work
-        let compositions: Keeper<Composition> = test.validate_composition_handlers();
-        test.pull_images(&compositions)
-            .await
-            .expect("failed to pull images");
-        let containers: Keeper<PendingContainer> = test
-            .create_containers(compositions)
-            .await
-            .expect("failed to create containers");
-        // issue start for StartPolicy::Relaxed operation WITHOUT constructing the network.
-        // This will result in a 404 network not found daemon error.
-        let result = test.start_containers(containers).await;
-        let expected = DockerTestError::Startup(format!(
-            "failed to start container due to `network {} not found`",
-            test.network
-        ));
-        match result {
-            Ok(_) => panic!("start should fail due to missing network"),
-            Err((e, _)) => assert_eq!(e, expected),
-        }
-    }
-
-    /// Test that failure condition in starting strict container is reported on error
-    #[tokio::test]
-    async fn test_start_strict_containers_start_failure() {
-        let repository = "dockertest-rs/hello";
-        let mut test = DockerTest::new();
-        let mut composition =
-            Composition::with_repository(repository).with_start_policy(StartPolicy::Strict);
-        composition.container_name = "dockertest_start_strict_containers_start_failure".to_string();
-        test.add_composition(composition);
-
-        // Create the containers without all prep-work
-        let compositions: Keeper<Composition> = test.validate_composition_handlers();
-        test.pull_images(&compositions)
-            .await
-            .expect("failed to pull images");
-        let containers: Keeper<PendingContainer> = test
-            .create_containers(compositions)
-            .await
-            .expect("failed to create containers");
-        // issue start for StartPolicy::Strict operation WITHOUT constructing the network.
-        // This will result in a 404 network not found daemon error.
-        let result = test.start_containers(containers).await;
-        let expected = DockerTestError::Startup(format!(
-            "failed to start container due to `network {} not found`",
-            test.network
-        ));
-        match result {
-            Ok(_) => panic!("start should fail due to missing network"),
-            Err((e, _)) => assert_eq!(e, expected),
-        }
     }
 }
