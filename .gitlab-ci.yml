@@ -31,4 +31,4 @@ test_dockertest:
   script:
     - export DOCKERTEST_BUILD_TEST_IMAGES=1
     - export DOCKERTEST_CONTAINER_ID_INJECT_TO_NETWORK=$(docker ps -q -f "label=com.gitlab.gitlab-runner.job.id=$CI_JOB_ID" -f "label=com.gitlab.gitlab-runner.type=build")
-    - cargo test --verbose
+    - cargo test --verbose -- --test-threads=1
