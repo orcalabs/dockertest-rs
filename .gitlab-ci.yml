@@ -11,6 +11,7 @@ variables:
   rustup component add rustfmt
 
 rust_precheck:
+  image: registry.gitlab.com/orcalabs/orca/rust-stable-runner
   stage: build
   tags:
     - rust:latest
@@ -23,6 +24,7 @@ rust_precheck:
     - cargo doc --no-deps
 
 test_dockertest:
+  image: registry.gitlab.com/orcalabs/orca/rust-stable-runner
   stage: test
   tags:
     - dockertest
