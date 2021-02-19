@@ -266,7 +266,7 @@ impl DockerTest {
         Fut: Future<Output = ()> + Send + 'static,
     {
         // If we are inside a container, we need to retrieve our container ID.
-        self.check_if_inside_container()?;
+        self.check_if_inside_container();
 
         // Before constructing the compositions, we ensure that all configured
         // docker volumes have been created.
@@ -431,7 +431,7 @@ impl DockerTest {
 
     /// Checks if we are inside a container, and if so sets our container ID.
     /// The user of dockertest is responsible for setting these env variables.
-    fn check_if_inside_container(&mut self) -> Result<(), DockerTestError> {
+    fn check_if_inside_container(&mut self) {
         if let Ok(id) = std::env::var("DOCKERTEST_CONTAINER_ID_INJECT_TO_NETWORK") {
             event!(
                 Level::TRACE,
@@ -445,8 +445,6 @@ impl DockerTest {
                 "dockertest container id env is not set, running native on host"
             );
         }
-
-        Ok(())
     }
 
     /// This function assumes that `resolve_final_container_name` has already been called.
