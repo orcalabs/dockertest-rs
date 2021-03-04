@@ -208,7 +208,7 @@ impl DockerTest {
         let _guard = span.enter();
 
         // Allocate a new runtime for this test.
-        let mut rt = match Runtime::new() {
+        let rt = match Runtime::new() {
             Ok(r) => r,
             Err(e) => {
                 event!(Level::ERROR, "failed to allocate tokio runtime: {}", e);
