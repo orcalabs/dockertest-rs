@@ -3,6 +3,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## 0.2.1
+
+### Changed
+- Upgrade tokio from 0.2 to 1.2
+- Upgrade bollard from 0.8 t0 0.10
+
 ## 0.2.0
 
 ### Added
