@@ -2,7 +2,7 @@
 
 use crate::DockerTestError;
 
-use bollard::{errors::Error, image::CreateImageOptions, models::BuildInfo, Docker};
+use bollard::{errors::Error, image::CreateImageOptions, models::CreateImageInfo, Docker};
 
 use futures::stream::StreamExt;
 use std::rc::Rc;
@@ -114,23 +114,15 @@ impl Image {
             match result {
                 Ok(intermitten_result) => {
                     match intermitten_result {
-                        BuildInfo {
-                            status,
-                            progress_detail,
-                            error_detail,
-                            error,
-                            stream: _,
-                            aux: _,
+                        CreateImageInfo {
                             id,
+                            error,
+                            status,
                             progress,
+                            progress_detail,
                         } => {
                             if error.is_some() {
-                                event!(
-                                    Level::ERROR,
-                                    "pull error {} - `{:?}`",
-                                    error.clone().unwrap(),
-                                    error_detail.clone().unwrap()
-                                );
+                                event!(Level::ERROR, "pull error {}", error.clone().unwrap(),);
                             } else {
                                 event!(
                                     Level::TRACE,
