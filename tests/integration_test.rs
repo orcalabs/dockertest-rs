@@ -143,7 +143,7 @@ fn test_ip_on_running_container() {
     let repo = "luca3m/sleep";
     let sleep_container = Composition::with_repository(repo).with_wait_for(Box::new(RunningWait {
         max_checks: 10,
-        check_interval: 1000,
+        check_interval: 60,
     }));
 
     test.add_composition(sleep_container);
