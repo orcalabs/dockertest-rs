@@ -144,10 +144,11 @@ impl Image {
                         }
                         _ => e.to_string(),
                     };
-                    return Err(DockerTestError::Pull(format!(
-                        "{}: `{}:{}`",
-                        msg, self.repository, self.tag
-                    )));
+                    return Err(DockerTestError::Pull {
+                        repository: self.repository.to_string(),
+                        tag: self.tag.to_string(),
+                        error: msg,
+                    });
                 }
             }
         }
@@ -177,10 +178,11 @@ impl Image {
                     self.tag,
                     self.source
                 );
-                Err(DockerTestError::Pull(format!(
-                    "failed to retrieve id of image: {}",
-                    e
-                )))
+                return Err(DockerTestError::Pull {
+                    repository: self.repository.to_string(),
+                    tag: self.tag.to_string(),
+                    error: e.to_string(),
+                });
             }
         }
     }
@@ -233,26 +235,42 @@ impl Image {
     /// exists on the local docker daemon.
     fn should_pull(&self, exists: bool, source: &Source) -> Result<bool, DockerTestError> {
         match source {
-            Source::Remote(r) => is_valid_pull_policy(exists, r.pull_policy()),
-            Source::DockerHub(p) => is_valid_pull_policy(exists, p),
+            Source::Remote(r) => {
+                is_valid_pull_policy(exists, r.pull_policy()).map_err(|e| DockerTestError::Pull {
+                    repository: self.repository.to_string(),
+                    tag: self.tag.to_string(),
+                    error: e,
+                })
+            }
+            Source::DockerHub(p) => {
+                is_valid_pull_policy(exists, p).map_err(|e| DockerTestError::Pull {
+                    repository: self.repository.to_string(),
+                    tag: self.tag.to_string(),
+                    error: e,
+                })
+            }
             Source::Local => {
                 if exists {
                     Ok(false)
                 } else {
-                    Err(DockerTestError::Pull("image source was set to local, but the provided image does not exists on the local host".to_string()))
+                    Err(DockerTestError::Pull {
+                        repository: self.repository.to_string(),
+                        tag: self.tag.to_string(),
+                        error: "image source was set to local, but the provided image does not exists on the local host".to_string(),
+                    })
                 }
             }
         }
     }
 }
 
-fn is_valid_pull_policy(exists: bool, pull_policy: &PullPolicy) -> Result<bool, DockerTestError> {
+fn is_valid_pull_policy(exists: bool, pull_policy: &PullPolicy) -> Result<bool, String> {
     match pull_policy {
         PullPolicy::Never => {
             if exists {
                 Ok(false)
             } else {
-                Err(DockerTestError::Pull("image source was set to remote and pull_policy to never, but the provided image does not exists on the local host".to_string()))
+                Err("image source was set to remote and pull_policy to never, but the provided image does not exists on the local host".to_string())
             }
         }
 
@@ -286,7 +304,6 @@ impl Remote {
 #[cfg(test)]
 mod tests {
     use crate::image::{Image, PullPolicy, Remote, Source};
-    use crate::DockerTestError;
     use crate::{test_utils, test_utils::CONCURRENT_IMAGE_ACCESS_QUEUE};
 
     use bollard::Docker;
@@ -349,8 +366,7 @@ mod tests {
 
         // Pull operation should fail since local pull on non-existent image
         let result = image.pull(&client, &Source::Local).await;
-        let expected = DockerTestError::Pull("image source was set to local, but the provided image does not exists on the local host".to_string());
-        assert_eq!(result.unwrap_err(), expected);
+        assert!(result.is_err());
     }
 
     /// Tests that our exposed pull method succeeds with a valid remote source.
@@ -405,15 +421,10 @@ mod tests {
         let image = Image::with_repository(repository).tag(tag);
 
         let result = image.pull(&client, &source).await;
-        let expected = DockerTestError::Pull(format!(
-            "unknown registry or image: `{}:{}`",
-            repository, tag
-        ));
         assert!(
             result.is_err(),
             "should fail pull process with an invalid remote source",
         );
-        assert_eq!(result.unwrap_err(), expected);
     }
 
     // Tests that the retrieve_and_set_id method sets the image id
