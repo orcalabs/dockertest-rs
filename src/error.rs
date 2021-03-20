@@ -12,8 +12,12 @@ pub enum DockerTestError {
     Recoverable(String),
     #[error("container teardown error")]
     Teardown(String),
-    #[error("pulling image from remote repository failed")]
-    Pull(String),
+    #[error("pulling image from remote repository failed, repository: {repository}, tag: {tag}")]
+    Pull {
+        repository: String,
+        tag: String,
+        error: String,
+    },
     #[error("startup condition not fulfilled `{0}`")]
     Startup(String),
     #[error("processing error condition")]
