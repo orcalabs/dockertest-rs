@@ -20,7 +20,7 @@ pub enum DockerTestError {
     },
     #[error("startup condition not fulfilled `{0}`")]
     Startup(String),
-    #[error("processing error condition")]
+    #[error("processing error condition `{0}`")]
     Processing(String),
     #[error("test body failure `{0}`")]
     TestBody(String),

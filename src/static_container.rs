@@ -84,6 +84,7 @@ impl StaticContainers {
         composition: Composition,
         client: &Docker,
         network: Option<&str>,
+        is_external_network: bool,
     ) -> Result<Option<PendingContainer>, DockerTestError> {
         if let Some(policy) = composition.static_management_policy() {
             match policy {
@@ -92,8 +93,14 @@ impl StaticContainers {
                     .await
                     .map(Some),
                 StaticManagementPolicy::External => {
-                    self.include_external_container(composition, client, network)
-                        .await?;
+                    self.include_external_container(
+                        composition,
+                        client,
+                        // Do not include network for external container if the network
+                        // is already an existing network, externally managed.
+                        network.filter(|_| !is_external_network),
+                    )
+                    .await?;
                     Ok(None)
                 }
             }
@@ -291,12 +298,18 @@ impl StaticContainers {
         &self,
         client: &Docker,
         network: &str,
+        is_external_network: bool,
         to_cleanup: &HashSet<&str>,
     ) {
         self.disconnect_static_containers(client, network, to_cleanup)
             .await;
-        self.disconnect_external_containers(client, network, to_cleanup)
-            .await;
+
+        // If we are operating with an existing network, we assume that this network
+        // is externally managed for the external container.
+        if !is_external_network {
+            self.disconnect_external_containers(client, network, to_cleanup)
+                .await;
+        }
     }
 
     async fn disconnect_static_containers(
@@ -332,14 +345,25 @@ impl StaticContainers {
     // We assume that all tests that usees a static container MUST invoke this method as apart of
     // dockertest teardown.
     // This is required to ensure static container cleanup is performed.
-    pub async fn cleanup(&self, client: &Docker, network: &str, to_cleanup: Vec<&str>) {
+    pub async fn cleanup(
+        &self,
+        client: &Docker,
+        network: &str,
+        is_external_network: bool,
+        to_cleanup: Vec<&str>,
+    ) {
         let cleanup_map: HashSet<&str> = to_cleanup.into_iter().collect();
         // We have to remove any static containers from the network such that the network itself
         // can be deleted.
         // We do not need to hold the lock for network disconnection as each Dockertest instance
         // generates its own docker network.
-        self.disconnect_static_containers_from_network(client, network, &cleanup_map)
-            .await;
+        self.disconnect_static_containers_from_network(
+            client,
+            network,
+            is_external_network,
+            &cleanup_map,
+        )
+        .await;
 
         let to_remove = self.decrement_completion_counters(&cleanup_map).await;
         for id in to_remove {
