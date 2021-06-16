@@ -139,7 +139,7 @@ impl DockerOperations {
             Ok(h) => h,
             Err(e) => {
                 event!(Level::ERROR, "{}", e.to_string());
-                panic!(e.to_string());
+                panic!("{}", e);
             }
         }
     }
@@ -212,7 +212,7 @@ impl DockerTest {
             Ok(r) => r,
             Err(e) => {
                 event!(Level::ERROR, "failed to allocate tokio runtime: {}", e);
-                panic!(e.to_string());
+                panic!("{}", e);
             }
         };
 
@@ -225,7 +225,7 @@ impl DockerTest {
                     e
                 );
                 event!(Level::WARN, "dockertest failure");
-                panic!(e.to_string());
+                panic!("{}", e);
             }
         }
     }
@@ -254,7 +254,7 @@ impl DockerTest {
                     e
                 );
                 event!(Level::WARN, "dockertest failure");
-                panic!(e.to_string());
+                panic!("{}", e);
             }
         }
     }

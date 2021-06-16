@@ -139,7 +139,7 @@ impl RunningContainer {
         )
         .await
         {
-            panic!(e.to_string())
+            panic!("{}", e)
         }
     }
 }
