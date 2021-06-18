@@ -390,11 +390,10 @@ impl Composition {
         let mut exposed_ports: HashMap<&str, HashMap<(), ()>> = HashMap::new();
 
         for (exposed, host) in &self.port {
-            let mut dest_port: Vec<PortBinding> = Vec::new();
-            dest_port.push(PortBinding {
+            let dest_port: Vec<PortBinding> = vec![PortBinding {
                 host_ip: Some("127.0.0.1".to_string()),
                 host_port: Some(host.clone()),
-            });
+            }];
             port_map.insert(exposed.to_string(), Some(dest_port));
             exposed_ports.insert(exposed, HashMap::new());
         }
