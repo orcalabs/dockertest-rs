@@ -18,7 +18,7 @@ pub use status::{ExitedWait, RunningWait};
 
 /// Trait to wait for a container to be ready for service.
 #[async_trait]
-pub trait WaitFor: Send + DynClone {
+pub trait WaitFor: Send + Sync + DynClone {
     /// Method implementation should return a future that resolves once the condition
     /// described by the implementing structure is fulfilled. Once this successfully resolves,
     /// the container is marked as ready.

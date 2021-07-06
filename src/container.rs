@@ -3,6 +3,7 @@
 use crate::waitfor::{wait_for_message, MessageSource, WaitFor};
 use crate::{DockerTestError, StartPolicy};
 
+use crate::static_container::STATIC_CONTAINERS;
 use bollard::{container::StartContainerOptions, errors::Error, Docker};
 use serde::Serialize;
 
@@ -13,6 +14,7 @@ use serde::Serialize;
 /// publicly exposed due to the public `WaitFor` trait which is responsible
 /// of performing the into conversion from `PendingContainer` to `RunningContainer`.
 // NOTE: No methods on this structure, nor fields, shall be publicly exposed.
+#[derive(Clone)]
 pub struct PendingContainer {
     /// The docker client
     pub(crate) client: Docker,
@@ -31,6 +33,9 @@ pub struct PendingContainer {
 
     /// Trait implementing how to wait for the container to startup.
     wait: Option<Box<dyn WaitFor>>,
+
+    /// Wheter this is a static container
+    is_static: bool,
 }
 
 /// Represent a docker container in running state and available to the test body.
@@ -44,6 +49,7 @@ pub struct RunningContainer {
     /// The generated docker name for this running container.
     pub(crate) name: String,
     pub(crate) ip: std::net::Ipv4Addr,
+    pub(crate) is_static: bool,
 }
 
 /// A container representation of a pending or running container, that requires us to
@@ -54,6 +60,13 @@ pub struct RunningContainer {
 #[derive(Clone, Debug)]
 pub(crate) struct CleanupContainer {
     pub(crate) id: String,
+    is_static: bool,
+}
+
+impl CleanupContainer {
+    pub(crate) fn is_static(&self) -> bool {
+        self.is_static
+    }
 }
 
 impl From<PendingContainer> for RunningContainer {
@@ -64,13 +77,17 @@ impl From<PendingContainer> for RunningContainer {
             id: container.id,
             name: container.name,
             ip: std::net::Ipv4Addr::UNSPECIFIED,
+            is_static: container.is_static,
         }
     }
 }
 
 impl From<PendingContainer> for CleanupContainer {
     fn from(container: PendingContainer) -> CleanupContainer {
-        CleanupContainer { id: container.id }
+        CleanupContainer {
+            id: container.id,
+            is_static: container.is_static,
+        }
     }
 }
 
@@ -78,13 +95,26 @@ impl From<&PendingContainer> for CleanupContainer {
     fn from(container: &PendingContainer) -> CleanupContainer {
         CleanupContainer {
             id: container.id.clone(),
+            is_static: container.is_static,
         }
     }
 }
 
 impl From<RunningContainer> for CleanupContainer {
     fn from(container: RunningContainer) -> CleanupContainer {
-        CleanupContainer { id: container.id }
+        CleanupContainer {
+            id: container.id,
+            is_static: container.is_static,
+        }
+    }
+}
+
+impl From<&RunningContainer> for CleanupContainer {
+    fn from(container: &RunningContainer) -> CleanupContainer {
+        CleanupContainer {
+            id: container.id.clone(),
+            is_static: container.is_static,
+        }
     }
 }
 
@@ -153,6 +183,7 @@ impl PendingContainer {
         start_policy: StartPolicy,
         wait: Box<dyn WaitFor>,
         client: Docker,
+        is_static: bool,
     ) -> PendingContainer {
         PendingContainer {
             client,
@@ -161,13 +192,23 @@ impl PendingContainer {
             handle: handle.to_string(),
             wait: Some(wait),
             start_policy,
+            is_static,
         }
     }
 
     /// Run the start command and initiate the WaitFor condition.
     /// Once the PendingContainer is successfully started and the WaitFor condition
     /// has been achived, the RunningContainer is returned.
-    pub(crate) async fn start(mut self) -> Result<RunningContainer, DockerTestError> {
+    pub(crate) async fn start(self) -> Result<RunningContainer, DockerTestError> {
+        if self.is_static {
+            STATIC_CONTAINERS.start(&self).await
+        } else {
+            self.start_internal().await
+        }
+    }
+
+    /// Internal start method should only be invoked from the static mod.
+    pub(crate) async fn start_internal(mut self) -> Result<RunningContainer, DockerTestError> {
         self.client
             .start_container(&self.name, None::<StartContainerOptions<String>>)
             .await
@@ -222,6 +263,7 @@ mod tests {
             StartPolicy::Relaxed,
             Box::new(NoWait {}),
             client,
+            false,
         );
         assert_eq!(id, container.id, "wrong id set in container creation");
         assert_eq!(name, container.name, "wrong name set in container creation");
@@ -279,7 +321,8 @@ mod tests {
         let container = composition
             .create(&client, None)
             .await
-            .expect("failed to create container");
+            .expect("failed to create container")
+            .unwrap();
         container.start().await.expect("failed to start container");
 
         let was_invoked = wrapped_wait_for

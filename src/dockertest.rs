@@ -4,7 +4,7 @@ use crate::container::{CleanupContainer, PendingContainer, RunningContainer};
 use crate::image::Source;
 use crate::{Composition, DockerTestError, StartPolicy};
 
-use crate::utils::connect_with_local_or_tls_defaults;
+use crate::{static_container::STATIC_CONTAINERS, utils::connect_with_local_or_tls_defaults};
 use bollard::{
     container::{InspectContainerOptions, RemoveContainerOptions, StopContainerOptions},
     network::{CreateNetworkOptions, DisconnectNetworkOptions},
@@ -323,13 +323,17 @@ impl DockerTest {
                 }
             };
 
+        // External containers return None on container creation and will therefore not be present
+        // in the Keeper so we need to add them.
+        running_containers
+            .kept
+            .append(&mut STATIC_CONTAINERS.external_containers().await);
+
         // Create the set of cleanup containers used after the test body
         let cleanup_containers = running_containers
             .kept
             .iter()
-            .map(|x| CleanupContainer {
-                id: x.id().to_string(),
-            })
+            .map(CleanupContainer::from)
             .collect();
 
         // Lets inspect each container for their ip address
@@ -572,7 +576,11 @@ impl DockerTest {
 
         for instance in compositions.kept.into_iter() {
             match instance.create(&self.client, Some(&self.network)).await {
-                Ok(c) => pending.push(c),
+                Ok(c) => {
+                    if let Some(container) = c {
+                        pending.push(container)
+                    }
+                }
                 Err(e) => {
                     // Error condition arose - we return the successfully created containers
                     // (for cleanup purposes)
@@ -691,7 +699,25 @@ impl DockerTest {
     /// Forcefully remove the `CleanupContainer` objects from `cleanup`.
     /// Also removes all named volumes added to dockertest.
     /// All errors are discarded.
-    async fn teardown(&self, cleanup: Vec<CleanupContainer>, test_failed: bool) {
+    async fn teardown(&self, mut cleanup: Vec<CleanupContainer>, test_failed: bool) {
+        let static_cleanup = cleanup
+            .iter()
+            .filter_map(|c| {
+                if c.is_static() {
+                    Some(c.id.as_str())
+                } else {
+                    None
+                }
+            })
+            .collect();
+        // Static containers ignores the prune strategy as other tests might still be running
+        STATIC_CONTAINERS
+            .cleanup(&self.client, &self.network, static_cleanup)
+            .await;
+
+        // Cleanup of static containers has to be synchronized between tests
+        cleanup.retain(|c| !c.is_static());
+
         // Get the prune strategy for this test.
         let prune = match std::env::var_os("DOCKERTEST_PRUNE") {
             Some(val) => match val.to_string_lossy().to_lowercase().as_str() {
