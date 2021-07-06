@@ -124,12 +124,12 @@
 //! }
 //! ```
 //!
-//! [ExitedWait]: waitfor::ExitedWait;
-//! [MessageWait]: waitfor::MessageWait;
-//! [NoWait]: waitfor::NoWait;
-//! [RunningWait]: waitfor::RunningWait;
-//! [WaitFor]: waitfor::WaitFor;
-//! [WaitFor::wait_for_ready]: waitfor::WaitFor::wait_for_ready;
+//! [ExitedWait]: (waitfor::ExitedWait);
+//! [MessageWait]: (waitfor::MessageWait);
+//! [NoWait]: (waitfor::NoWait);
+//! [RunningWait]: (waitfor::RunningWait);
+//! [WaitFor]: (waitfor::WaitFor);
+//! [WaitFor::wait_for_ready]: (waitfor::WaitFor::wait_for_ready);
 
 mod composition;
 mod container;
