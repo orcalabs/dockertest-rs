@@ -50,6 +50,50 @@ pub enum StaticManagementPolicy {
     DockerTest,
 }
 
+/// Specifies how should a `Composition` handle logs.
+#[derive(Clone, Debug)]
+pub enum LogAction {
+    /// Forward all outputs to their respective output sources of dockertest process.
+    Forward,
+    /// Forward `LogSource` outputs to a specified file.
+    ForwardToFile { path: String },
+    /// Forward `LogSource` outputs to stdout of dockertest process.
+    ForwardToStdOut,
+    /// Forward `LogSource` outputs to stderr of dockertest process.
+    ForwardToStdErr,
+}
+
+/// Specifies which log sources we want to read from containers.
+#[derive(Clone, Debug)]
+pub enum LogSource {
+    /// Read stderr only.
+    StdErr,
+    /// Read stdout only.
+    StdOut,
+    /// Read stdout and stderr.
+    Both,
+}
+
+/// Specifies when `LogAction` is applicable.
+#[derive(Clone, Debug)]
+pub enum LogPolicy {
+    /// `LogAction` is always applicable.
+    Always,
+    /// `LogAction` is applicable only if an error occures.
+    OnError,
+}
+
+/// Specifies how should `Composition` handle container logging.
+#[derive(Clone, Debug)]
+pub struct LogOptions {
+    /// Specifies how should a `Composition` handle logs.
+    pub action: LogAction,
+    /// Specifies when `action` is applicable.
+    pub policy: LogPolicy,
+    /// Specifies log sources we want to read from containers.
+    pub source: LogSource,
+}
+
 /// Represents an instance of an [Image].
 ///
 /// The `Composition` is used to specialize an Image whose name, version, tag and source is known,
@@ -135,6 +179,9 @@ pub struct Composition {
     /// Who is responsible for managing the lifecycle of the container.
     /// Will only be set if `is_static` is true.
     management: Option<StaticManagementPolicy>,
+
+    /// Logging options used for all containers.
+    pub(crate) log_options: Option<LogOptions>,
 }
 
 impl Composition {
@@ -162,6 +209,7 @@ impl Composition {
             port: Vec::new(),
             publish_all_ports: false,
             management: None,
+            log_options: None,
         }
     }
 
@@ -185,6 +233,7 @@ impl Composition {
             port: Vec::new(),
             publish_all_ports: false,
             management: None,
+            log_options: None,
         }
     }
 
@@ -264,6 +313,14 @@ impl Composition {
     /// [RunningWait]: crate::waitfor::RunningWait
     pub fn with_wait_for(self, wait: Box<dyn WaitFor>) -> Composition {
         Composition { wait, ..self }
+    }
+
+    /// Sets log options for this `Composition`.
+    pub fn with_log_options(self, log_options: LogOptions) -> Composition {
+        Composition {
+            log_options: Some(log_options),
+            ..self
+        }
     }
 
     /// Sets the environment variable to the given value.
@@ -524,6 +581,7 @@ impl Composition {
             self.wait,
             client.clone(),
             is_static,
+            self.log_options.clone(),
         ))
     }
 

@@ -1,5 +1,6 @@
 //! The main library structures.
 
+use crate::composition::{LogPolicy, LogSource};
 use crate::container::{CleanupContainer, PendingContainer, RunningContainer};
 use crate::image::Source;
 use crate::{Composition, DockerTestError, StartPolicy};
@@ -429,6 +430,8 @@ impl DockerTest {
                 }
             };
 
+        self.handle_logs(&cleanup_containers, result.is_err())
+            .await?;
         self.teardown(cleanup_containers, result.is_err()).await;
 
         if let Err(option) = result {
@@ -438,6 +441,57 @@ impl DockerTest {
             }
         }
 
+        Ok(())
+    }
+
+    /// Handle container logs.
+    ///
+    /// This function handles logs on per-container bases.
+    async fn handle_logs(
+        &self,
+        containers: &[CleanupContainer],
+        test_failed: bool,
+    ) -> Result<(), DockerTestError> {
+        for container in containers {
+            // we need to handle logs only if log_options is not None
+            if let Some(log_options) = &container.log_options {
+                // check if we need to capture stderr and/or stdout
+                let should_log_stderr = match log_options.source {
+                    LogSource::StdErr => true,
+                    LogSource::StdOut => false,
+                    LogSource::Both => true,
+                };
+
+                let should_log_stdout = match log_options.source {
+                    LogSource::StdErr => false,
+                    LogSource::StdOut => true,
+                    LogSource::Both => true,
+                };
+
+                let result = match log_options.policy {
+                    LogPolicy::Always => {
+                        container
+                            .handle_log(&log_options.action, should_log_stderr, should_log_stdout)
+                            .await
+                    }
+                    LogPolicy::OnError => {
+                        if !test_failed {
+                            continue;
+                        }
+                        container
+                            .handle_log(&log_options.action, should_log_stderr, should_log_stdout)
+                            .await
+                    }
+                };
+
+                result.map_err(|error| {
+                    DockerTestError::LogWriteError(format!(
+                        "unable to handle logs for: {}: {}",
+                        container.name, error
+                    ))
+                })?;
+            }
+        }
         Ok(())
     }
 

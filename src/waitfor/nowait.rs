@@ -44,6 +44,7 @@ mod tests {
             wait.clone(),
             client,
             false,
+            None,
         );
 
         let result = wait.wait_for_ready(container).await;
