@@ -334,10 +334,8 @@ mod tests {
         let result = image.pull(&client, &Source::Local).await;
         assert!(
             result.is_ok(),
-            format!(
-                "should not fail pull process with local source and existing image: {}",
-                result.unwrap_err()
-            )
+            "should not fail pull process with local source and existing image: {}",
+            result.unwrap_err()
         );
 
         let expected_id = test_utils::image_id(&client, repository, tag)
@@ -361,7 +359,8 @@ mod tests {
         let result = test_utils::delete_image_if_present(&client, *repository, tag).await;
         assert!(
             result.is_ok(),
-            format!("failed to delete image: {}", result.unwrap_err())
+            "failed to delete image: {}",
+            result.unwrap_err()
         );
 
         // Pull operation should fail since local pull on non-existent image
@@ -381,7 +380,8 @@ mod tests {
         let result = test_utils::delete_image_if_present(&client, *repository, tag).await;
         assert!(
             result.is_ok(),
-            format!("failed to delete image: {}", result.unwrap_err())
+            "failed to delete image: {}",
+            result.unwrap_err()
         );
         assert_eq!(
             image.retrieved_id(),
@@ -392,10 +392,8 @@ mod tests {
         let result = image.pull(&client, &source).await;
         assert!(
             result.is_ok(),
-            format!(
-                "should not fail pull process with valid remote source: {}",
-                result.unwrap_err()
-            )
+            "should not fail pull process with valid remote source: {}",
+            result.unwrap_err()
         );
 
         let expected_id = test_utils::image_id(&client, *repository, &tag)
@@ -445,10 +443,7 @@ mod tests {
             .expect("failed to get image id");
 
         let res = image.retrieve_and_set_id(&client).await;
-        assert!(
-            res.is_ok(),
-            format!("failed to set image id: {}", res.unwrap_err())
-        );
+        assert!(res.is_ok(), "failed to set image id: {}", res.unwrap_err());
 
         assert_eq!(
             image.retrieved_id(),
@@ -476,7 +471,8 @@ mod tests {
         let result = image.does_image_exist(&client).await;
         assert!(
             result.is_ok(),
-            format!("failure checking image exists {}", result.unwrap_err())
+            "failure checking image exists {}",
+            result.unwrap_err()
         );
         assert!(
             result.unwrap(),
@@ -492,7 +488,8 @@ mod tests {
         let result = image.does_image_exist(&client).await;
         assert!(
             result.is_ok(),
-            format!("failure checking image exists {}", result.unwrap_err())
+            "failure checking image exists {}",
+            result.unwrap_err()
         );
         assert!(
             !result.unwrap(),
@@ -517,7 +514,8 @@ mod tests {
             .await;
         assert!(
             result.is_ok(),
-            format!("failed to pull image: {}", result.unwrap_err())
+            "failed to pull image: {}",
+            result.unwrap_err()
         );
 
         match test_utils::image_exists_locally(&client, *repository, &tag).await {
@@ -527,7 +525,7 @@ mod tests {
                     "image should exist on local daemon after pull operation"
                 );
             }
-            Err(e) => panic!(format!("failed to check image existence: {}", e)),
+            Err(e) => panic!("failed to check image existence: {}", e),
         }
     }
 

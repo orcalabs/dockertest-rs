@@ -390,11 +390,10 @@ impl Composition {
         let mut exposed_ports: HashMap<&str, HashMap<(), ()>> = HashMap::new();
 
         for (exposed, host) in &self.port {
-            let mut dest_port: Vec<PortBinding> = Vec::new();
-            dest_port.push(PortBinding {
+            let dest_port: Vec<PortBinding> = vec![PortBinding {
                 host_ip: Some("127.0.0.1".to_string()),
                 host_port: Some(host.clone()),
-            });
+            }];
             port_map.insert(exposed.to_string(), Some(dest_port));
             exposed_ports.insert(exposed, HashMap::new());
         }
@@ -679,7 +678,8 @@ mod tests {
         let result = composition.create(&client, None).await;
         assert!(
             result.is_ok(),
-            format!("failed to start Composition: {}", result.err().unwrap())
+            "failed to start Composition: {}",
+            result.err().unwrap()
         );
     }
 
@@ -711,10 +711,8 @@ mod tests {
         let result = composition1.create(&client, None).await;
         assert!(
             result.is_ok(),
-            format!(
-                "failed to start first composition: {}",
-                result.err().unwrap()
-            )
+            "failed to start first composition: {}",
+            result.err().unwrap()
         );
 
         // Creating a second one should still be allowed, since we expect the first one
@@ -722,10 +720,8 @@ mod tests {
         let result = composition2.create(&client, None).await;
         assert!(
             result.is_ok(),
-            format!(
-                "failed to start second composition: {}",
-                result.err().unwrap()
-            )
+            "failed to start second composition: {}",
+            result.err().unwrap()
         );
     }
 
@@ -749,17 +745,16 @@ mod tests {
         let result = composition.create(&client, None).await;
         assert!(
             result.is_ok(),
-            format!("failed to start composition: {}", result.err().unwrap())
+            "failed to start composition: {}",
+            result.err().unwrap()
         );
 
         // Remove it by name
         let result = remove_container_if_exists(&client, container_name).await;
         assert!(
             result.is_ok(),
-            format!(
-                "failed to remove existing container: {}",
-                result.unwrap_err()
-            )
+            "failed to remove existing container: {}",
+            result.unwrap_err()
         );
     }
 
@@ -778,7 +773,7 @@ mod tests {
                 _ => false,
             },
         };
-        assert!(res, format!("should fail to remove non-existing container"));
+        assert!(res, "should fail to remove non-existing container");
     }
 
     // Tests that the configurate_container_name method correctly sets the Composition's
