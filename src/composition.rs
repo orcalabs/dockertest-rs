@@ -472,9 +472,9 @@ async fn remove_container_if_exists(client: &Docker, name: &str) -> Result<(), D
 mod tests {
     use crate::composition::{remove_container_if_exists, Composition, StartPolicy};
     use crate::image::{Image, Source};
+    use crate::utils::connect_with_local_or_tls_defaults;
     use crate::DockerTestError;
 
-    use bollard::Docker;
     use std::collections::HashMap;
 
     // Tests that the with_repository constructor creates
@@ -638,7 +638,7 @@ mod tests {
     /// Tests that we cannot create a container from a non-existent local repository image.
     #[tokio::test]
     async fn test_create_with_non_existing_local_image() {
-        let client = Docker::connect_with_local_defaults().expect("local docker daemon connection");
+        let client = connect_with_local_or_tls_defaults().unwrap();
         let repository = "dockertest_create_with_non_existing_local_image";
         let composition = Composition::with_repository(repository);
 
@@ -662,7 +662,7 @@ mod tests {
     /// Check that a simple composition from repository can be successfully created.
     #[tokio::test]
     async fn test_simple_create_composition_from_repository_success() {
-        let client = Docker::connect_with_local_defaults().expect("local docker daemon connection");
+        let client = connect_with_local_or_tls_defaults().unwrap();
         let repository = "dockertest-rs/hello";
         let mut composition = Composition::with_repository(repository);
         composition.container_name =
@@ -690,7 +690,7 @@ mod tests {
     /// (since we assume it will be an _old_ name collision).
     #[tokio::test]
     async fn test_create_with_existing_container() {
-        let client = Docker::connect_with_local_defaults().expect("local docker daemon connection");
+        let client = connect_with_local_or_tls_defaults().unwrap();
         let repository = "dockertest-rs/hello";
         let container_name = "dockertest_create_with_existing_container".to_string();
 
@@ -728,7 +728,7 @@ mod tests {
     /// Tests the `remove_container_if_exists` method when container exists.
     #[tokio::test]
     async fn test_remove_existing_container() {
-        let client = Docker::connect_with_local_defaults().expect("local docker daemon connection");
+        let client = connect_with_local_or_tls_defaults().unwrap();
         let repository = "dockertest-rs/hello";
         let container_name = "dockertest_remove_existing_container_test_name";
         let mut composition = Composition::with_repository(repository);
@@ -762,7 +762,7 @@ mod tests {
     /// `remove_container_if_exists`.
     #[tokio::test]
     async fn test_remove_non_existing_container() {
-        let client = Docker::connect_with_local_defaults().expect("local docker daemon connection");
+        let client = connect_with_local_or_tls_defaults().unwrap();
 
         let result = remove_container_if_exists(&client, "dockertest_non_existing_container").await;
 

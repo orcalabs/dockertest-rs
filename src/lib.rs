@@ -1,7 +1,7 @@
 #![deny(missing_docs)]
 #![deny(warnings)]
 #![deny(rust_2018_idioms)]
-#![deny(broken_intra_doc_links)]
+#![deny(rustdoc::broken_intra_doc_links)]
 
 //! _dockertest_ is a testing and automation abstraction for Docker.
 //!
@@ -136,6 +136,7 @@ mod container;
 mod dockertest;
 mod error;
 mod image;
+pub mod utils;
 pub mod waitfor;
 
 // Private module containing utility functions used for testing purposes

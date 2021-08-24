@@ -4,6 +4,7 @@ use crate::container::{CleanupContainer, PendingContainer, RunningContainer};
 use crate::image::Source;
 use crate::{Composition, DockerTestError, StartPolicy};
 
+use crate::utils::connect_with_local_or_tls_defaults;
 use bollard::{
     container::{InspectContainerOptions, RemoveContainerOptions, StopContainerOptions},
     network::{CreateNetworkOptions, DisconnectNetworkOptions},
@@ -66,17 +67,7 @@ pub struct DockerTest {
 
 impl Default for DockerTest {
     fn default() -> DockerTest {
-        let id = generate_random_string(20);
-        DockerTest {
-            default_source: Source::Local,
-            compositions: Vec::new(),
-            namespace: "dockertest-rs".to_string(),
-            client: Docker::connect_with_local_defaults().expect("local docker daemon connection"),
-            container_id: None,
-            named_volumes: Vec::new(),
-            network: format!("dockertest-rs-{}", id),
-            id,
-        }
+        Self::try_new().unwrap()
     }
 }
 
@@ -167,11 +158,27 @@ struct Keeper<T> {
 }
 
 impl DockerTest {
-    /// Creates a new DockerTest.
+    /// Creates a new DockerTest. Panics on Docker daemon connection failure.
+
     pub fn new() -> DockerTest {
         DockerTest {
             ..Default::default()
         }
+    }
+    /// Creates a new DockerTest. Returns error on Docker daemon connection failure.
+    pub fn try_new() -> Result<DockerTest, DockerTestError> {
+        let id = generate_random_string(20);
+        let client = connect_with_local_or_tls_defaults()?;
+        Ok(DockerTest {
+            default_source: Source::Local,
+            compositions: Vec::new(),
+            namespace: "dockertest-rs".to_string(),
+            client,
+            container_id: None,
+            named_volumes: Vec::new(),
+            network: format!("dockertest-rs-{}", id),
+            id,
+        })
     }
 
     /// Sets the default source for all images.

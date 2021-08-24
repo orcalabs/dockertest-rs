@@ -1,3 +1,4 @@
+use dockertest::utils::connect_with_local_or_tls_defaults;
 use dockertest::waitfor::{
     async_trait, ExitedWait, MessageSource, MessageWait, RunningWait, WaitFor,
 };
@@ -6,7 +7,7 @@ use dockertest::{
     Source, StartPolicy,
 };
 
-use bollard::{container::InspectContainerOptions, Docker};
+use bollard::container::InspectContainerOptions;
 use futures::future::TryFutureExt;
 use test_env_log::test;
 
@@ -27,8 +28,7 @@ impl WaitFor for FailWait {
 
 /// Returns whether the container is in a running state.
 pub async fn is_running(id: String) -> Result<bool, DockerTestError> {
-    let client = Docker::connect_with_local_defaults()
-        .map_err(|_| DockerTestError::Daemon("connection to local default".to_string()))?;
+    let client = connect_with_local_or_tls_defaults()?;
 
     let container = client
         .inspect_container(&id, None::<InspectContainerOptions>)

@@ -22,15 +22,14 @@ impl WaitFor for NoWait {
 #[cfg(test)]
 mod tests {
     use crate::container::PendingContainer;
+    use crate::utils::connect_with_local_or_tls_defaults;
     use crate::waitfor::{NoWait, WaitFor};
     use crate::StartPolicy;
-
-    use bollard::Docker;
 
     // Tests that WaitFor implementation for NoWait
     #[tokio::test]
     async fn test_no_wait_returns_ok() {
-        let client = Docker::connect_with_local_defaults().expect("local docker daemon connection");
+        let client = connect_with_local_or_tls_defaults().unwrap();
         let wait = Box::new(NoWait {});
 
         let container_name = "this_is_a_name".to_string();

@@ -201,16 +201,16 @@ impl PendingContainer {
 mod tests {
     use crate::container::{PendingContainer, RunningContainer};
     use crate::image::Source;
+    use crate::utils::connect_with_local_or_tls_defaults;
     use crate::waitfor::{async_trait, NoWait, WaitFor};
     use crate::{Composition, DockerTestError, StartPolicy};
 
-    use bollard::Docker;
     use std::sync::{Arc, RwLock};
 
     /// Tests `PendingContainer::new` with associated struct member field values.
     #[tokio::test]
     async fn test_new_pending_container() {
-        let client = Docker::connect_with_local_defaults().expect("local docker daemon connection");
+        let client = connect_with_local_or_tls_defaults().unwrap();
         let id = "this_is_an_id".to_string();
         let name = "this_is_a_container_name".to_string();
         let handle_key = "this_is_a_handle_key";
@@ -262,7 +262,7 @@ mod tests {
 
         let wrapped_wait_for = Box::new(wait_for);
 
-        let client = Docker::connect_with_local_defaults().expect("local docker daemon connection");
+        let client = connect_with_local_or_tls_defaults().unwrap();
         let repository = "dockertest-rs/hello".to_string();
         let mut composition =
             Composition::with_repository(repository).with_wait_for(wrapped_wait_for.clone());

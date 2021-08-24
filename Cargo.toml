@@ -34,3 +34,6 @@ test-env-log = { version = "0.2", default-features = false, features = ["trace"]
 
 [build-dependencies]
 anyhow = "1.0.33"
+
+[features]
+tls = ["bollard/ssl"]
