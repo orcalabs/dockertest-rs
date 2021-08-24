@@ -15,7 +15,7 @@ documentation = "https://docs.rs/dockertest"
 [dependencies]
 anyhow = "1.0.33"
 async-trait = "0.1.41"
-bollard = "0.10.1"
+bollard = "0.11"
 dyn-clone = "1.0"
 futures = "0.3.7"
 serde = "1.0"
