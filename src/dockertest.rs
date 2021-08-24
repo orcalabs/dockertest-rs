@@ -384,7 +384,7 @@ impl DockerTest {
         let result: Result<(), Option<Box<dyn Any + Send + 'static>>> =
             match tokio::spawn(test(ops)).await {
                 Ok(_) => {
-                    event!(Level::INFO, "test body success");
+                    event!(Level::DEBUG, "test body success");
                     Ok(())
                 }
                 Err(e) => {
