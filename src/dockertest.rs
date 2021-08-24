@@ -607,7 +607,7 @@ impl DockerTest {
             .collect();
 
         // Replace the `kept` vector into the stack frame
-        let pending = std::mem::replace(&mut pending_containers.kept, vec![]);
+        let pending = std::mem::take(&mut pending_containers.kept);
         let (relaxed, strict): (Vec<_>, Vec<_>) = pending
             .into_iter()
             .partition(|c| c.start_policy == StartPolicy::Relaxed);
@@ -810,7 +810,7 @@ impl DockerTest {
         // Replace the original vec in DockerTest.compositions.
         // - We take ownership of it into Keeper<Composition>.
         // NOTE: The insertion order is preserved.
-        let compositions = std::mem::replace(&mut self.compositions, vec![]);
+        let compositions = std::mem::take(&mut self.compositions);
         for (i, composition) in compositions.iter().enumerate() {
             let handle = composition.handle();
 

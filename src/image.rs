@@ -178,11 +178,11 @@ impl Image {
                     self.tag,
                     self.source
                 );
-                return Err(DockerTestError::Pull {
+                Err(DockerTestError::Pull {
                     repository: self.repository.to_string(),
                     tag: self.tag.to_string(),
                     error: e.to_string(),
-                });
+                })
             }
         }
     }
@@ -218,7 +218,7 @@ impl Image {
 
         let exists = self.does_image_exist(client).await?;
 
-        let pull = self.should_pull(exists, &pull_source)?;
+        let pull = self.should_pull(exists, pull_source)?;
         if pull {
             self.do_pull(client).await?;
         }
