@@ -4,6 +4,7 @@ use bollard::Docker;
 #[cfg(feature = "tls")]
 use std::env;
 
+#[doc(hidden)]
 /// Connect to a Docker daemon with defaults
 ///
 /// if `tls` feature is enabled and DOCKER_TLS_VERIFY env variable is set then connection is done via TLS over tcp

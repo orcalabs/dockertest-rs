@@ -23,8 +23,15 @@ use tracing_futures::Instrument;
 
 /// Represents a single docker test body execution environment.
 ///
-/// After constructing an instance of this, we will have established a local
-/// docker daemon connection with default installation properties.
+/// After constructing an instance of this, we will have established a
+/// connection to a Docker daemon.
+///
+/// When `tls` feature is enabled and `DOCKER_TLS_VERIFY` environment variable is set to a nonempty
+/// value the connection will use TLS encryption. [DOCKER_* env
+/// variables](https://docs.rs/bollard/0.11.0/bollard/index.html#ssl-via-rustls) configure a TCP
+/// connection URI and a location of client private key and client/CA certificates.
+///
+/// Otherwise local connection is used - via unix socket or named pipe (on Windows).
 ///
 /// Before running the test body through [run](DockerTest::run), one should configure
 /// the docker container dependencies through adding [Composition] with the configured
@@ -159,12 +166,12 @@ struct Keeper<T> {
 
 impl DockerTest {
     /// Creates a new DockerTest. Panics on Docker daemon connection failure.
-
     pub fn new() -> DockerTest {
         DockerTest {
             ..Default::default()
         }
     }
+
     /// Creates a new DockerTest. Returns error on Docker daemon connection failure.
     pub fn try_new() -> Result<DockerTest, DockerTestError> {
         let id = generate_random_string(20);

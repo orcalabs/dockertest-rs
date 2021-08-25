@@ -7,6 +7,8 @@
 //!
 //! The primary utility for this crate is to easily employ docker in test infrastructure,
 //! with the following key features:
+//! * Optionally enable connection to a Docker daemon via TLS on top of TCP or connect locally via
+//!   unix socket (named pipe on Windows)
 //! * Ensure that the docker container is running prior to test code.
 //!  * Support multiple containers per test.
 //!  * Support multiple containers from same image, with different configurations.
