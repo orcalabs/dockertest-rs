@@ -1,12 +1,14 @@
 #![deny(missing_docs)]
 #![deny(warnings)]
 #![deny(rust_2018_idioms)]
-#![deny(broken_intra_doc_links)]
+#![deny(rustdoc::broken_intra_doc_links)]
 
 //! _dockertest_ is a testing and automation abstraction for Docker.
 //!
 //! The primary utility for this crate is to easily employ docker in test infrastructure,
 //! with the following key features:
+//! * Optionally enable connection to a Docker daemon via TLS on top of TCP or connect locally via
+//!   unix socket (named pipe on Windows)
 //! * Ensure that the docker container is running prior to test code.
 //!  * Support multiple containers per test.
 //!  * Support multiple containers from same image, with different configurations.
@@ -136,6 +138,7 @@ mod container;
 mod dockertest;
 mod error;
 mod image;
+pub mod utils;
 pub mod waitfor;
 
 // Private module containing utility functions used for testing purposes

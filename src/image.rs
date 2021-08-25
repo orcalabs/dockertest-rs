@@ -304,15 +304,14 @@ impl Remote {
 #[cfg(test)]
 mod tests {
     use crate::image::{Image, PullPolicy, Remote, Source};
+    use crate::utils::connect_with_local_or_tls_defaults;
     use crate::{test_utils, test_utils::CONCURRENT_IMAGE_ACCESS_QUEUE};
-
-    use bollard::Docker;
 
     /// Tests that our `Image::pull` method succeeds with a valid `Source::Local` repository image.
     /// After the pull operation has been performed the image id shall be sat on the object.
     #[tokio::test]
     async fn test_pull_succeeds_with_valid_local_source() {
-        let client = Docker::connect_with_local_defaults().expect("local docker daemon connection");
+        let client = connect_with_local_or_tls_defaults().unwrap();
 
         let repository = "dockertest-rs/hello";
         let tag = "latest";
@@ -352,7 +351,7 @@ mod tests {
     /// `PullPolicy::Local`, the operation fails with a descriptive error message.
     #[tokio::test]
     async fn test_pull_fails_with_invalid_local_source() {
-        let client = Docker::connect_with_local_defaults().expect("local docker daemon connection");
+        let client = connect_with_local_or_tls_defaults().unwrap();
         let repository = CONCURRENT_IMAGE_ACCESS_QUEUE.access().await;
         let tag = "latest";
         let image = Image::with_repository(*repository).tag(&tag);
@@ -371,7 +370,7 @@ mod tests {
     /// Tests that our exposed pull method succeeds with a valid remote source.
     #[tokio::test]
     async fn test_pull_succeeds_with_valid_remote_source() {
-        let client = Docker::connect_with_local_defaults().expect("local docker daemon connection");
+        let client = connect_with_local_or_tls_defaults().unwrap();
         let repository = CONCURRENT_IMAGE_ACCESS_QUEUE.access().await;
         let tag = "latest";
         let source = Source::DockerHub(PullPolicy::Always);
@@ -410,7 +409,7 @@ mod tests {
     /// Tests that `Image::pull` fails with an invalid remote source.
     #[tokio::test]
     async fn test_pull_fails_with_invalid_remote_source() {
-        let client = Docker::connect_with_local_defaults().expect("local docker daemon connection");
+        let client = connect_with_local_or_tls_defaults().unwrap();
         let remote = Remote::new(&"example.com".to_string(), PullPolicy::Always);
         let source = Source::Remote(remote);
 
@@ -428,7 +427,7 @@ mod tests {
     // Tests that the retrieve_and_set_id method sets the image id
     #[tokio::test]
     async fn test_set_image_id() {
-        let client = Docker::connect_with_local_defaults().expect("local docker daemon connection");
+        let client = connect_with_local_or_tls_defaults().unwrap();
         let repository = "dockertest-rs/hello";
         let tag = "latest";
         let image = Image::with_repository(&repository).tag(&tag);
@@ -455,7 +454,7 @@ mod tests {
     // Tests that we can check if an image exists locally with the does_image_exist method.
     #[tokio::test]
     async fn test_image_existence() {
-        let client = Docker::connect_with_local_defaults().expect("local docker daemon connection");
+        let client = connect_with_local_or_tls_defaults().unwrap();
         let repository = CONCURRENT_IMAGE_ACCESS_QUEUE.access().await;
         let tag = "latest";
         let image = Image::with_repository(*repository).tag(&tag);
@@ -500,7 +499,7 @@ mod tests {
     /// Tests that the `Image::pull` method succesfully pulls a image from DockerHub.
     #[tokio::test]
     async fn test_pull_remote_image_from_dockerhub() {
-        let client = Docker::connect_with_local_defaults().expect("local docker daemon connection");
+        let client = connect_with_local_or_tls_defaults().unwrap();
         let repository = CONCURRENT_IMAGE_ACCESS_QUEUE.access().await;
         let tag = "latest";
         let image = Image::with_repository(*repository).tag(&tag);
@@ -700,7 +699,7 @@ mod tests {
     // Could not come up with a better way to test this scenario.
     #[tokio::test]
     async fn test_image_source_overrides_default_source_in_pull() {
-        let client = Docker::connect_with_local_defaults().expect("local docker daemon connection");
+        let client = connect_with_local_or_tls_defaults().unwrap();
         let repository = CONCURRENT_IMAGE_ACCESS_QUEUE.access().await;
         let tag = "latest";
         let image = Image::with_repository(*repository)
