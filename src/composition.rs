@@ -233,6 +233,10 @@ impl Composition {
     /// by dockertest.
     ///
     /// The container name defaults to the repository name.
+    ///
+    /// NOTE: If the `Composition` is a static container with an
+    /// `External` management policy the container name *MUST* match the container_name of
+    /// the external container and is required to be set.
     pub fn with_container_name<T: ToString>(self, container_name: T) -> Composition {
         Composition {
             user_provided_container_name: Some(container_name.to_string()),
@@ -336,9 +340,12 @@ impl Composition {
     /// If the static container is used across multiple tests in the same test binary, Dockertest can only guarantee that
     /// the container will be started in its designated start order or earlier as other tests might
     /// have already started it.
-    /// The container_name MUST be set to a unique value when using static containers.
-    /// To refer to the same containe across test binaries set the same container name for the
+    /// The container_name *MUST* be set to a unique value when using static containers.
+    /// To refer to the same container across `Dockertest` instances set the same container name for the
     /// compostions.
+    ///
+    /// NOTE: When the `External` management policy is used, the container_name must be set to the
+    /// name of the external container.
     pub fn static_container(&mut self, management: StaticManagementPolicy) -> &mut Composition {
         self.management = Some(management);
         self
