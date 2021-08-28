@@ -14,7 +14,7 @@ fn test_static_containers_runs() {
     let repo = "hello-world".to_string();
     let img = Image::with_repository(&repo);
     let mut hello_world = Composition::with_image(img);
-    hello_world.is_static_container(StaticManagementPolicy::DockerTest);
+    hello_world.static_container(StaticManagementPolicy::DockerTest);
 
     test.add_composition(hello_world);
 
@@ -31,7 +31,7 @@ fn test_static_containers_references_the_same_container_within_test_binary() {
     let repo = "hello-world".to_string();
     let img = Image::with_repository(&repo);
     let mut hello_world = Composition::with_image(img);
-    hello_world.is_static_container(StaticManagementPolicy::DockerTest);
+    hello_world.static_container(StaticManagementPolicy::DockerTest);
 
     test.add_composition(hello_world);
 
@@ -50,7 +50,7 @@ fn test_static_containers_references_the_same_container_within_test_binary_2() {
     let repo = "hello-world".to_string();
     let img = Image::with_repository(&repo);
     let mut hello_world = Composition::with_image(img);
-    hello_world.is_static_container(StaticManagementPolicy::DockerTest);
+    hello_world.static_container(StaticManagementPolicy::DockerTest);
 
     test.add_composition(hello_world);
 

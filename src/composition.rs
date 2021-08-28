@@ -339,7 +339,7 @@ impl Composition {
     /// The container_name MUST be set to a unique value when using static containers.
     /// To refer to the same containe across test binaries set the same container name for the
     /// compostions.
-    pub fn is_static_container(&mut self, management: StaticManagementPolicy) -> &mut Composition {
+    pub fn static_container(&mut self, management: StaticManagementPolicy) -> &mut Composition {
         self.management = Some(management);
         self
     }
