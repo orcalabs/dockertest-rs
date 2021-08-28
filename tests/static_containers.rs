@@ -3,7 +3,10 @@ use lazy_static::lazy_static;
 use std::sync::{Arc, Mutex};
 
 lazy_static! {
-    static ref STATIC_CONTAINER_ID: ContainerId = ContainerId::default();
+    // As the container might re-created due to one of the tests completing before the next one
+    // starts we cannot rely on container id as they will differ after creating the container
+    // again.
+    static ref STATIC_CONTAINER_NAME: ContainerName = ContainerName::default();
 }
 
 #[test]
@@ -37,8 +40,8 @@ fn test_static_containers_references_the_same_container_within_test_binary() {
 
     test.run(|ops| async move {
         let handle = ops.handle("hello-world");
-        let container_id = handle.id();
-        assert!(STATIC_CONTAINER_ID.set_and_compare(container_id));
+        let container_name = handle.name();
+        assert!(STATIC_CONTAINER_NAME.set_and_compare(container_name));
     });
 }
 
@@ -56,31 +59,31 @@ fn test_static_containers_references_the_same_container_within_test_binary_2() {
 
     test.run(|ops| async move {
         let handle = ops.handle("hello-world");
-        let container_id = handle.id();
-        assert!(STATIC_CONTAINER_ID.set_and_compare(container_id));
+        let container_name = handle.name();
+        assert!(STATIC_CONTAINER_NAME.set_and_compare(container_name));
     });
 }
 
 #[derive(Debug)]
-struct ContainerId {
-    id: Arc<Mutex<Option<String>>>,
+struct ContainerName {
+    name: Arc<Mutex<Option<String>>>,
 }
 
-impl Default for ContainerId {
-    fn default() -> ContainerId {
-        ContainerId {
-            id: Arc::new(Mutex::new(None)),
+impl Default for ContainerName {
+    fn default() -> ContainerName {
+        ContainerName {
+            name: Arc::new(Mutex::new(None)),
         }
     }
 }
 
-impl ContainerId {
-    fn set_and_compare(&self, container_id: &str) -> bool {
-        let mut id = self.id.lock().unwrap();
-        if let Some(i) = &*id {
-            i == container_id
+impl ContainerName {
+    fn set_and_compare(&self, container_name: &str) -> bool {
+        let mut name = self.name.lock().unwrap();
+        if let Some(i) = &*name {
+            i == container_name
         } else {
-            *id = Some(container_id.to_string());
+            *name = Some(container_name.to_string());
             true
         }
     }
