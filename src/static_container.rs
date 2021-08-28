@@ -52,6 +52,11 @@ enum StaticStatus {
     // clone of it if they are "behind" in the pipeline.
     Running(RunningContainer, PendingContainer),
     Pending(PendingContainer),
+    // If a test sharing static with other tests starts and completes before any of the other
+    // tests cleanup of the container will be performed.
+    // The remaining tests should create the container again during container creation.
+    // This status is only set during container cleanup.
+    Cleaned,
     // Keeps the id of the failed container for cleanup purposes.
     // If the container failed to be created the id will be None as we have not container id yet
     // and no cleanup will be necessary.
@@ -66,6 +71,7 @@ impl StaticStatus {
             StaticStatus::Running(_, r) => Some(r.id.as_str()),
             StaticStatus::Pending(p) => Some(p.id.as_str()),
             StaticStatus::Failed(_, container_id) => container_id.as_ref().map(|id| id.as_str()),
+            StaticStatus::Cleaned => None,
         }
     }
 }
@@ -191,27 +197,42 @@ impl StaticContainers {
                     c.completion_counter += 1;
                     Ok(p.clone())
                 }
+                StaticStatus::Cleaned => {
+                    self.create_static_container_impl(&mut map, composition, client, network)
+                        .await
+                }
             }
         } else {
-            let container_name = composition.container_name.clone();
-            let pending = composition.create_inner(client, network).await;
-            match pending {
-                Ok(p) => {
-                    let c = StaticContainer {
-                        status: StaticStatus::Pending(p.clone()),
-                        completion_counter: 1,
-                    };
-                    map.insert(container_name, c);
-                    Ok(p)
-                }
-                Err(e) => {
-                    let c = StaticContainer {
-                        status: StaticStatus::Failed(e.clone(), None),
-                        completion_counter: 1,
-                    };
-                    map.insert(container_name, c);
-                    Err(e)
-                }
+            self.create_static_container_impl(&mut map, composition, client, network)
+                .await
+        }
+    }
+
+    async fn create_static_container_impl(
+        &self,
+        containers: &mut HashMap<String, StaticContainer>,
+        composition: Composition,
+        client: &Docker,
+        network: Option<&str>,
+    ) -> Result<PendingContainer, DockerTestError> {
+        let container_name = composition.container_name.clone();
+        let pending = composition.create_inner(client, network).await;
+        match pending {
+            Ok(p) => {
+                let c = StaticContainer {
+                    status: StaticStatus::Pending(p.clone()),
+                    completion_counter: 1,
+                };
+                containers.insert(container_name, c);
+                Ok(p)
+            }
+            Err(e) => {
+                let c = StaticContainer {
+                    status: StaticStatus::Failed(e.clone(), None),
+                    completion_counter: 1,
+                };
+                containers.insert(container_name, c);
+                Err(e)
             }
         }
     }
@@ -248,6 +269,13 @@ impl StaticContainers {
                         }
                     }
                 }
+                // This should never occur as we set the completion_counter to 1 when
+                // we encounter a Cleaned container during creation, hence the container will never
+                // have it status set to Cleaned before this `Dockertest` instance has performed
+                // cleanup.
+                StaticStatus::Cleaned => Err(DockerTestError::Startup(
+                    "encountered a cleaned container during startup".to_string(),
+                )),
             }
         } else {
             Err(DockerTestError::Startup(
@@ -331,6 +359,7 @@ impl StaticContainers {
                     container.completion_counter -= 1;
                     if container.completion_counter == 0 {
                         responsible_to_remove.push(container_id.to_string());
+                        container.status = StaticStatus::Cleaned;
                     }
                 }
             }
