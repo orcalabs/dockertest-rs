@@ -138,6 +138,7 @@ mod container;
 mod dockertest;
 mod error;
 mod image;
+mod static_container;
 pub mod utils;
 pub mod waitfor;
 
@@ -145,7 +146,7 @@ pub mod waitfor;
 #[cfg(test)]
 mod test_utils;
 
-pub use crate::composition::{Composition, StartPolicy};
+pub use crate::composition::{Composition, StartPolicy, StaticManagementPolicy};
 pub use crate::container::{PendingContainer, RunningContainer};
 pub use crate::dockertest::{DockerOperations, DockerTest};
 pub use crate::error::DockerTestError;

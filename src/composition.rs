@@ -2,6 +2,7 @@
 
 use crate::container::PendingContainer;
 use crate::image::Image;
+use crate::static_container::STATIC_CONTAINERS;
 use crate::waitfor::{NoWait, WaitFor};
 use crate::DockerTestError;
 
@@ -30,6 +31,23 @@ pub enum StartPolicy {
     Relaxed,
     /// Start Containers' sequentially in the order added to DockerTest.
     Strict,
+}
+
+/// Specifies who is responsible for managing a static container.
+///
+/// An `External` policy indicates that the user is responsible for managing the container,
+/// DockerTest will never start or remove/stop the container.
+/// DockerTest will only make the container available through its handle in `DockerOperations`.
+/// DockerTest asssumes that all Externally managed containers are running prior to test execution,
+/// if not an error will be returned.
+///
+/// A `DockerTest` policy indicates that DockerTest will handle the lifecycle of the container.
+#[derive(Clone, PartialEq)]
+pub enum StaticManagementPolicy {
+    /// The lifecycle of the container is managed by the user.
+    External,
+    /// DockerTest handles the lifecycle of the container.
+    DockerTest,
 }
 
 /// Represents an instance of an [Image].
@@ -109,6 +127,10 @@ pub struct Composition {
 
     /// Port mapping (used for Windows-compatibility)
     port: Vec<(String, String)>,
+
+    /// Who is responsible for managing the lifecycle of the container.
+    /// Will only be set if `is_static` is true.
+    management: Option<StaticManagementPolicy>,
 }
 
 impl Composition {
@@ -134,6 +156,7 @@ impl Composition {
             inject_container_name_env: Vec::new(),
             final_named_volume_names: Vec::new(),
             port: Vec::new(),
+            management: None,
         }
     }
 
@@ -155,6 +178,7 @@ impl Composition {
             inject_container_name_env: Vec::new(),
             final_named_volume_names: Vec::new(),
             port: Vec::new(),
+            management: None,
         }
     }
 
@@ -209,6 +233,10 @@ impl Composition {
     /// by dockertest.
     ///
     /// The container name defaults to the repository name.
+    ///
+    /// NOTE: If the `Composition` is a static container with an
+    /// `External` management policy the container name *MUST* match the container_name of
+    /// the external container and is required to be set.
     pub fn with_container_name<T: ToString>(self, container_name: T) -> Composition {
         Composition {
             user_provided_container_name: Some(container_name.to_string()),
@@ -307,6 +335,30 @@ impl Composition {
         self
     }
 
+    /// Defines this as a static container which will will only be cleaned up after the full test
+    /// binary has executed.
+    /// If the static container is used across multiple tests in the same test binary, Dockertest can only guarantee that
+    /// the container will be started in its designated start order or earlier as other tests might
+    /// have already started it.
+    /// The container_name *MUST* be set to a unique value when using static containers.
+    /// To refer to the same container across `Dockertest` instances set the same container name for the
+    /// compostions.
+    ///
+    /// NOTE: When the `External` management policy is used, the container_name must be set to the
+    /// name of the external container.
+    pub fn static_container(&mut self, management: StaticManagementPolicy) -> &mut Composition {
+        self.management = Some(management);
+        self
+    }
+
+    pub(crate) fn static_management_policy(&self) -> &Option<StaticManagementPolicy> {
+        &self.management
+    }
+
+    fn is_static(&self) -> bool {
+        self.management.is_some()
+    }
+
     // Configure the container's name with the given namespace as prefix
     // and suffix.
     // We do this to ensure that we do not have overlapping container names
@@ -317,15 +369,37 @@ impl Composition {
             Some(n) => n,
         };
 
-        // The docker daemon does not like '/' or '\' in container names
-        let stripped_name = name.replace("/", "_");
+        if !self.is_static() {
+            // The docker daemon does not like '/' or '\' in container names
+            let stripped_name = name.replace("/", "_");
 
-        self.container_name = format!("{}-{}-{}", namespace, stripped_name, suffix);
+            self.container_name = format!("{}-{}-{}", namespace, stripped_name, suffix);
+        } else {
+            self.container_name = name.to_string();
+        }
     }
 
     // Consumes the Composition, creates the container and returns the Container object if it
     // was succesfully created.
+    // Only static containers with `StaticManagementPolicy::External` will return None, as we never
+    // want to create a `PendingContainer` representation for static containers which are managed
+    // by the user.
     pub(crate) async fn create(
+        self,
+        client: &Docker,
+        network: Option<&str>,
+    ) -> Result<Option<PendingContainer>, DockerTestError> {
+        if self.is_static() {
+            STATIC_CONTAINERS.create(self, client, network).await
+        } else {
+            self.create_inner(client, network).await.map(Some)
+        }
+    }
+
+    // Performs container creation, should NOT be called outside of this module or the static
+    // module.
+    // This is only exposed such that the static module can reach it.
+    pub(crate) async fn create_inner(
         self,
         client: &Docker,
         network: Option<&str>,
@@ -335,14 +409,16 @@ impl Composition {
         let start_policy_clone = self.start_policy.clone();
         let container_name_clone = self.container_name.clone();
 
-        // Ensure we can remove the previous container instance, if it somehow still exists.
-        // Only bail on non-recoverable failure.
-        match remove_container_if_exists(client, &self.container_name).await {
-            Ok(_) => {}
-            Err(e) => match e {
-                DockerTestError::Recoverable(_) => {}
-                _ => return Err(e),
-            },
+        if !self.is_static() {
+            // Ensure we can remove the previous container instance, if it somehow still exists.
+            // Only bail on non-recoverable failure.
+            match remove_container_if_exists(client, &self.container_name).await {
+                Ok(_) => {}
+                Err(e) => match e {
+                    DockerTestError::Recoverable(_) => {}
+                    _ => return Err(e),
+                },
+            }
         }
 
         let image_id = self.image.retrieved_id();
@@ -425,6 +501,7 @@ impl Composition {
             .map_err(|e| DockerTestError::Daemon(format!("failed to create container: {}", e)))
             .await?;
 
+        let is_static = self.is_static();
         Ok(PendingContainer::new(
             &container_name_clone,
             &container_info.id,
@@ -432,6 +509,7 @@ impl Composition {
             start_policy_clone,
             self.wait,
             client.clone(),
+            is_static,
         ))
     }
 

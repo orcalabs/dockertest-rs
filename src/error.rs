@@ -3,7 +3,7 @@
 use thiserror::Error;
 
 /// Public library error conditions.
-#[derive(Error, Debug, PartialEq)]
+#[derive(Error, Debug, PartialEq, Clone)]
 #[allow(missing_docs)]
 pub enum DockerTestError {
     #[error("docker daemon interaction error `{0}`")]

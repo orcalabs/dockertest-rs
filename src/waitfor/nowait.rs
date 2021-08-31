@@ -43,6 +43,7 @@ mod tests {
             StartPolicy::Relaxed,
             wait.clone(),
             client,
+            false,
         );
 
         let result = wait.wait_for_ready(container).await;
