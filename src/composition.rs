@@ -128,6 +128,10 @@ pub struct Composition {
     /// Port mapping (used for Windows-compatibility)
     port: Vec<(String, String)>,
 
+    // Allocates an ephemeral host port for all of a container’s exposed ports.
+    // Port forwarding is useful on MacOS because there is no network connectivity between the Mac system and Docker Desktop VM
+    pub(crate) publish_all_ports: bool,
+
     /// Who is responsible for managing the lifecycle of the container.
     /// Will only be set if `is_static` is true.
     management: Option<StaticManagementPolicy>,
@@ -156,6 +160,7 @@ impl Composition {
             inject_container_name_env: Vec::new(),
             final_named_volume_names: Vec::new(),
             port: Vec::new(),
+            publish_all_ports: false,
             management: None,
         }
     }
@@ -178,6 +183,7 @@ impl Composition {
             inject_container_name_env: Vec::new(),
             final_named_volume_names: Vec::new(),
             port: Vec::new(),
+            publish_all_ports: false,
             management: None,
         }
     }
@@ -222,6 +228,13 @@ impl Composition {
     pub fn port_map(&mut self, exported: u32, host: u32) -> &mut Composition {
         self.port
             .push((format!("{}/tcp", exported), format!("{}", host)));
+        self
+    }
+
+    /// Publish all exposed container ports to some ephemeral ports on the host.
+    /// Mapped host ports can be found via `RunningContainer::ports()` method.
+    pub fn publish_all_ports(&mut self) -> &mut Composition {
+        self.publish_all_ports = true;
         self
     }
 
@@ -479,6 +492,7 @@ impl Composition {
             network_mode: Some(n.to_string()),
             binds: Some(volumes),
             port_bindings: Some(port_map),
+            publish_all_ports: Some(self.publish_all_ports),
             ..Default::default()
         });
 
