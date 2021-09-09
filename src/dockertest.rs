@@ -98,8 +98,6 @@ enum PruneStrategy {
     StopOnFailure,
     /// Prune everything, including named and anonymous volumes.
     RemoveRegardless,
-    /// Prune everything, including named volumes (exluding anonymous volumes).
-    RemoveRegardlessKeepAnonymousVolumes,
 }
 
 impl DockerOperations {
@@ -727,9 +725,6 @@ impl DockerTest {
                 "never" => PruneStrategy::RunningRegardless,
                 "running_on_failure" => PruneStrategy::RunningOnFailure,
                 "always" => PruneStrategy::RemoveRegardless,
-                "always_keep_anonymous_volumes" => {
-                    PruneStrategy::RemoveRegardlessKeepAnonymousVolumes
-                }
                 _ => {
                     event!(Level::WARN, "unrecognized `DOCKERTEST_PRUNE = {:?}`", val);
                     event!(Level::DEBUG, "defaulting to prune stategy RemoveRegardless");
@@ -739,8 +734,6 @@ impl DockerTest {
             // Default strategy
             None => PruneStrategy::RemoveRegardless,
         };
-
-        let remove_anonymous_volumes;
 
         match prune {
             PruneStrategy::RunningRegardless => {
@@ -777,19 +770,10 @@ impl DockerTest {
                 return;
             }
 
-            PruneStrategy::RemoveRegardlessKeepAnonymousVolumes => {
-                remove_anonymous_volumes = false;
-                event!(
-                    Level::DEBUG,
-                    "forcefully removing all containers and keeping anonymous volumes"
-                );
-            }
-
             // Catch all to remove everything.
             PruneStrategy::StopOnFailure
             | PruneStrategy::RunningOnFailure
             | PruneStrategy::RemoveRegardless => {
-                remove_anonymous_volumes = true;
                 event!(Level::DEBUG, "forcefully removing all containers");
             }
         }
@@ -801,12 +785,9 @@ impl DockerTest {
             // It's unlikely that anonymous volumes will be used by several containers. In this
             // case there will be remove errors that it's possible just to ignore (see
             // https://github.com/moby/moby/blob/7b9275c0da707b030e62c96b679a976f31f929d3/daemon/mounts.go#L34).
-            //
-            // Use PruneStrategy::RemoveRegardlessKeepAnonymousVolumes to keep anonymous volumes and remove them
-            // manually.
             let options = Some(RemoveContainerOptions {
                 force: true,
-                v: remove_anonymous_volumes,
+                v: true,
                 ..Default::default()
             });
             remove_futs.push(self.client.remove_container(&c.id, options));

@@ -66,8 +66,6 @@
 //! regardless of execution result. You can control this policy by setting the environment variable
 //! `DOCKERTEST_PRUNE`:
 //! * "always": default remove everything
-//! * "always_keep_anonymous_volumes": remove containers and named volumes but keep anonymous
-//! volumes
 //! * "never": leave all containers running
 //! * "stop_on_failure": stop containers on execution failure
 //! * "running_on_failure": leave containers running on execution failure
