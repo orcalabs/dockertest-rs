@@ -96,7 +96,7 @@ enum PruneStrategy {
     RunningOnFailure,
     /// With a stop-only strategy, docker volumes will NOT be pruned.
     StopOnFailure,
-    /// Prune everything, including volumes.
+    /// Prune everything, including named and anonymous volumes.
     RemoveRegardless,
 }
 
@@ -782,14 +782,17 @@ impl DockerTest {
         // as much as possible, even if one fail.
         let mut remove_futs = Vec::new();
         for c in cleanup.iter() {
+            // It's unlikely that anonymous volumes will be used by several containers. In this
+            // case there will be remove errors that it's possible just to ignore (see
+            // https://github.com/moby/moby/blob/7b9275c0da707b030e62c96b679a976f31f929d3/daemon/mounts.go#L34).
             let options = Some(RemoveContainerOptions {
                 force: true,
+                v: true,
                 ..Default::default()
             });
             remove_futs.push(self.client.remove_container(&c.id, options));
         }
-        // Volumes have to be removed after the containers, as we will get a 409 from the docker
-        // daemon if the volume is still in use by a container.
+        // Volumes have to be removed after the containers, as we will get a 409 from the docker daemon if the volume is still in use by a container.
         // We therefore run the container remove futures to completion before trying to remove volumes.
         // We will not be able to remove volumes if the associated container was not removed
         // successfully.
