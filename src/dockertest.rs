@@ -356,7 +356,7 @@ impl DockerTest {
             {
                 Ok(details) => {
                     // Get the ip address from the network
-                    c.ip = if let Some(ref network) = details
+                    c.ip = if let Some(network) = details
                         .network_settings
                         .as_ref()
                         .unwrap()
