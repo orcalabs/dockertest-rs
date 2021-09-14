@@ -24,4 +24,6 @@ pub enum DockerTestError {
     Processing(String),
     #[error("test body failure `{0}`")]
     TestBody(String),
+    #[error("log write error `{0}'")]
+    LogWriteError(String),
 }

@@ -1,12 +1,22 @@
 //! Represents a docker `Container`.
 
-use crate::waitfor::{wait_for_message, MessageSource, WaitFor};
-use crate::{DockerTestError, StartPolicy};
+use crate::{
+    composition::{LogAction, LogOptions},
+    static_container::STATIC_CONTAINERS,
+    waitfor::{wait_for_message, MessageSource, WaitFor},
+    DockerTestError, StartPolicy,
+};
 
-use crate::static_container::STATIC_CONTAINERS;
-use bollard::models::PortBinding;
-use bollard::{container::StartContainerOptions, errors::Error, Docker};
+use bollard::{
+    container::{LogOutput, StartContainerOptions},
+    errors::Error,
+    models::PortBinding,
+    Docker,
+};
+use futures::StreamExt;
 use serde::Serialize;
+use tracing::info;
+
 use std::collections::HashMap;
 
 /// Represent a docker container object in a pending phase between
@@ -38,6 +48,9 @@ pub struct PendingContainer {
 
     /// Wheter this is a static container
     is_static: bool,
+
+    /// Container log options, they are provided by `Composition`.
+    pub(crate) log_options: Option<LogOptions>,
 }
 
 /// Represent a docker container in running state and available to the test body.
@@ -55,6 +68,7 @@ pub struct RunningContainer {
     /// Published container ports
     pub(crate) ports: HashMap<String, Option<Vec<PortBinding>>>,
     pub(crate) is_static: bool,
+    pub(crate) log_options: Option<LogOptions>,
 }
 
 /// A container representation of a pending or running container, that requires us to
@@ -66,11 +80,140 @@ pub struct RunningContainer {
 pub(crate) struct CleanupContainer {
     pub(crate) id: String,
     is_static: bool,
+    /// The generated docker name for this container.
+    pub(crate) name: String,
+    /// Client obtained from `PendingContainer` or `RunningContainer`, we need it because
+    /// we want to call `client.logs` to get container logs.
+    pub(crate) client: Docker,
+    /// Container log options.
+    pub(crate) log_options: Option<LogOptions>,
 }
+
+use std::io::{self, Write};
 
 impl CleanupContainer {
     pub(crate) fn is_static(&self) -> bool {
         self.is_static
+    }
+
+    /// Handle one log entry.
+    async fn handle_log_line(
+        &self,
+        action: &LogAction,
+        output: LogOutput,
+        file: &mut Option<tokio::fs::File>,
+    ) -> Result<(), DockerTestError> {
+        let write_to_stdout = |message| {
+            io::stdout()
+                .write(message)
+                .map_err(|error| DockerTestError::LogWriteError(format!("stdout: {}", error)))?;
+            Ok(())
+        };
+
+        let write_to_stderr = |message| {
+            io::stderr()
+                .write(message)
+                .map_err(|error| DockerTestError::LogWriteError(format!("stderr: {}", error)))?;
+            Ok(())
+        };
+
+        match action {
+            // forward-only, print stdout/stderr output to current process stdout/stderr
+            LogAction::Forward => match output {
+                LogOutput::StdOut { message } => write_to_stdout(&message[..]),
+                LogOutput::StdErr { message } => write_to_stderr(&message[..]),
+                LogOutput::StdIn { .. } | LogOutput::Console { .. } => Ok(()),
+            },
+            // forward everything to stderr
+            LogAction::ForwardToStdErr => match output {
+                LogOutput::StdOut { message } | LogOutput::StdErr { message } => {
+                    write_to_stderr(&message[..])
+                }
+                LogOutput::StdIn { .. } | LogOutput::Console { .. } => Ok(()),
+            },
+            // forward everything to stdout
+            LogAction::ForwardToStdOut => match output {
+                LogOutput::StdOut { message } | LogOutput::StdErr { message } => {
+                    write_to_stdout(&message[..])
+                }
+                LogOutput::StdIn { .. } | LogOutput::Console { .. } => Ok(()),
+            },
+            // forward everything to a file, file should be already opened
+            LogAction::ForwardToFile { .. } => match output {
+                LogOutput::StdOut { message } | LogOutput::StdErr { message } => {
+                    use tokio::io::AsyncWriteExt;
+
+                    if let Some(ref mut file) = file {
+                        file.write(&message[..])
+                            .await
+                            .map_err(|error| {
+                                DockerTestError::LogWriteError(format!(
+                                    "unable to write to log file: {}",
+                                    error
+                                ))
+                            })
+                            .map(|_| ())
+                    } else {
+                        Err(DockerTestError::LogWriteError(
+                            "log file should not be None".to_string(),
+                        ))
+                    }
+                }
+                LogOutput::StdIn { .. } | LogOutput::Console { .. } => Ok(()),
+            },
+        }
+    }
+
+    /// Handle container logs.
+    pub(crate) async fn handle_log(
+        &self,
+        action: &LogAction,
+        should_log_stderr: bool,
+        should_log_stdout: bool,
+    ) -> Result<(), DockerTestError> {
+        use bollard::container::LogsOptions;
+
+        let options = Some(LogsOptions::<String> {
+            stdout: should_log_stdout,
+            stderr: should_log_stderr,
+            ..Default::default()
+        });
+
+        info!("Trying to get logs from container: id={}", self.id);
+        let mut stream = self.client.logs(&self.name, options);
+
+        // let's open file if need it, we are doing this because we dont want to open
+        // file in every log reading iteration
+        let mut file = match action {
+            LogAction::ForwardToFile { path } => {
+                let filepath = format!("{}/{}", path, self.name);
+                // try to create file, bail if we cannot create file
+                tokio::fs::File::create(filepath)
+                    .await
+                    .map(Some)
+                    .map_err(|error| {
+                        DockerTestError::LogWriteError(format!(
+                            "unable to create log file: {}",
+                            error
+                        ))
+                    })
+            }
+            _ => Ok(None),
+        }?;
+
+        while let Some(data) = stream.next().await {
+            match data {
+                Ok(line) => self.handle_log_line(action, line, &mut file).await?,
+                Err(error) => {
+                    return Err(DockerTestError::LogWriteError(format!(
+                        "unable to read docker log: {}",
+                        error
+                    )))
+                }
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -84,6 +227,7 @@ impl From<PendingContainer> for RunningContainer {
             ip: std::net::Ipv4Addr::UNSPECIFIED,
             ports: HashMap::new(),
             is_static: container.is_static,
+            log_options: container.log_options,
         }
     }
 }
@@ -93,6 +237,9 @@ impl From<PendingContainer> for CleanupContainer {
         CleanupContainer {
             id: container.id,
             is_static: container.is_static,
+            client: container.client,
+            log_options: container.log_options,
+            name: container.name,
         }
     }
 }
@@ -102,6 +249,9 @@ impl From<&PendingContainer> for CleanupContainer {
         CleanupContainer {
             id: container.id.clone(),
             is_static: container.is_static,
+            client: container.client.clone(),
+            log_options: container.log_options.clone(),
+            name: container.name.clone(),
         }
     }
 }
@@ -111,6 +261,9 @@ impl From<RunningContainer> for CleanupContainer {
         CleanupContainer {
             id: container.id,
             is_static: container.is_static,
+            client: container.client,
+            log_options: container.log_options,
+            name: container.name,
         }
     }
 }
@@ -120,6 +273,9 @@ impl From<&RunningContainer> for CleanupContainer {
         CleanupContainer {
             id: container.id.clone(),
             is_static: container.is_static,
+            client: container.client.clone(),
+            log_options: container.log_options.clone(),
+            name: container.name.clone(),
         }
     }
 }
@@ -188,6 +344,8 @@ impl RunningContainer {
 
 impl PendingContainer {
     /// Creates a new Container object with the given values.
+    // FIXME(veeg): reword the PendingContainer API to be more ergonomic
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new<T: ToString, R: ToString, H: ToString>(
         name: T,
         id: R,
@@ -196,6 +354,7 @@ impl PendingContainer {
         wait: Box<dyn WaitFor>,
         client: Docker,
         is_static: bool,
+        log_options: Option<LogOptions>,
     ) -> PendingContainer {
         PendingContainer {
             client,
@@ -205,6 +364,7 @@ impl PendingContainer {
             wait: Some(wait),
             start_policy,
             is_static,
+            log_options,
         }
     }
 
@@ -276,6 +436,7 @@ mod tests {
             Box::new(NoWait {}),
             client,
             false,
+            None,
         );
         assert_eq!(id, container.id, "wrong id set in container creation");
         assert_eq!(name, container.name, "wrong name set in container creation");

@@ -142,6 +142,7 @@ impl StaticContainers {
                     ip: std::net::Ipv4Addr::UNSPECIFIED,
                     ports: HashMap::new(),
                     is_static: true,
+                    log_options: composition.log_options.clone(),
                 };
                 map.insert(composition.container_name, running);
             } else {
