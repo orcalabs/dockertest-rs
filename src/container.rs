@@ -4,8 +4,10 @@ use crate::waitfor::{wait_for_message, MessageSource, WaitFor};
 use crate::{DockerTestError, StartPolicy};
 
 use crate::static_container::STATIC_CONTAINERS;
+use bollard::models::PortBinding;
 use bollard::{container::StartContainerOptions, errors::Error, Docker};
 use serde::Serialize;
+use std::collections::HashMap;
 
 /// Represent a docker container object in a pending phase between
 /// it being created on the daemon, but may not be running.
@@ -48,7 +50,10 @@ pub struct RunningContainer {
     pub(crate) id: String,
     /// The generated docker name for this running container.
     pub(crate) name: String,
+    /// IP address of the container
     pub(crate) ip: std::net::Ipv4Addr,
+    /// Published container ports
+    pub(crate) ports: HashMap<String, Option<Vec<PortBinding>>>,
     pub(crate) is_static: bool,
 }
 
@@ -77,6 +82,7 @@ impl From<PendingContainer> for RunningContainer {
             id: container.id,
             name: container.name,
             ip: std::net::Ipv4Addr::UNSPECIFIED,
+            ports: HashMap::new(),
             is_static: container.is_static,
         }
     }
@@ -148,6 +154,12 @@ impl RunningContainer {
     /// [ExitedWait]: crate::waitfor::ExitedWait
     pub fn ip(&self) -> &std::net::Ipv4Addr {
         &self.ip
+    }
+
+    /// Return container port and host ip address bindings. Useful in MacOS where there is no
+    /// network connectivity between Mac system and containers.
+    pub fn ports(&self) -> &HashMap<String, Option<Vec<PortBinding>>> {
+        &self.ports
     }
 
     /// Inspect the output of this container and await the presence of a log line.
