@@ -581,7 +581,7 @@ impl Composition {
             ..Default::default()
         });
 
-        network.map(|n| {
+        if let Some(n) = network {
             net_config = network_aliases.map(|a| {
                 let mut endpoints = HashMap::new();
                 let settings = EndpointSettings {
@@ -593,7 +593,7 @@ impl Composition {
                     endpoints_config: endpoints,
                 }
             });
-        });
+        }
 
         // Construct options for create container
         let options = Some(CreateContainerOptions {
