@@ -6,10 +6,13 @@ use crate::static_container::STATIC_CONTAINERS;
 use crate::waitfor::{NoWait, WaitFor};
 use crate::DockerTestError;
 
-use bollard::service::PortBinding;
 use bollard::{
-    container::{Config, CreateContainerOptions, InspectContainerOptions, RemoveContainerOptions},
+    container::{
+        Config, CreateContainerOptions, InspectContainerOptions, NetworkingConfig,
+        RemoveContainerOptions,
+    },
     models::HostConfig,
+    service::{EndpointSettings, PortBinding},
     Docker,
 };
 
@@ -121,6 +124,9 @@ pub struct Composition {
     /// that will be created from this Composition.
     user_provided_container_name: Option<String>,
 
+    /// Network aliases for the container.
+    network_aliases: Option<Vec<String>>,
+
     /// The name of the container to be created by this Composition.
     /// At Composition creation this field defaults to the repository name of the associated image.
     /// When adding Compositions to DockerTest, the container_name will be transformed to the following:
@@ -196,6 +202,7 @@ impl Composition {
         let copy = repository.to_string();
         Composition {
             user_provided_container_name: None,
+            network_aliases: None,
             image: Image::with_repository(&copy),
             container_name: copy.replace("/", "-"),
             wait: Box::new(NoWait {}),
@@ -220,6 +227,7 @@ impl Composition {
     pub fn with_image(image: Image) -> Composition {
         Composition {
             user_provided_container_name: None,
+            network_aliases: None,
             container_name: image.repository().to_string().replace("/", "-"),
             image,
             wait: Box::new(NoWait {}),
@@ -304,6 +312,23 @@ impl Composition {
             user_provided_container_name: Some(container_name.to_string()),
             ..self
         }
+    }
+
+    /// Sets network aliases for this `Composition`.
+    pub fn with_alias(self, aliases: Vec<String>) -> Composition {
+        Composition {
+            network_aliases: Some(aliases),
+            ..self
+        }
+    }
+
+    /// Adds network alias to this `Composition`
+    pub fn alias(&mut self, alias: String) -> &mut Composition {
+        match self.network_aliases {
+            Some(ref mut network_aliases) => network_aliases.push(alias),
+            None => self.network_aliases = Some(vec![alias]),
+        };
+        self
     }
 
     /// Sets the `WaitFor` trait object for this `Composition`.
@@ -544,6 +569,9 @@ impl Composition {
             exposed_ports.insert(exposed, HashMap::new());
         }
 
+        let network_aliases = self.network_aliases.as_ref();
+        let mut net_config = None;
+
         // Construct host config
         let host_config = network.map(|n| HostConfig {
             network_mode: Some(n.to_string()),
@@ -552,6 +580,20 @@ impl Composition {
             publish_all_ports: Some(self.publish_all_ports),
             ..Default::default()
         });
+
+        if let Some(n) = network {
+            net_config = network_aliases.map(|a| {
+                let mut endpoints = HashMap::new();
+                let settings = EndpointSettings {
+                    aliases: Some(a.to_vec()),
+                    ..Default::default()
+                };
+                endpoints.insert(n, settings);
+                NetworkingConfig {
+                    endpoints_config: endpoints,
+                }
+            });
+        }
 
         // Construct options for create container
         let options = Some(CreateContainerOptions {
@@ -562,6 +604,7 @@ impl Composition {
             image: Some(&image_id),
             cmd: Some(cmds),
             env: Some(envs),
+            networking_config: net_config,
             host_config,
             exposed_ports: Some(exposed_ports),
             ..Default::default()
