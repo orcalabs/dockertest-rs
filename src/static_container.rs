@@ -304,6 +304,8 @@ impl StaticContainers {
     }
 
     /// Disconnects all static containers from the given network.
+    ///
+    /// If the network is external, we do not disconnect the external containers.
     async fn disconnect_static_containers_from_network(
         &self,
         client: &Docker,
