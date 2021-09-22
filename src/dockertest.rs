@@ -62,6 +62,9 @@ pub struct DockerTest {
     named_volumes: Vec<String>,
     /// The associated network created for this test, that all containers run within.
     network: String,
+    /// If set, the `network` referenced points to an externally managed network.
+    /// We do not meddle with this network, only include ourselves in it.
+    is_external_network: bool,
     /// Retrieved internally by an env variable the user has to set.
     /// Will only be used in environments where dockertest itself is running inside a container.
     container_id: Option<String>,
@@ -185,6 +188,7 @@ impl DockerTest {
             container_id: None,
             named_volumes: Vec::new(),
             network: format!("dockertest-rs-{}", id),
+            is_external_network: false,
             id,
         })
     }
@@ -209,6 +213,25 @@ impl DockerTest {
         }
     }
 
+    /// Test will use an externally managed docker network.
+    ///
+    /// All created containers will attach itself to the existing, externally managed network.
+    ///
+    /// If the container is created with a [crate::composition::StaticManagementPolicy::External],
+    /// it is assumed that the container is already part of this network.
+    ///
+    /// For [crate::composition::StaticManagementPolicy::DockerTest], the container will be included
+    /// into the network before test starts, and dropped once the statically managed container
+    /// is removed.
+    pub fn with_external_network<T: ToString>(self, network: T) -> DockerTest {
+        DockerTest {
+            network: network.to_string(),
+            is_external_network: true,
+            ..self
+        }
+    }
+
+    /// Set that we want to store logs from containers into individual files
     /// Execute the test body within the provided function closure.
     /// All Compositions added to the DockerTest has successfully completed their WaitFor clause
     /// once the test body is executed.
@@ -303,7 +326,9 @@ impl DockerTest {
         self.pull_images(&compositions).await?;
 
         // Create the network
-        self.create_network().await?;
+        if !self.is_external_network {
+            self.create_network().await?;
+        }
 
         // Create PendingContainers from the Compositions
         let pending_containers: Keeper<PendingContainer> =
@@ -641,7 +666,10 @@ impl DockerTest {
         let mut pending: Vec<PendingContainer> = Vec::new();
 
         for instance in compositions.kept.into_iter() {
-            match instance.create(&self.client, Some(&self.network)).await {
+            match instance
+                .create(&self.client, Some(&self.network), self.is_external_network)
+                .await
+            {
                 Ok(c) => {
                     if let Some(container) = c {
                         pending.push(container)
@@ -778,7 +806,12 @@ impl DockerTest {
             .collect();
         // Static containers ignores the prune strategy as other tests might still be running
         STATIC_CONTAINERS
-            .cleanup(&self.client, &self.network, static_cleanup)
+            .cleanup(
+                &self.client,
+                &self.network,
+                self.is_external_network,
+                static_cleanup,
+            )
             .await;
 
         // Cleanup of static containers has to be synchronized between tests
@@ -832,7 +865,9 @@ impl DockerTest {
                 )
                 .await;
 
-                self.teardown_network().await;
+                if !self.is_external_network {
+                    self.teardown_network().await;
+                }
                 return;
             }
 
@@ -865,7 +900,9 @@ impl DockerTest {
         join_all(remove_futs).await;
 
         // Network must be removed after containers have been stopped.
-        self.teardown_network().await;
+        if !self.is_external_network {
+            self.teardown_network().await;
+        }
 
         // Cleanup volumes now
         let mut volume_futs = Vec::new();

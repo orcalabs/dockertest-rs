@@ -483,9 +483,12 @@ impl Composition {
         self,
         client: &Docker,
         network: Option<&str>,
+        is_external_network: bool,
     ) -> Result<Option<PendingContainer>, DockerTestError> {
         if self.is_static() {
-            STATIC_CONTAINERS.create(self, client, network).await
+            STATIC_CONTAINERS
+                .create(self, client, network, is_external_network)
+                .await
         } else {
             self.create_inner(client, network).await.map(Some)
         }
@@ -844,7 +847,7 @@ mod tests {
             .is_err());
 
         // This will then fail due to missing image id
-        let result = composition.create(&client, None).await;
+        let result = composition.create(&client, None, false).await;
         // TODO: assert a proper error message
         assert!(
             result.is_err(),
@@ -868,7 +871,7 @@ mod tests {
             .await
             .unwrap();
 
-        let result = composition.create(&client, None).await;
+        let result = composition.create(&client, None, false).await;
         assert!(
             result.is_ok(),
             "failed to start Composition: {}",
@@ -901,7 +904,7 @@ mod tests {
         let composition2 = composition1.clone();
 
         // Initial setup - first container that already exists.
-        let result = composition1.create(&client, None).await;
+        let result = composition1.create(&client, None, false).await;
         assert!(
             result.is_ok(),
             "failed to start first composition: {}",
@@ -910,7 +913,7 @@ mod tests {
 
         // Creating a second one should still be allowed, since we expect the first one
         // to be removed.
-        let result = composition2.create(&client, None).await;
+        let result = composition2.create(&client, None, false).await;
         assert!(
             result.is_ok(),
             "failed to start second composition: {}",
@@ -935,7 +938,7 @@ mod tests {
             .unwrap();
 
         // Create out composition
-        let result = composition.create(&client, None).await;
+        let result = composition.create(&client, None, false).await;
         assert!(
             result.is_ok(),
             "failed to start composition: {}",

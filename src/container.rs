@@ -492,7 +492,7 @@ mod tests {
 
         // Create and start the container
         let container = composition
-            .create(&client, None)
+            .create(&client, None, false)
             .await
             .expect("failed to create container")
             .unwrap();
