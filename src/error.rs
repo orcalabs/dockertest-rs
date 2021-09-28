@@ -26,4 +26,6 @@ pub enum DockerTestError {
     TestBody(String),
     #[error("log write error `{0}'")]
     LogWriteError(String),
+    #[error("host port error `{0}`")]
+    HostPort(String),
 }

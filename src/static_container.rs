@@ -1,5 +1,6 @@
 use crate::{
-    Composition, DockerTestError, PendingContainer, RunningContainer, StaticManagementPolicy,
+    container::HostPortMappings, Composition, DockerTestError, PendingContainer, RunningContainer,
+    StaticManagementPolicy,
 };
 use bollard::{
     container::{InspectContainerOptions, RemoveContainerOptions},
@@ -154,7 +155,7 @@ impl StaticContainers {
                     name: composition.container_name.clone(),
                     handle: composition.container_name.clone(),
                     ip: std::net::Ipv4Addr::UNSPECIFIED,
-                    ports: HashMap::new(),
+                    ports: HostPortMappings::default(),
                     is_static: true,
                     log_options: composition.log_options.clone(),
                 };

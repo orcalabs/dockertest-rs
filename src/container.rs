@@ -10,14 +10,14 @@ use crate::{
 use bollard::{
     container::{LogOutput, StartContainerOptions},
     errors::Error,
-    models::PortBinding,
+    models::{PortBinding, PortMap},
     Docker,
 };
 use futures::StreamExt;
 use serde::Serialize;
 use tracing::info;
 
-use std::collections::HashMap;
+use std::{collections::HashMap, convert::TryFrom, net::Ipv4Addr, str::FromStr};
 
 /// Represent a docker container object in a pending phase between
 /// it being created on the daemon, but may not be running.
@@ -66,7 +66,7 @@ pub struct RunningContainer {
     /// IP address of the container
     pub(crate) ip: std::net::Ipv4Addr,
     /// Published container ports
-    pub(crate) ports: HashMap<String, Option<Vec<PortBinding>>>,
+    pub(crate) ports: HostPortMappings,
     pub(crate) is_static: bool,
     pub(crate) log_options: Option<LogOptions>,
 }
@@ -87,6 +87,29 @@ pub(crate) struct CleanupContainer {
     pub(crate) client: Docker,
     /// Container log options.
     pub(crate) log_options: Option<LogOptions>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct HostPortMappings {
+    mappings: HashMap<u32, (Ipv4Addr, u32)>,
+}
+
+#[derive(thiserror::Error, Debug, PartialEq, Clone)]
+pub(crate) enum HostPortMappingError {
+    #[error("failed to extract host port from docker details, malformed ip/protocol key: {0}")]
+    HostPortKey(String),
+    #[error("port mapping did not contain a host port or host ip")]
+    NoMapping,
+    #[error("failed to convert host ip/port to appropriate types: {0}")]
+    Conversion(String),
+}
+
+impl Default for HostPortMappings {
+    fn default() -> HostPortMappings {
+        HostPortMappings {
+            mappings: HashMap::new(),
+        }
+    }
 }
 
 use std::io::{self, Write};
@@ -225,7 +248,7 @@ impl From<PendingContainer> for RunningContainer {
             id: container.id,
             name: container.name,
             ip: std::net::Ipv4Addr::UNSPECIFIED,
-            ports: HashMap::new(),
+            ports: HostPortMappings::default(),
             is_static: container.is_static,
             log_options: container.log_options,
         }
@@ -280,6 +303,51 @@ impl From<&RunningContainer> for CleanupContainer {
     }
 }
 
+impl TryFrom<PortMap> for HostPortMappings {
+    type Error = HostPortMappingError;
+    fn try_from(p: PortMap) -> Result<HostPortMappings, Self::Error> {
+        let mut map: HashMap<u32, (Ipv4Addr, u32)> = HashMap::new();
+        for (host_port_string, ports) in p.into_iter() {
+            if let Some(port_bindings) = ports {
+                let split: Vec<&str> = host_port_string.split('/').collect();
+                // We expect the split to contain "port/protocol" e.g. "8080/tcp"
+                // If it does not contain this, we cannot extract the host_port and do not
+                // have any fallback and return an early error.
+                if split.len() < 2 {
+                    return Err(HostPortMappingError::HostPortKey(host_port_string));
+                }
+
+                let host_port = u32::from_str(split[0]).unwrap();
+
+                for binding in port_bindings {
+                    match from_port_binding(binding)? {
+                        Some((ip, port)) => {
+                            map.entry(host_port).or_insert((ip, port));
+                        }
+                        None => return Err(HostPortMappingError::NoMapping),
+                    }
+                }
+            }
+        }
+
+        Ok(HostPortMappings { mappings: map })
+    }
+}
+
+fn from_port_binding(ports: PortBinding) -> Result<Option<(Ipv4Addr, u32)>, HostPortMappingError> {
+    match (ports.host_ip, ports.host_port) {
+        (Some(ip), Some(port)) => {
+            let parsed_ip = Ipv4Addr::from_str(&ip)
+                .map_err(|e| HostPortMappingError::Conversion(e.to_string()))?;
+            let parsed_port = u32::from_str(&port)
+                .map_err(|e| HostPortMappingError::Conversion(e.to_string()))?;
+
+            Ok(Some((parsed_ip, parsed_port)))
+        }
+        _ => Ok(None),
+    }
+}
+
 impl RunningContainer {
     /// Return the generated name on the docker container object for this `RunningContainer`.
     pub fn name(&self) -> &str {
@@ -312,10 +380,15 @@ impl RunningContainer {
         &self.ip
     }
 
-    /// Return container port and host ip address bindings. Useful in MacOS where there is no
+    /// Returns host ip/port binding for the given container port. Useful in MacOS where there is no
     /// network connectivity between Mac system and containers.
-    pub fn ports(&self) -> &HashMap<String, Option<Vec<PortBinding>>> {
-        &self.ports
+    pub fn host_port(&self, exposed_port: u32) -> Option<&(Ipv4Addr, u32)> {
+        self.ports.mappings.get(&exposed_port)
+    }
+
+    /// Same as `host_port`, but panics if the mapping could not be found.
+    pub fn host_port_unchecked(&self, exposed_port: u32) -> &(Ipv4Addr, u32) {
+        self.ports.mappings.get(&exposed_port).unwrap()
     }
 
     /// Inspect the output of this container and await the presence of a log line.
