@@ -223,3 +223,27 @@ fn test_host_port_returns_none_if_the_port_is_not_mapped() {
         assert!(handle.host_port(7900).is_none());
     });
 }
+
+#[test]
+fn test_host_port_returns_ports_exposed_by_publish_all() {
+    let source = Source::DockerHub(PullPolicy::IfNotPresent);
+    let mut test = DockerTest::new().with_default_source(source);
+
+    let repo = "dockertest-rs/expose_ports";
+    let mut composition = Composition::with_repository(repo);
+    composition.publish_all_ports();
+    test.add_composition(composition);
+
+    test.run(|ops| async move {
+        let handle = ops.handle(repo);
+
+        let ports = handle.host_port(8080).unwrap();
+        assert_eq!(Ipv4Addr::UNSPECIFIED, ports.0);
+
+        let ports = handle.host_port(9000).unwrap();
+        assert_eq!(Ipv4Addr::UNSPECIFIED, ports.0);
+
+        let ports = handle.host_port(4567).unwrap();
+        assert_eq!(Ipv4Addr::UNSPECIFIED, ports.0);
+    });
+}
