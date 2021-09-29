@@ -20,14 +20,14 @@ use futures::future::TryFutureExt;
 use std::collections::HashMap;
 use tracing::{event, Level};
 
-/// Specifies the starting policy of a `Composition`.
+/// Specifies the starting policy of a [Composition].
 ///
-/// A `Strict` policy will enforce that the Composition is started in the order
-/// it was added to dockertest. A `Relaxed` policy will not enforce any ordering,
-/// all Compositions with a Relaxed policy will be started concurrently.
-///
-/// All relaxed compositions is asynchronously started before sequentially
-/// starting all with a strict `StartPolicy`.
+/// - [StartPolicy::Strict] policy will enforce that the composition is started in the order
+///     it was added to [crate::DockerTest].
+/// - [StartPolicy::Relaxed] policy will not enforce any ordering,
+///     all Compositions with a relaxed policy will be started concurrently.
+///     These are all started asynchrously started before the strict policy containers
+///     are started sequentially.
 #[derive(Clone, PartialEq)]
 pub enum StartPolicy {
     /// Concurrently start the Container with other Relaxed instances.
@@ -38,13 +38,15 @@ pub enum StartPolicy {
 
 /// Specifies who is responsible for managing a static container.
 ///
-/// An `External` policy indicates that the user is responsible for managing the container,
-/// DockerTest will never start or remove/stop the container.
-/// DockerTest will only make the container available through its handle in `DockerOperations`.
-/// DockerTest asssumes that all Externally managed containers are running prior to test execution,
-/// if not an error will be returned.
-///
-/// A `DockerTest` policy indicates that DockerTest will handle the lifecycle of the container.
+/// - [StaticManagementPolicy::External] indicates that the user is responsible for managing the
+///     container, DockerTest will never start or remove/stop the container. The container will
+///     be available through its handle in [crate::DockerOperations]. If no external network is
+///     supplied, the test-scoped network will be added to the external network, and subsequently
+///     removed once the test terminates.
+///     The externally managed container is assumed to be in a running state when the test starts.
+///     If DockerTest cannot locate the the container, the test will fail.
+/// - [StaticManagementPolicy::DockerTest] indicates that DockerTest will handle the lifecycle of
+///     the container between all DockerTest instances within the test binary.
 #[derive(Clone, PartialEq)]
 pub enum StaticManagementPolicy {
     /// The lifecycle of the container is managed by the user.
@@ -53,16 +55,16 @@ pub enum StaticManagementPolicy {
     DockerTest,
 }
 
-/// Specifies how should a `Composition` handle logs.
+/// Specifies how should a [Composition] handle logs.
 #[derive(Clone, Debug)]
 pub enum LogAction {
-    /// Forward all outputs to their respective output sources of dockertest process.
+    /// Forward all outputs to their respective output sources of the dockertest process.
     Forward,
-    /// Forward `LogSource` outputs to a specified file.
+    /// Forward [LogSource] outputs to a specified file.
     ForwardToFile { path: String },
-    /// Forward `LogSource` outputs to stdout of dockertest process.
+    /// Forward [LogSource] outputs to stdout of the dockertest process.
     ForwardToStdOut,
-    /// Forward `LogSource` outputs to stderr of dockertest process.
+    /// Forward [LogSource] outputs to stderr of the dockertest process.
     ForwardToStdErr,
 }
 
@@ -77,34 +79,34 @@ pub enum LogSource {
     Both,
 }
 
-/// Specifies when `LogAction` is applicable.
+/// Specifies when [LogAction] is applicable.
 #[derive(Clone, Debug)]
 pub enum LogPolicy {
-    /// `LogAction` is always applicable.
+    /// [LogAction] is always applicable.
     Always,
-    /// `LogAction` is applicable only if an error occures.
+    /// [LogAction] is applicable only if an error occures.
     OnError,
 }
 
-/// Specifies how should `Composition` handle container logging.
+/// Specifies how [Composition] should handle container logging.
 #[derive(Clone, Debug)]
 pub struct LogOptions {
-    /// Specifies how should a `Composition` handle logs.
+    /// The logging actions to be performed
     pub action: LogAction,
-    /// Specifies when `action` is applicable.
+    /// Under which conditions should we perform the log actions?
     pub policy: LogPolicy,
-    /// Specifies log sources we want to read from containers.
+    /// Specifies log sources we want to read from container.
     pub source: LogSource,
 }
 
 /// Represents an instance of an [Image].
 ///
-/// The `Composition` is used to specialize an Image whose name, version, tag and source is known,
-/// but before one can create a [RunningContainer] from an Image, it must be augmented with
-/// information about how to start it, how to ensure it has been started, environment variables
-/// and runtime commands.
+/// The [Composition] is used to specialize an image whose name, version, tag and source is known,
+/// but before one can create a [crate::container:: RunningContainer] from an image,
+/// it must be augmented with information about how to start it, how to ensure it has been
+/// started, environment variables and runtime commands.
 /// Thus, this structure represents the concrete instance of an [Image] that will be started
-/// and become a [RunningContainer].
+/// and become a [crate::container::RunningContainer].
 ///
 /// # Examples
 /// ```rust
@@ -115,11 +117,10 @@ pub struct LogOptions {
 /// hello.env("MY_ENV", "MY VALUE");
 /// hello.cmd("appended_to_original_cmd!");
 /// ```
-///
-/// [RunningContainer]: crate::container::RunningContainer
 #[derive(Clone)]
 pub struct Composition {
     /// User provided name of the container.
+    ///
     /// This will dictate the final container_name and the container_handle_key of the container
     /// that will be created from this Composition.
     user_provided_container_name: Option<String>,
@@ -128,45 +129,46 @@ pub struct Composition {
     network_aliases: Option<Vec<String>>,
 
     /// The name of the container to be created by this Composition.
-    /// At Composition creation this field defaults to the repository name of the associated image.
-    /// When adding Compositions to DockerTest, the container_name will be transformed to the following:
-    ///     namespace_of_dockerTest - repository_name - random_generated_suffix
-    /// If the user have provided a user_provided_container_name, the container_name will look like
-    /// the following:
-    ///     namespace_of_dockerTest - user_provided_container_name - random_generated_suffix
+    ///
+    /// When the composition is created, this field defaults to the repository name of the
+    /// associated image. If the user provides an alternative container name, this will be stored
+    /// in its own dedicated field.
+    ///
+    /// The final format of the container name we will create will be on the following format:
+    /// `{namespace}-{name}-{suffix}` where
+    /// - `{namespace}` is the configured namespace with [crate::DockerTest].
+    /// - `{name}` is either the user provided container name, or this default value.
+    /// - `{suffix}` randomly generated pattern.
     pub(crate) container_name: String,
 
-    /// Trait object that is responsible for
-    /// waiting for the container that will
-    /// be created to be ready for service.
-    /// Defaults to waiting for the container
-    /// to appear as running.
+    /// A trait object holding the implementation that indicate container readiness.
     wait: Box<dyn WaitFor>,
 
-    /// The environmentable variables that will be
-    /// passed to the container.
+    /// The environmentable variables that will be passed to the container.
     pub(crate) env: HashMap<String, String>,
 
     /// The command to pass to the container.
     cmd: Vec<String>,
 
-    /// The StartPolicy of this Composition,
-    /// defaults to relaxed.
+    /// The start policy of this container, codifing the inter-depdencies between containers.
     start_policy: StartPolicy,
 
-    /// The image that this Composition
-    /// stems from.
+    /// The base image that will be the container we will be starting.
     image: Image,
 
-    /// Named volumes associated with this composition, are in the form of: "(VOLUME_NAME,CONTAINER_PATH)"
+    /// Named volumes associated with this composition, are in the form of:
+    /// - "(VOLUME_NAME,CONTAINER_PATH)"
     pub(crate) named_volumes: Vec<(String, String)>,
 
-    /// Final form of named volume names, dockertest run_impl is responsible for constructing the
-    /// final names and adding them to this vector.
-    /// The final name will be on the form "VOLUME_NAME-RANDOM_SUFFIX/CONTAINER_PATH".
+    /// Final form of named volume names.
+    ///
+    /// DockerTest is responsible for constructing the final names and adding them to this vector.
+    /// The final name will be on the form `VOLUME_NAME-RANDOM_SUFFIX/CONTAINER_PATH`.
     pub(crate) final_named_volume_names: Vec<String>,
 
-    /// Bind mounts associated with this composition, are in the form of: "HOST_PATH:CONTAINER_PATH"
+    /// Bind mounts associated with this composition, are in the form of:
+    /// - `HOST_PATH:CONTAINER_PATH`
+    ///
     /// NOTE: As bind mounts do not outlive the container they are mounted in they do not need to
     /// be cleaned up.
     bind_mounts: Vec<String>,
@@ -178,25 +180,29 @@ pub struct Composition {
     /// Port mapping (used for Windows-compatibility)
     port: Vec<(String, String)>,
 
-    // Allocates an ephemeral host port for all of a container’s exposed ports.
-    // Port forwarding is useful on MacOS because there is no network connectivity between the Mac system and Docker Desktop VM
+    /// Allocates an ephemeral host port for all of a container’s exposed ports.
+    ///
+    /// Port forwarding is useful on operating systems where there is no network connectivity
+    /// between system and the Docker Desktop VM.
     pub(crate) publish_all_ports: bool,
 
     /// Who is responsible for managing the lifecycle of the container.
-    /// Will only be set if `is_static` is true.
+    ///
+    /// A composition can be marked as static, where the lifecycle of the container outlives
+    /// the individual test.
     management: Option<StaticManagementPolicy>,
 
-    /// Logging options used for all containers.
+    /// Logging options for this specific container.
     pub(crate) log_options: Option<LogOptions>,
 }
 
 impl Composition {
-    /// Creates a `Composition` based on the `Image` repository name provided.
+    /// Creates a [Composition] based on the [Image] repository name provided.
     ///
     /// This will internally create the [Image] based on the provided repository name,
     /// and default the tag to `latest`.
     ///
-    /// This is the shortcut method of constructing a `Composition`.
+    /// This is the shortcut method of constructing a [Composition].
     /// See [with_image](Composition::with_image) to create one with a provided [Image].
     pub fn with_repository<T: ToString>(repository: T) -> Composition {
         let copy = repository.to_string();
@@ -220,10 +226,10 @@ impl Composition {
         }
     }
 
-    /// Creates a `Composition` with the provided `Image`.
+    /// Creates a [Composition] with the provided [Image].
     ///
-    /// This is the long-winded way of defining a `Composition`.
-    /// See [with_repository](Composition::with_repository) to for the shortcut method.
+    /// This is the long-winded way of defining a [Composition].
+    /// See [with_repository](Composition::with_repository) for the shortcut method.
     pub fn with_image(image: Image) -> Composition {
         Composition {
             user_provided_container_name: None,
@@ -245,7 +251,7 @@ impl Composition {
         }
     }
 
-    /// Sets the `StartPolicy` for this `Composition`.
+    /// Sets the [StartPolicy] for this [Composition].
     ///
     /// Defaults to a [relaxed](StartPolicy::Relaxed) policy.
     pub fn with_start_policy(self, start_policy: StartPolicy) -> Composition {
@@ -275,21 +281,26 @@ impl Composition {
         Composition { cmd, ..self }
     }
 
-    /// Adds the exported -> host port mapping.
-    /// If an exported port already exists, it will be overridden.
+    /// Add a host port mapping to the container.
     ///
-    /// NOTE: This method should *ONLY* be used on Windows as its not possible to contact
-    /// containers within the test body using their IP.
-    /// This is strictly only used in the scenario on Windows then you need to contact a container
-    /// within the test body.
+    /// This is useful when the host environment running docker cannot support IP routing
+    /// within the docker network, such that test containers cannot communicate between themselves.
+    /// This escape hatch allows the host to be involved to route traffic.
+    /// This mechanism is not recommended, as concurrent tests utilizing the same host port
+    /// will fail since the port is already in use.
+    /// It is recommended to use [Composition::publish_all_ports].
+    ///
+    /// If an port mapping on the exported port has already been issued on the [Composition],
+    /// it will be overidden.
     pub fn port_map(&mut self, exported: u32, host: u32) -> &mut Composition {
         self.port
             .push((format!("{}/tcp", exported), format!("{}", host)));
         self
     }
 
-    /// Publish all exposed container ports to some ephemeral ports on the host.
-    /// Mapped host ports can be found via `RunningContainer::ports()` method.
+    /// Allocates an ephemeral host port for all of the container's exposed ports.
+    ///
+    /// Mapped host ports can be found via [crate::container::RunningContainer::ports] method.
     pub fn publish_all_ports(&mut self) -> &mut Composition {
         self.publish_all_ports = true;
         self
@@ -446,10 +457,12 @@ impl Composition {
         self
     }
 
+    /// Fetch the assigned [StaticManagementPolicy], if any.
     pub(crate) fn static_management_policy(&self) -> &Option<StaticManagementPolicy> {
         &self.management
     }
 
+    /// Query whether or not a [StaticManagementPolicy] has been assigned to this composition.
     fn is_static(&self) -> bool {
         self.management.is_some()
     }
@@ -636,7 +649,10 @@ impl Composition {
         &self.image
     }
 
-    /// Retrieve a copy of the applicable handle name for this Composition.
+    /// Retrieve a copy of the applicable handle name for this composition.
+    ///
+    /// NOTE: this value will be outdated if [Composition::with_container_name] is invoked
+    /// with a different name.
     pub fn handle(&self) -> String {
         match &self.user_provided_container_name {
             None => self.image.repository().to_string(),

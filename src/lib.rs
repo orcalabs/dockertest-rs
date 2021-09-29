@@ -139,6 +139,8 @@ mod dockertest;
 mod error;
 mod image;
 mod static_container;
+// We only make this public because a function is used in our integration test
+#[doc(hidden)]
 pub mod utils;
 pub mod waitfor;
 

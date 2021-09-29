@@ -13,6 +13,7 @@ use tokio::sync::RwLock;
 use tracing::{event, Level};
 
 // Internal static object to keep track of all static containers.
+//
 // Each test binary will create one of these static container objects, and we rely on the fact that
 // only one test binary is executed at a time.
 // Within a test binary multiple might execute in parallel, but only a single test binary is
@@ -22,46 +23,52 @@ lazy_static! {
     pub(crate) static ref STATIC_CONTAINERS: StaticContainers = StaticContainers::default();
 }
 
-// Encapsulates all static container related logic.
-// Synchronizes the creation and starting of static containers.
-// Callers are still responsible for checking if the container they are starting/creating are
-// static and call the appropriate method.
+/// Encapsulates all static container related logic.
+///
+/// Synchronizes the creation and starting of static containers.
+/// Callers are still responsible for checking if the container they are starting/creating are
+/// static and call the appropriate method.
 pub struct StaticContainers {
     containers: Arc<RwLock<HashMap<String, StaticContainer>>>,
     external: Arc<RwLock<HashMap<String, RunningContainer>>>,
 }
 
-// Represent a single static container.
+/// Represent a single static, managed container.
 struct StaticContainer {
-    // Curren status of the container.
+    /// Current status of the container.
     status: StaticStatus,
-    // Represents a usage counter of the static container, and controls which test performs cleanup
-    // of this container.
-    // This counter is incremented for each test that uses this static container.
-    // On test completion each test will decrement this counter and test which decrements it to 0
-    // will perform the cleanup of the container.
+
+    /// Represents a usage counter of the static container.
+    ///
+    /// This counter is incremented for each test that uses this static container.
+    /// On test completion each test will decrement this counter and test which decrements it to 0
+    /// will perform the cleanup of the container.
     completion_counter: u8,
 }
 
-// Represents the different states of a static container.
+/// Represents the different states of a static container.
 enum StaticStatus {
-    // As tests execute concurrently other tests might have already executed the waitfor
-    // implementation and created a running container.
-    // However, as we do not want to alter our pipeline of Composition -> PendingContainer ->
-    // RunningContainer and start order logistics we store a clone of the pending container here such that tests can return a
-    // clone of it if they are "behind" in the pipeline.
+    /// As tests execute concurrently other tests might have already executed the WaitFor
+    /// implementation and created a running container. However, as we do not want to alter our
+    /// pipeline of Composition -> PendingContainer -> RunningContainer and start order logistics.
+    /// We store a clone of the pending container here such that tests can return a
+    /// clone of it if they are "behind" in the pipeline.
     Running(RunningContainer, PendingContainer),
     Pending(PendingContainer),
-    // If a test sharing static with other tests starts and completes before any of the other
-    // tests cleanup of the container will be performed.
-    // The remaining tests should create the container again during container creation.
-    // This status is only set during container cleanup.
+    /// If a test utilizes the same managed static container with other tests, and completes
+    /// the entire test including cleanup prior to other tests even registering their need for
+    /// the same managed static container, then it will be cleaned up. This is to avoid
+    /// leaking the container on binary termination.
+    ///
+    /// The remaining tests should create the container again during container creation.
+    /// This status is only set during container cleanup.
     Cleaned,
-    // Keeps the id of the failed container for cleanup purposes.
-    // If the container failed to be created the id will be None as we have not container id yet
-    // and no cleanup will be necessary.
-    // If the container failed to be started, the id will be present and we will need
-    // to remove the container.
+    /// Keeps the id of the failed container for cleanup purposes.
+    ///
+    /// If the container failed to be created the id will be None as we have not container id yet
+    /// and no cleanup will be necessary.
+    /// If the container failed to be started, the id will be present and we will need
+    /// to remove the container.
     Failed(DockerTestError, Option<String>),
 }
 
@@ -77,8 +84,8 @@ impl StaticStatus {
 }
 
 impl StaticContainers {
-    // We assume that all tests using a static container invokes this method instead of creating
-    // the PendingContainer directly.
+    /// It is the responsibility of the Composition to invoke this method for creating
+    /// a static version of it, in order to obtain a PendingContainer.
     pub async fn create(
         &self,
         composition: Composition,
@@ -246,10 +253,13 @@ impl StaticContainers {
         }
     }
 
-    // We assume that all tests using a static container invokes this method instead of starting
-    // ther container directly.
-    // This method is responsible for setting the container id field of the Failed enum variant
-    // incase it fails to start the container.
+    /// Start the PendingContainer representing a static container.
+    ///
+    /// It is the responsibility of the test runner to use this interface to
+    /// obtain a static a RunningContainer from a PendingContainer that is a managed.
+    ///
+    /// This method is responsible for setting the container id field of the Failed enum variant
+    /// incase it fails to start the container.
     pub async fn start(
         &self,
         container: &PendingContainer,
@@ -293,7 +303,9 @@ impl StaticContainers {
         }
     }
 
-    // Disconnects all static containers from the given network.
+    /// Disconnects all static containers from the given network.
+    ///
+    /// If the network is external, we do not disconnect the external containers.
     async fn disconnect_static_containers_from_network(
         &self,
         client: &Docker,
