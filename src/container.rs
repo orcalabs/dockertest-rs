@@ -17,7 +17,12 @@ use futures::StreamExt;
 use serde::Serialize;
 use tracing::info;
 
-use std::{collections::HashMap, convert::TryFrom, net::Ipv4Addr, str::FromStr};
+use std::{
+    collections::HashMap,
+    convert::TryFrom,
+    net::{IpAddr, Ipv4Addr},
+    str::FromStr,
+};
 
 /// Represent a docker container object in a pending phase between
 /// it being created on the daemon, but may not be running.
@@ -321,11 +326,8 @@ impl TryFrom<PortMap> for HostPortMappings {
                     .map_err(|e| HostPortMappingError::Conversion(e.to_string()))?;
 
                 for binding in port_bindings {
-                    match from_port_binding(binding)? {
-                        Some((ip, port)) => {
-                            map.entry(host_port).or_insert((ip, port));
-                        }
-                        None => return Err(HostPortMappingError::NoMapping),
+                    if let Some((ip, port)) = from_port_binding(binding)? {
+                        map.entry(host_port).or_insert((ip, port));
                     }
                 }
             }
@@ -338,14 +340,22 @@ impl TryFrom<PortMap> for HostPortMappings {
 fn from_port_binding(ports: PortBinding) -> Result<Option<(Ipv4Addr, u32)>, HostPortMappingError> {
     match (ports.host_ip, ports.host_port) {
         (Some(ip), Some(port)) => {
-            let parsed_ip = Ipv4Addr::from_str(&ip)
+            // When 'publish_all_ports' is used 2 port bindings are made for each port, one for
+            // ipv4 and one for ipv6.
+            // We only want to return a single address/port pair in our API so we skip all ipv6
+            // pairs.
+            let ip = IpAddr::from_str(&ip)
                 .map_err(|e| HostPortMappingError::Conversion(e.to_string()))?;
-            let parsed_port = u32::from_str(&port)
-                .map_err(|e| HostPortMappingError::Conversion(e.to_string()))?;
-
-            Ok(Some((parsed_ip, parsed_port)))
+            match ip {
+                IpAddr::V4(ipv4) => {
+                    let parsed_port = u32::from_str(&port)
+                        .map_err(|e| HostPortMappingError::Conversion(e.to_string()))?;
+                    Ok(Some((ipv4, parsed_port)))
+                }
+                IpAddr::V6(_) => Ok(None),
+            }
         }
-        _ => Ok(None),
+        _ => Err(HostPortMappingError::NoMapping),
     }
 }
 
