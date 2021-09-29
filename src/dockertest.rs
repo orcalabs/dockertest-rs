@@ -1,7 +1,7 @@
 //! The main library structures.
 
 use crate::composition::{LogPolicy, LogSource};
-use crate::container::{CleanupContainer, PendingContainer, RunningContainer};
+use crate::container::{CleanupContainer, HostPortMappings, PendingContainer, RunningContainer};
 use crate::image::Source;
 use crate::{Composition, DockerTestError, StartPolicy};
 
@@ -17,6 +17,7 @@ use rand::{self, Rng};
 use std::any::Any;
 use std::clone::Clone;
 use std::collections::{HashMap, HashSet};
+use std::convert::TryFrom;
 use std::panic;
 use tokio::{runtime::Runtime, task::JoinHandle};
 use tracing::{event, span, Level};
@@ -415,9 +416,15 @@ impl DockerTest {
                             "container ports from inspect: {:?}",
                             ports.clone()
                         );
-                        ports
+                        match HostPortMappings::try_from(ports) {
+                            Ok(h) => h,
+                            Err(e) => {
+                                self.teardown(cleanup_containers, true).await;
+                                return Err(DockerTestError::HostPort(e.to_string()));
+                            }
+                        }
                     } else {
-                        HashMap::new()
+                        HostPortMappings::default()
                     }
                 }
                 Err(e) => {

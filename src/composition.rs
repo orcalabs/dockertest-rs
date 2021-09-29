@@ -300,7 +300,7 @@ impl Composition {
 
     /// Allocates an ephemeral host port for all of the container's exposed ports.
     ///
-    /// Mapped host ports can be found via [crate::container::RunningContainer::ports] method.
+    /// Mapped host ports can be found via [crate::container::RunningContainer::host_port] method.
     pub fn publish_all_ports(&mut self) -> &mut Composition {
         self.publish_all_ports = true;
         self
