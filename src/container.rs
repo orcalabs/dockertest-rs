@@ -317,7 +317,8 @@ impl TryFrom<PortMap> for HostPortMappings {
                     return Err(HostPortMappingError::HostPortKey(host_port_string));
                 }
 
-                let host_port = u32::from_str(split[0]).unwrap();
+                let host_port = u32::from_str(split[0])
+                    .map_err(|e| HostPortMappingError::Conversion(e.to_string()))?;
 
                 for binding in port_bindings {
                     match from_port_binding(binding)? {
