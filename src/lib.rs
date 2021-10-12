@@ -138,6 +138,7 @@ mod container;
 mod dockertest;
 mod error;
 mod image;
+mod runner;
 mod static_container;
 // We only make this public because a function is used in our integration test
 #[doc(hidden)]
@@ -150,6 +151,7 @@ mod test_utils;
 
 pub use crate::composition::{Composition, StartPolicy, StaticManagementPolicy};
 pub use crate::container::{PendingContainer, RunningContainer};
-pub use crate::dockertest::{DockerOperations, DockerTest};
+pub use crate::dockertest::DockerTest;
 pub use crate::error::DockerTestError;
 pub use crate::image::{Image, PullPolicy, Remote, Source};
+pub use crate::runner::DockerOperations;
