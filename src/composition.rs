@@ -99,6 +99,16 @@ pub struct LogOptions {
     pub source: LogSource,
 }
 
+impl Default for LogOptions {
+    fn default() -> LogOptions {
+        LogOptions {
+            action: LogAction::Forward,
+            policy: LogPolicy::OnError,
+            source: LogSource::StdErr,
+        }
+    }
+}
+
 /// Represents an instance of an [Image].
 ///
 /// The [Composition] is used to specialize an image whose name, version, tag and source is known,
@@ -222,7 +232,7 @@ impl Composition {
             port: Vec::new(),
             publish_all_ports: false,
             management: None,
-            log_options: None,
+            log_options: Some(LogOptions::default()),
         }
     }
 
@@ -247,7 +257,7 @@ impl Composition {
             port: Vec::new(),
             publish_all_ports: false,
             management: None,
-            log_options: None,
+            log_options: Some(LogOptions::default()),
         }
     }
 
@@ -352,9 +362,11 @@ impl Composition {
     }
 
     /// Sets log options for this `Composition`.
-    pub fn with_log_options(self, log_options: LogOptions) -> Composition {
+    /// By default `LogAction::Forward`, `LogPolicy::OnError`, and `LogSource::StdErr` is enabled.
+    /// To clear default log option pass `None` or specify your own log options.
+    pub fn with_log_options(self, log_options: Option<LogOptions>) -> Composition {
         Composition {
-            log_options: Some(log_options),
+            log_options,
             ..self
         }
     }
