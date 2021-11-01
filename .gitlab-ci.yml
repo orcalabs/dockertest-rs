@@ -10,7 +10,7 @@ rust_precheck:
   image: registry.gitlab.com/orcalabs/devops/rust-stable-runner:latest
   stage: build
   tags:
-    - rust:latest
+    - dockertest
   only:
     - merge_requests
   script:
@@ -22,7 +22,7 @@ test_dockertest:
   image: registry.gitlab.com/orcalabs/devops/rust-stable-runner:latest
   stage: test
   tags:
-    - rust:latest
+    - dockertest
   only:
     - merge_requests
   script:
