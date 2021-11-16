@@ -2,6 +2,7 @@
 
 use crate::composition::{LogPolicy, LogSource};
 use crate::container::{CleanupContainer, HostPortMappings, PendingContainer, RunningContainer};
+use crate::utils::generate_random_string;
 use crate::{static_container::STATIC_CONTAINERS, utils::connect_with_local_or_tls_defaults};
 use crate::{Composition, DockerTest, DockerTestError, StartPolicy};
 
@@ -12,7 +13,6 @@ use bollard::{
     Docker,
 };
 use futures::future::{join_all, Future};
-use rand::{self, Rng};
 use std::any::Any;
 use std::clone::Clone;
 use std::collections::{HashMap, HashSet};
@@ -1042,15 +1042,4 @@ async fn wait_for_relaxed_containers(
         None => Ok(running_relaxed),
         Some(e) => Err(e),
     }
-}
-
-fn generate_random_string(len: i32) -> String {
-    let mut random_string = String::new();
-    let mut rng = rand::thread_rng();
-    for _i in 0..len {
-        let letter: char = rng.gen_range(b'a', b'z') as char;
-        random_string.push(letter);
-    }
-
-    random_string
 }

@@ -1,6 +1,11 @@
-//! Provides a helper to connect to a Docker daemon
+//! Provides helper utilities used by both our crate and our integration tests.
+//! Functions publically exposed here are part of a doc(hidden) module.
+
 use crate::error::DockerTestError;
+
 use bollard::Docker;
+use rand::{self, Rng};
+
 #[cfg(feature = "tls")]
 use std::env;
 
@@ -30,4 +35,16 @@ pub fn connect_with_local_or_tls_defaults() -> Result<Docker, DockerTestError> {
     #[cfg(not(feature = "tls"))]
     Docker::connect_with_local_defaults()
         .map_err(|e| DockerTestError::Daemon(format!("connection with locals defaults: {:?}", e)))
+}
+
+#[doc(hidden)]
+pub fn generate_random_string(len: i32) -> String {
+    let mut random_string = String::new();
+    let mut rng = rand::thread_rng();
+    for _i in 0..len {
+        let letter: char = rng.gen_range(b'a', b'z') as char;
+        random_string.push(letter);
+    }
+
+    random_string
 }
