@@ -9,9 +9,22 @@ pub use pending::PendingContainer;
 pub(crate) use running::HostPortMappings;
 pub use running::RunningContainer;
 
+/// Represents an exisiting static external container.
+///
+// FIXME: does this need to be public?
+#[derive(Clone)]
+pub struct StaticExternalContainer {
+    pub handle: String,
+}
+
+pub enum CreatedContainer {
+    StaticExternal(StaticExternalContainer),
+    Pending(PendingContainer),
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::container::{PendingContainer, RunningContainer};
+    use crate::container::{CreatedContainer, PendingContainer, RunningContainer};
     use crate::image::Source;
     use crate::utils::connect_with_local_or_tls_defaults;
     use crate::waitfor::{async_trait, WaitFor};
@@ -60,11 +73,14 @@ mod tests {
             .expect("failed to pull image");
 
         // Create and start the container
-        let container = composition
+        let pending = composition
             .create(&client, None, false)
             .await
-            .expect("failed to create container")
-            .unwrap();
+            .expect("failed to create container");
+        let container = match pending {
+            CreatedContainer::Pending(c) => c,
+            _ => panic!("expected pending created container"),
+        };
         container.start().await.expect("failed to start container");
 
         let was_invoked = wrapped_wait_for

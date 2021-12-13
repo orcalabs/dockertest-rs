@@ -1,6 +1,6 @@
 //! Represent a concrete instance of an Image, before it is ran as a Container.
 
-use crate::container::PendingContainer;
+use crate::container::{CreatedContainer, PendingContainer};
 use crate::image::Image;
 use crate::static_container::STATIC_CONTAINERS;
 use crate::waitfor::{NoWait, WaitFor};
@@ -502,23 +502,21 @@ impl Composition {
         }
     }
 
-    // Consumes the Composition, creates the container and returns the Container object if it
-    // was succesfully created.
-    // Only static containers with `StaticManagementPolicy::External` will return None, as we never
-    // want to create a `PendingContainer` representation for static containers which are managed
-    // by the user.
+    /// TODO: Refactor what is returned when creating the static container.
     pub(crate) async fn create(
         self,
         client: &Docker,
         network: Option<&str>,
         is_external_network: bool,
-    ) -> Result<Option<PendingContainer>, DockerTestError> {
+    ) -> Result<CreatedContainer, DockerTestError> {
         if self.is_static() {
             STATIC_CONTAINERS
                 .create(self, client, network, is_external_network)
                 .await
         } else {
-            self.create_inner(client, network).await.map(Some)
+            self.create_inner(client, network)
+                .await
+                .map(CreatedContainer::Pending)
         }
     }
 
