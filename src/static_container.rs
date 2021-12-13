@@ -48,6 +48,8 @@ struct StaticContainer {
 }
 
 /// Represents the different states of a static container.
+// NOTE: allowing this clippy warning in pending of refactor
+#[allow(clippy::large_enum_variant)]
 enum StaticStatus {
     /// As tests execute concurrently other tests might have already executed the WaitFor
     /// implementation and created a running container. However, as we do not want to alter our

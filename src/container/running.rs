@@ -38,7 +38,7 @@ pub struct RunningContainer {
     pub(crate) log_options: Option<LogOptions>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub(crate) struct HostPortMappings {
     mappings: HashMap<u32, (Ipv4Addr, u32)>,
 }
@@ -51,14 +51,6 @@ pub(crate) enum HostPortMappingError {
     NoMapping,
     #[error("failed to convert host ip/port to appropriate types: {0}")]
     Conversion(String),
-}
-
-impl Default for HostPortMappings {
-    fn default() -> HostPortMappings {
-        HostPortMappings {
-            mappings: HashMap::new(),
-        }
-    }
 }
 
 impl TryFrom<PortMap> for HostPortMappings {
