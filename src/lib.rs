@@ -149,7 +149,9 @@ pub mod waitfor;
 #[cfg(test)]
 mod test_utils;
 
-pub use crate::composition::{Composition, StartPolicy, StaticManagementPolicy};
+pub use crate::composition::{
+    Composition, LogAction, LogOptions, LogPolicy, LogSource, StartPolicy, StaticManagementPolicy,
+};
 pub use crate::container::{PendingContainer, RunningContainer};
 pub use crate::dockertest::DockerTest;
 pub use crate::error::DockerTestError;
