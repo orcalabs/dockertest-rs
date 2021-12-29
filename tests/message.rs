@@ -1,6 +1,6 @@
 use dockertest::waitfor::MessageSource;
 use dockertest::{Composition, DockerTest};
-use test_env_log::test;
+use test_log::test;
 
 #[test]
 fn test_assert_message_in_test_body_succeeds() {

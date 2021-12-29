@@ -9,7 +9,7 @@ use dockertest::{
 
 use bollard::container::InspectContainerOptions;
 use futures::future::TryFutureExt;
-use test_env_log::test;
+use test_log::test;
 
 #[derive(Clone)]
 struct FailWait {}

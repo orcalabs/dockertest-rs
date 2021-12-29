@@ -81,12 +81,12 @@
 //! [dev-dependencies]
 //! tracing = "0.1.13"
 //! tracing-subscriber = "0.2"
-//! test-env-log = { version = "0.2", default-features = false, features = ["trace"] }
+//! test-log = { version = "0.2", default-features = false, features = ["trace"] }
 //! ```
 //!
 //! `Top of test file`
 //! ```
-//! use test_env_log::test;
+//! use test_log::test;
 //! ```
 //!
 //! # Example

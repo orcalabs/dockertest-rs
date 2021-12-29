@@ -2,7 +2,7 @@ use std::net::Ipv4Addr;
 
 use dockertest::waitfor::RunningWait;
 use dockertest::{Composition, DockerTest, Image, PullPolicy, Source};
-use test_env_log::test;
+use test_log::test;
 
 #[test]
 fn test_run_with_no_failure() {
