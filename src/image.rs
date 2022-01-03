@@ -36,7 +36,6 @@ pub enum Source {
 /// NOTE: This is currently not properly supported.
 #[derive(Clone, Debug)]
 pub struct Remote {
-    address: String,
     pull_policy: PullPolicy,
 }
 
@@ -288,11 +287,8 @@ fn is_valid_pull_policy(exists: bool, pull_policy: &PullPolicy) -> Result<bool, 
 
 impl Remote {
     /// Creates a new remote with the given address and `PullPolicy`.
-    pub fn new<T: ToString>(address: &T, pull_policy: PullPolicy) -> Remote {
-        Remote {
-            address: address.to_string(),
-            pull_policy,
-        }
+    pub fn new(pull_policy: PullPolicy) -> Remote {
+        Remote { pull_policy }
     }
 
     /// Returns the `PullPolicy associated with  this `Remote`.
@@ -410,7 +406,7 @@ mod tests {
     #[tokio::test]
     async fn test_pull_fails_with_invalid_remote_source() {
         let client = connect_with_local_or_tls_defaults().unwrap();
-        let remote = Remote::new(&"example.com".to_string(), PullPolicy::Always);
+        let remote = Remote::new(PullPolicy::Always);
         let source = Source::Remote(remote);
 
         let tag = "this_is_not_a_tag";
@@ -531,19 +527,14 @@ mod tests {
     // Tests that we can new up a remote with correct variables
     #[test]
     fn test_new_remote() {
-        let address = "this_is_a_remote_registry".to_string();
         let pull_policy = PullPolicy::Always;
-        let remote = Remote::new(&address, pull_policy);
+        let remote = Remote::new(pull_policy);
 
         let equal = match remote.pull_policy {
             PullPolicy::Always => true,
             _ => false,
         };
 
-        assert_eq!(
-            address, remote.address,
-            "remote was created with incorrect address"
-        );
         assert!(equal, "remote was created with incorrect pull policy");
 
         // Assert that the getter returns the correct value
@@ -660,19 +651,15 @@ mod tests {
             "image id should not be set before we pull the image"
         );
 
-        let addr = "this_is_an_address".to_string();
-        let remote = Remote::new(&addr, PullPolicy::Always);
+        let remote = Remote::new(PullPolicy::Always);
         let image = image.source(Source::Remote(remote));
 
         let equal = match &image.source {
             Some(r) => match r {
-                Source::Remote(r) => {
-                    assert_eq!(r.address, addr, "wrong address set in remote after change");
-                    match r.pull_policy {
-                        PullPolicy::Always => true,
-                        _ => false,
-                    }
-                }
+                Source::Remote(r) => match r.pull_policy {
+                    PullPolicy::Always => true,
+                    _ => false,
+                },
                 _ => false,
             },
             None => false,
@@ -708,10 +695,7 @@ mod tests {
             .source(Source::DockerHub(PullPolicy::Always));
 
         // Deinve a custom Remove registry that is invalid.
-        let invalid_source = Source::Remote(Remote::new(
-            &"this_is_not_a_registry".to_string(),
-            PullPolicy::Always,
-        ));
+        let invalid_source = Source::Remote(Remote::new(PullPolicy::Always));
 
         // Cleanup to force pull operation
         test_utils::delete_image_if_present(&client, *repository, tag)

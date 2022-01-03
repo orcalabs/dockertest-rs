@@ -1,6 +1,6 @@
 use dockertest::waitfor::{MessageSource, MessageWait};
 use dockertest::{Composition, DockerTest, StartPolicy};
-use test_env_log::test;
+use test_log::test;
 
 #[test]
 fn test_inject_container_name_ip_through_env_communication() {

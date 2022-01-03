@@ -61,7 +61,10 @@ pub enum LogAction {
     /// Forward all outputs to their respective output sources of the dockertest process.
     Forward,
     /// Forward [LogSource] outputs to a specified file.
-    ForwardToFile { path: String },
+    ForwardToFile {
+        /// The filepath to output to.
+        path: String,
+    },
     /// Forward [LogSource] outputs to stdout of the dockertest process.
     ForwardToStdOut,
     /// Forward [LogSource] outputs to stderr of the dockertest process.
