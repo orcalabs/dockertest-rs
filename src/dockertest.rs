@@ -160,7 +160,7 @@ fn process_run(result: Result<(), DockerTestError>) {
 
 #[cfg(test)]
 mod tests {
-    use crate::{DockerTest, PullPolicy, Source};
+    use crate::{DockerTest, Source};
 
     // The default DockerTest constructor produces a valid instance with the correct values set
     #[test]
@@ -201,13 +201,10 @@ mod tests {
     // The `with_default_source` builder method sets the default_source_correctly
     #[test]
     fn test_with_default_source() {
-        let test = DockerTest::new().with_default_source(Source::DockerHub(PullPolicy::Always));
+        let test = DockerTest::new().with_default_source(Source::DockerHub);
 
         let equal = match test.default_source {
-            Source::DockerHub(p) => match p {
-                PullPolicy::Always => true,
-                _ => false,
-            },
+            Source::DockerHub => true,
             _ => false,
         };
 

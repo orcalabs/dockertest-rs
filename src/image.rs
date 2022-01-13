@@ -23,6 +23,7 @@ pub struct Image {
     repository: String,
     tag: String,
     source: Option<Source>,
+    pull_policy: PullPolicy,
     id: Rc<RwLock<String>>,
 }
 
@@ -32,7 +33,7 @@ pub enum Source {
     /// Use the local docker daemon storage.
     Local,
     /// Retrieve from hub.docker.com, the official registry.
-    DockerHub(PullPolicy),
+    DockerHub,
     /// Provide the domain and credentials of the Docker Registry to authenticate with.
     RegistryWithCredentials(RegistryCredentials),
     /// Use the existing credentials `docker login` credentials active for the current user,
@@ -45,14 +46,12 @@ pub enum Source {
     /// Please note that the protocol portion of the address is not supplied. E.g.,
     /// * `ghcr.io`
     /// * `myregistry.azurecr.io`
-    RegistryWithDockerLogin(PullPolicy, String),
+    RegistryWithDockerLogin(String),
 }
 
 /// Represents credentials to a custom remote Docker Registry.
 #[derive(Clone, Debug)]
 pub struct RegistryCredentials {
-    /// Which pull policy should pulling this image have?
-    pub pull_policy: PullPolicy,
     /// The domain (without the protocol) of the registry.
     pub address: String,
     /// Username of the credentials against the registry.
@@ -73,7 +72,7 @@ pub enum PullPolicy {
 }
 
 impl Image {
-    /// Creates an `Image` with the given `repository`.
+    /// Creates an `Image` with the given repository.
     ///
     /// The default tag is `latest` and its source is `Source::Local`.
     pub fn with_repository<T: ToString>(repository: T) -> Image {
@@ -81,6 +80,7 @@ impl Image {
             repository: repository.to_string(),
             tag: "latest".to_string(),
             source: None,
+            pull_policy: PullPolicy::IfNotPresent,
             id: Rc::new(RwLock::new("".to_string())),
         }
     }
@@ -95,12 +95,22 @@ impl Image {
         }
     }
 
-    /// Set the `Source` for this `Image`.
+    /// Set the [Source] for this `Image`.
     ///
-    /// If left unconfigured, it will default to `Source::Local`.
+    /// If left unconfigured, it will default to [Source::Local].
     pub fn source(self, source: Source) -> Image {
         Image {
             source: Some(source),
+            ..self
+        }
+    }
+
+    /// The the [PullPolicy] of this `Image`.
+    ///
+    /// If left unconfigured, it will default to [PullPolicy::IfNotPresent].
+    pub fn pull_policy(self, policy: PullPolicy) -> Image {
+        Image {
+            pull_policy: policy,
             ..self
         }
     }
@@ -264,8 +274,8 @@ impl Image {
     /// exists on the local docker daemon.
     fn should_pull(&self, exists: bool, source: &Source) -> Result<bool, DockerTestError> {
         match source {
-            Source::RegistryWithCredentials(r) => {
-                let valid = is_valid_pull_policy(exists, r.pull_policy()).map_err(|e| {
+            Source::RegistryWithCredentials(_) => {
+                let valid = is_valid_pull_policy(exists, &self.pull_policy).map_err(|e| {
                     DockerTestError::Pull {
                         repository: self.repository.to_string(),
                         tag: self.tag.to_string(),
@@ -274,19 +284,23 @@ impl Image {
                 })?;
                 Ok(valid)
             }
-            Source::RegistryWithDockerLogin(p, _) => {
-                let valid = is_valid_pull_policy(exists, p).map_err(|e| DockerTestError::Pull {
-                    repository: self.repository.to_string(),
-                    tag: self.tag.to_string(),
-                    error: e,
+            Source::RegistryWithDockerLogin(_) => {
+                let valid = is_valid_pull_policy(exists, &self.pull_policy).map_err(|e| {
+                    DockerTestError::Pull {
+                        repository: self.repository.to_string(),
+                        tag: self.tag.to_string(),
+                        error: e,
+                    }
                 })?;
                 Ok(valid)
             }
-            Source::DockerHub(p) => {
-                let valid = is_valid_pull_policy(exists, p).map_err(|e| DockerTestError::Pull {
-                    repository: self.repository.to_string(),
-                    tag: self.tag.to_string(),
-                    error: e,
+            Source::DockerHub => {
+                let valid = is_valid_pull_policy(exists, &self.pull_policy).map_err(|e| {
+                    DockerTestError::Pull {
+                        repository: self.repository.to_string(),
+                        tag: self.tag.to_string(),
+                        error: e,
+                    }
                 })?;
                 Ok(valid)
             }
@@ -297,7 +311,8 @@ impl Image {
                     Err(DockerTestError::Pull {
                         repository: self.repository.to_string(),
                         tag: self.tag.to_string(),
-                        error: "image source was set to local, but the provided image does not exists on the local host".to_string(),
+                        error: "image does not exist locally and image source is set to local"
+                            .to_string(),
                     })
                 }
             }
@@ -307,7 +322,7 @@ impl Image {
     /// Resolve the auth credentials based on the provided [Source].
     fn resolve_auth(&self, source: &Source) -> Result<Option<DockerCredentials>, DockerTestError> {
         let potential = match source {
-            Source::RegistryWithDockerLogin(_, address) => {
+            Source::RegistryWithDockerLogin(address) => {
                 let credentials =
                     resolve_docker_login_auth(address).map_err(|e| DockerTestError::Pull {
                         repository: self.repository.to_string(),
@@ -327,7 +342,7 @@ impl Image {
 
                 Some(credentials)
             }
-            Source::Local | Source::DockerHub(_) => None,
+            Source::Local | Source::DockerHub => None,
         };
 
         Ok(potential)
@@ -340,7 +355,7 @@ fn is_valid_pull_policy(exists: bool, pull_policy: &PullPolicy) -> Result<bool, 
             if exists {
                 Ok(false)
             } else {
-                Err("image source was set to remote and pull_policy to never, but the provided image does not exists on the local host".to_string())
+                Err("image does not exist locally and pull policy is set to never".to_string())
             }
         }
 
@@ -436,24 +451,13 @@ fn resolve_docker_login_auth(address: &str) -> Result<DockerCredentials, String>
 }
 
 impl RegistryCredentials {
-    /// Creates a new remote with the given address and `PullPolicy`.
-    pub fn new(
-        pull_policy: PullPolicy,
-        address: String,
-        username: String,
-        password: Secret<String>,
-    ) -> RegistryCredentials {
+    /// Creates a new [RegistryCredentials]
+    pub fn new(address: String, username: String, password: Secret<String>) -> RegistryCredentials {
         RegistryCredentials {
-            pull_policy,
             address,
             username,
             password,
         }
-    }
-
-    /// Returns the `PullPolicy associated with  this `RegistryCredentials`.
-    pub(crate) fn pull_policy(&self) -> &PullPolicy {
-        &self.pull_policy
     }
 }
 
@@ -531,7 +535,7 @@ mod tests {
         let client = connect_with_local_or_tls_defaults().unwrap();
         let repository = CONCURRENT_IMAGE_ACCESS_QUEUE.access().await;
         let tag = "latest";
-        let source = Source::DockerHub(PullPolicy::Always);
+        let source = Source::DockerHub;
         let image = Image::with_repository(*repository).tag(&tag);
 
         let result = test_utils::delete_image_if_present(&client, *repository, tag).await;
@@ -569,7 +573,6 @@ mod tests {
     async fn test_pull_fails_with_invalid_remote_source() {
         let client = connect_with_local_or_tls_defaults().unwrap();
         let remote = RegistryCredentials::new(
-            PullPolicy::Always,
             "X".to_string(),
             "Y".to_string(),
             Secret::new("Z".to_string()),
@@ -625,7 +628,7 @@ mod tests {
         // Ensure image is present first
         // If it is already present, we skip the download time.
         image
-            .pull(&client, &Source::DockerHub(PullPolicy::Always))
+            .pull(&client, &Source::DockerHub)
             .await
             .expect("failed to pull image");
 
@@ -671,9 +674,7 @@ mod tests {
             .await
             .expect("failed to delete image");
 
-        let result = image
-            .pull(&client, &Source::DockerHub(PullPolicy::Always))
-            .await;
+        let result = image.pull(&client, &Source::DockerHub).await;
         assert!(
             result.is_ok(),
             "failed to pull image: {}",
@@ -689,32 +690,6 @@ mod tests {
             }
             Err(e) => panic!("failed to check image existence: {}", e),
         }
-    }
-
-    // Tests that we can new up a remote with correct variables
-    #[test]
-    fn test_new_remote() {
-        let remote = RegistryCredentials::new(
-            PullPolicy::Always,
-            "X".to_string(),
-            "Y".to_string(),
-            Secret::new("Z".to_string()),
-        );
-
-        let equal = match remote.pull_policy {
-            PullPolicy::Always => true,
-            _ => false,
-        };
-
-        assert!(equal, "remote was created with incorrect pull policy");
-
-        // Assert that the getter returns the correct value
-        let equal = match remote.pull_policy() {
-            PullPolicy::Always => true,
-            _ => false,
-        };
-
-        assert!(equal, "remote get method returned incorrect value");
     }
 
     // Tests the behaviour of the should_pull method with the
@@ -747,9 +722,9 @@ mod tests {
     // source set to remote and pull_policy set to always
     #[test]
     fn test_should_pull_remote_source_always() {
-        let source = Source::DockerHub(PullPolicy::Always);
+        let source = Source::DockerHub;
         let repository = "hello-world".to_string();
-        let image = Image::with_repository(&repository);
+        let image = Image::with_repository(&repository).pull_policy(PullPolicy::Always);
 
         let exists_locally = false;
         let res = image.should_pull(exists_locally, &source).expect("should not return an error when source is remote, pull_policy is always, and image does not exist locally");
@@ -764,9 +739,9 @@ mod tests {
     // source set to remote and pull_policy set to never
     #[test]
     fn test_should_pull_remote_source_never() {
-        let source = Source::DockerHub(PullPolicy::Never);
+        let source = Source::DockerHub;
         let repository = "hello-world".to_string();
-        let image = Image::with_repository(&repository);
+        let image = Image::with_repository(&repository).pull_policy(PullPolicy::Never);
 
         let exists_locally = false;
         let res = image.should_pull(exists_locally, &source);
@@ -783,7 +758,7 @@ mod tests {
     // source set to remote and pull_policy set to if_not_present
     #[test]
     fn test_should_pull_remote_source_if_not_present() {
-        let source = Source::DockerHub(PullPolicy::IfNotPresent);
+        let source = Source::DockerHub;
         let repository = "hello-world".to_string();
         let image = Image::with_repository(&repository);
 
@@ -823,28 +798,11 @@ mod tests {
         );
 
         let remote = RegistryCredentials::new(
-            PullPolicy::Always,
             "X".to_string(),
             "Y".to_string(),
             Secret::new("Z".to_string()),
         );
         let image = image.source(Source::RegistryWithCredentials(remote));
-
-        let equal = match &image.source {
-            Some(r) => match r {
-                Source::RegistryWithCredentials(r) => match r.pull_policy {
-                    PullPolicy::Always => true,
-                    _ => false,
-                },
-                _ => false,
-            },
-            None => false,
-        };
-
-        assert!(
-            equal,
-            "changing source does not change the image object correctly"
-        );
 
         let new_tag = "this_is_a_test_tag";
         let image = image.tag(&new_tag);
@@ -868,11 +826,10 @@ mod tests {
         let image = Image::with_repository(*repository)
             .tag(&tag)
             // Source is overridden to be DockerHub, a valid source.
-            .source(Source::DockerHub(PullPolicy::Always));
+            .source(Source::DockerHub);
 
         // Deinve a custom Remove registry that is invalid.
         let invalid_source = Source::RegistryWithCredentials(RegistryCredentials::new(
-            PullPolicy::Always,
             "X".to_string(),
             "Y".to_string(),
             Secret::new("Z".to_string()),
