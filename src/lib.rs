@@ -136,6 +136,7 @@
 mod composition;
 mod container;
 mod dockertest;
+mod engine;
 mod error;
 mod image;
 mod runner;

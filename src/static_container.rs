@@ -1,17 +1,21 @@
+//! Implemenet static container abstraction.
+
 use crate::{
-    container::HostPortMappings, Composition, DockerTestError, PendingContainer, RunningContainer,
-    StaticManagementPolicy,
+    container::{CreatedContainer, HostPortMappings, StaticExternalContainer},
+    Composition, DockerTestError, PendingContainer, RunningContainer, StaticManagementPolicy,
 };
+
 use bollard::{
     container::{InspectContainerOptions, RemoveContainerOptions},
     network::DisconnectNetworkOptions,
     Docker,
 };
 use lazy_static::lazy_static;
-use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{event, Level};
+
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 // Internal static object to keep track of all static containers.
 //
@@ -95,23 +99,24 @@ impl StaticContainers {
         client: &Docker,
         network: Option<&str>,
         is_external_network: bool,
-    ) -> Result<Option<PendingContainer>, DockerTestError> {
+    ) -> Result<CreatedContainer, DockerTestError> {
         if let Some(policy) = composition.static_management_policy() {
             match policy {
                 StaticManagementPolicy::DockerTest => self
                     .create_static_container(composition, client, network)
                     .await
-                    .map(Some),
+                    .map(CreatedContainer::Pending),
                 StaticManagementPolicy::External => {
-                    self.include_external_container(
-                        composition,
-                        client,
-                        // Do not include network for external container if the network
-                        // is already an existing network, externally managed.
-                        network.filter(|_| !is_external_network),
-                    )
-                    .await?;
-                    Ok(None)
+                    let external = self
+                        .include_external_container(
+                            composition,
+                            client,
+                            // Do not include network for external container if the network
+                            // is already an existing network, externally managed.
+                            network.filter(|_| !is_external_network),
+                        )
+                        .await?;
+                    Ok(CreatedContainer::StaticExternal(external))
                 }
             }
         } else {
@@ -121,6 +126,7 @@ impl StaticContainers {
         }
     }
 
+    #[allow(dead_code)]
     pub async fn external_containers(&self) -> Vec<RunningContainer> {
         let map = self.external.read().await;
 
@@ -132,13 +138,17 @@ impl StaticContainers {
         composition: Composition,
         client: &Docker,
         network: Option<&str>,
-    ) -> Result<(), DockerTestError> {
+    ) -> Result<StaticExternalContainer, DockerTestError> {
         let mut map = self.external.write().await;
 
         if let Some(running) = map.get(&composition.container_name) {
             if let Some(n) = network {
                 self.add_to_network(running.id(), n, client).await?;
             }
+            let external = StaticExternalContainer {
+                handle: running.handle.clone(),
+            };
+            Ok(external)
         } else {
             let details = client
                 .inspect_container(&composition.container_name, None::<InspectContainerOptions>)
@@ -161,15 +171,18 @@ impl StaticContainers {
                     is_static: true,
                     log_options: composition.log_options.clone(),
                 };
+                let external = StaticExternalContainer {
+                    handle: running.handle.clone(),
+                };
                 map.insert(composition.container_name, running);
+
+                Ok(external)
             } else {
-                return Err(DockerTestError::Daemon(
+                Err(DockerTestError::Daemon(
                     "failed to retrieve container id for external container".to_string(),
-                ));
+                ))
             }
         }
-
-        Ok(())
     }
 
     async fn create_static_container(
