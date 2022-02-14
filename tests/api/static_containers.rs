@@ -2,7 +2,7 @@
 
 use dockertest::{
     utils::{connect_with_local_or_tls_defaults, generate_random_string},
-    Composition, DockerTest, Image, PullPolicy, Source, StaticManagementPolicy,
+    Composition, DockerTest, Image, Source, StaticManagementPolicy,
 };
 
 use bollard::container::{Config, CreateContainerOptions, StartContainerOptions};
@@ -19,7 +19,7 @@ lazy_static! {
 
 #[test]
 fn test_static_containers_runs() {
-    let source = Source::DockerHub(PullPolicy::IfNotPresent);
+    let source = Source::DockerHub;
     let mut test = DockerTest::new().with_default_source(source);
 
     let repo = "hello-world".to_string();
@@ -36,7 +36,7 @@ fn test_static_containers_runs() {
 
 #[tokio::test]
 async fn test_external_static_container_handle_resolves_correctly_mixed_with_others() {
-    let source = Source::DockerHub(PullPolicy::IfNotPresent);
+    let source = Source::DockerHub;
     let mut test = DockerTest::new().with_default_source(source);
     let repo = "hello-world";
 
@@ -87,7 +87,7 @@ async fn test_external_static_container_handle_resolves_correctly_mixed_with_oth
 
 #[test]
 fn test_static_containers_references_the_same_container_within_test_binary() {
-    let source = Source::DockerHub(PullPolicy::IfNotPresent);
+    let source = Source::DockerHub;
     let mut test = DockerTest::new().with_default_source(source);
 
     let repo = "hello-world".to_string();
@@ -106,7 +106,7 @@ fn test_static_containers_references_the_same_container_within_test_binary() {
 
 #[test]
 fn test_static_containers_references_the_same_container_within_test_binary_2() {
-    let source = Source::DockerHub(PullPolicy::IfNotPresent);
+    let source = Source::DockerHub;
     let mut test = DockerTest::new().with_default_source(source);
 
     let repo = "hello-world".to_string();

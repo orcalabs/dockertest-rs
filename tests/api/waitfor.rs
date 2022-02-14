@@ -3,8 +3,8 @@ use dockertest::waitfor::{
     async_trait, ExitedWait, MessageSource, MessageWait, RunningWait, WaitFor,
 };
 use dockertest::{
-    Composition, DockerTest, DockerTestError, PendingContainer, PullPolicy, RunningContainer,
-    Source, StartPolicy,
+    Composition, DockerTest, DockerTestError, PendingContainer, RunningContainer, Source,
+    StartPolicy,
 };
 
 use bollard::container::InspectContainerOptions;
@@ -41,7 +41,7 @@ pub async fn is_running(id: String) -> Result<bool, DockerTestError> {
 // Tests that the RunningWait implementation waits for the container to appear as running.
 #[test]
 fn test_running_wait_for() {
-    let source = Source::DockerHub(PullPolicy::IfNotPresent);
+    let source = Source::DockerHub;
     let mut test = DockerTest::new().with_default_source(source);
 
     let repo = "luca3m/sleep";
@@ -67,7 +67,7 @@ fn test_running_wait_for() {
 // Tests that the ExitedWait implementation waits for the container to reach an exit status.
 #[test]
 fn test_exit_wait_for() {
-    let source = Source::DockerHub(PullPolicy::IfNotPresent);
+    let source = Source::DockerHub;
     let mut test = DockerTest::new().with_default_source(source);
 
     let repo = "hello-world";
@@ -94,7 +94,7 @@ fn test_exit_wait_for() {
 #[test]
 #[should_panic]
 fn test_wait_for_relaxed_failed() {
-    let source = Source::DockerHub(PullPolicy::IfNotPresent);
+    let source = Source::DockerHub;
     let mut test = DockerTest::new().with_default_source(source);
 
     let repo = "hello-world";
@@ -113,7 +113,7 @@ fn test_wait_for_relaxed_failed() {
 #[test]
 #[should_panic]
 fn test_wait_for_strict_failed() {
-    let source = Source::DockerHub(PullPolicy::IfNotPresent);
+    let source = Source::DockerHub;
     let mut test = DockerTest::new().with_default_source(source);
 
     let repo = "hello-world";
@@ -131,7 +131,7 @@ fn test_wait_for_strict_failed() {
 // Tests that the MessageWait implementation waits for a message to occur in stream
 #[test]
 fn test_message_wait_for_success_on_stdout() {
-    let source = Source::DockerHub(PullPolicy::IfNotPresent);
+    let source = Source::DockerHub;
     let mut test = DockerTest::new().with_default_source(source);
 
     let repo = "hello-world";
@@ -153,7 +153,7 @@ fn test_message_wait_for_success_on_stdout() {
 #[test]
 #[should_panic]
 fn test_message_wait_for_not_found_on_stream() {
-    let source = Source::DockerHub(PullPolicy::IfNotPresent);
+    let source = Source::DockerHub;
     let mut test = DockerTest::new().with_default_source(source);
 
     let repo = "hello-world";

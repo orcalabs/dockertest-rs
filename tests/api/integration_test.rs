@@ -1,12 +1,12 @@
 use std::net::Ipv4Addr;
 
 use dockertest::waitfor::RunningWait;
-use dockertest::{Composition, DockerTest, Image, PullPolicy, Source};
+use dockertest::{Composition, DockerTest, Image, Source};
 use test_log::test;
 
 #[test]
 fn test_run_with_no_failure() {
-    let source = Source::DockerHub(PullPolicy::IfNotPresent);
+    let source = Source::DockerHub;
     let mut test = DockerTest::new().with_default_source(source);
 
     let repo = "hello-world".to_string();
@@ -23,7 +23,7 @@ fn test_run_with_no_failure() {
 #[test]
 #[should_panic]
 fn test_run_with_failure() {
-    let source = Source::DockerHub(PullPolicy::IfNotPresent);
+    let source = Source::DockerHub;
     let mut test = DockerTest::new().with_default_source(source);
 
     let repo = "hello-world".to_string();
@@ -40,7 +40,7 @@ fn test_run_with_failure() {
 // Tests that we can retrieve the handle of a container by providing the repository as the key
 #[test]
 fn test_resolve_handle_with_repository_as_key() {
-    let source = Source::DockerHub(PullPolicy::IfNotPresent);
+    let source = Source::DockerHub;
     let mut test = DockerTest::new().with_default_source(source);
 
     let repo = "hello-world";
@@ -60,7 +60,7 @@ fn test_resolve_handle_with_repository_as_key() {
     expected = "test body failure `container with handle 'handle_does_not_exist' not found`"
 )]
 fn test_resolve_handle_with_invalid_key() {
-    let source = Source::DockerHub(PullPolicy::IfNotPresent);
+    let source = Source::DockerHub;
     let mut test = DockerTest::new().with_default_source(source);
 
     let repo = "hello-world";
@@ -78,7 +78,7 @@ fn test_resolve_handle_with_invalid_key() {
 // key
 #[test]
 fn test_resolve_handle_with_user_provided_container_name_as_key() {
-    let source = Source::DockerHub(PullPolicy::IfNotPresent);
+    let source = Source::DockerHub;
     let mut test = DockerTest::new().with_default_source(source);
 
     let repo = "hello-world";
@@ -100,7 +100,7 @@ fn test_resolve_handle_with_user_provided_container_name_as_key() {
     expected = "test body failure `handle 'this_is_a_container_name' defined multiple times`"
 )]
 fn test_resolve_handle_with_identical_user_provided_container_name() {
-    let source = Source::DockerHub(PullPolicy::IfNotPresent);
+    let source = Source::DockerHub;
     let mut test = DockerTest::new().with_default_source(source);
 
     let repo = "hello-world";
@@ -121,7 +121,7 @@ fn test_resolve_handle_with_identical_user_provided_container_name() {
 #[test]
 #[should_panic(expected = "test body failure `handle 'hello-world' defined multiple times`")]
 fn test_resolve_handle_with_identical_repository() {
-    let source = Source::DockerHub(PullPolicy::IfNotPresent);
+    let source = Source::DockerHub;
     let mut test = DockerTest::new().with_default_source(source);
 
     let repo = "hello-world";
@@ -139,7 +139,7 @@ fn test_resolve_handle_with_identical_repository() {
 // Tests that the RunningWait implementation waits for the container to appear as running.
 #[test]
 fn test_ip_on_running_container() {
-    let source = Source::DockerHub(PullPolicy::IfNotPresent);
+    let source = Source::DockerHub;
     let mut test = DockerTest::new().with_default_source(source);
 
     let repo = "luca3m/sleep";
@@ -160,7 +160,7 @@ fn test_ip_on_running_container() {
 
 #[test]
 fn test_host_port_returns_correct_host_port_when_using_port_mapping() {
-    let source = Source::DockerHub(PullPolicy::IfNotPresent);
+    let source = Source::DockerHub;
     let mut test = DockerTest::new().with_default_source(source);
 
     let repo = "luca3m/sleep";
@@ -185,7 +185,7 @@ fn test_host_port_returns_correct_host_port_when_using_port_mapping() {
 #[test]
 fn test_host_port_returns_the_last_port_mapping_if_multiple_mappings_applied_to_same_container_port(
 ) {
-    let source = Source::DockerHub(PullPolicy::IfNotPresent);
+    let source = Source::DockerHub;
     let mut test = DockerTest::new().with_default_source(source);
 
     let repo = "luca3m/sleep";
@@ -210,7 +210,7 @@ fn test_host_port_returns_the_last_port_mapping_if_multiple_mappings_applied_to_
 
 #[test]
 fn test_host_port_returns_none_if_the_port_is_not_mapped() {
-    let source = Source::DockerHub(PullPolicy::IfNotPresent);
+    let source = Source::DockerHub;
     let mut test = DockerTest::new().with_default_source(source);
 
     let repo = "hello-world";
@@ -226,7 +226,7 @@ fn test_host_port_returns_none_if_the_port_is_not_mapped() {
 
 #[test]
 fn test_host_port_returns_ports_exposed_by_publish_all() {
-    let source = Source::DockerHub(PullPolicy::IfNotPresent);
+    let source = Source::DockerHub;
     let mut test = DockerTest::new().with_default_source(source);
 
     let repo = "dockertest-rs/expose_ports";

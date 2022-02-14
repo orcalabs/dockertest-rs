@@ -2,12 +2,18 @@
 
 use crate::DockerTestError;
 
-use bollard::{errors::Error, image::CreateImageOptions, models::CreateImageInfo, Docker};
+use bollard::{
+    auth::DockerCredentials, errors::Error, image::CreateImageOptions, models::CreateImageInfo,
+    Docker,
+};
 
 use futures::stream::StreamExt;
+use secrecy::{ExposeSecret, Secret};
+use serde::Deserialize;
+use tracing::{debug, event, trace, Level};
+
 use std::rc::Rc;
 use std::sync::RwLock;
-use tracing::{event, Level};
 
 /// Represents a docker `Image`.
 ///
@@ -17,6 +23,7 @@ pub struct Image {
     repository: String,
     tag: String,
     source: Option<Source>,
+    pull_policy: PullPolicy,
     id: Rc<RwLock<String>>,
 }
 
@@ -26,17 +33,31 @@ pub enum Source {
     /// Use the local docker daemon storage.
     Local,
     /// Retrieve from hub.docker.com, the official registry.
-    DockerHub(PullPolicy),
-    /// Custom registry address, described by the Remote structure.
-    Remote(Remote),
+    DockerHub,
+    /// Provide the domain and credentials of the Docker Registry to authenticate with.
+    RegistryWithCredentials(RegistryCredentials),
+    /// Use the existing credentials `docker login` credentials active for the current user,
+    /// against the desired registry at the provided address.
+    ///
+    /// This is useful when collaborating across developers with access to the same registry,
+    /// as they will be required to login with their own credentials to access the image.
+    /// It may also be useful in a CI circumstance, where you only login once.
+    ///
+    /// Please note that the protocol portion of the address is not supplied. E.g.,
+    /// * `ghcr.io`
+    /// * `myregistry.azurecr.io`
+    RegistryWithDockerLogin(String),
 }
 
-/// Represents a custom remote docker registry.
-///
-/// NOTE: This is currently not properly supported.
+/// Represents credentials to a custom remote Docker Registry.
 #[derive(Clone, Debug)]
-pub struct Remote {
-    pull_policy: PullPolicy,
+pub struct RegistryCredentials {
+    /// The domain (without the protocol) of the registry.
+    pub address: String,
+    /// Username of the credentials against the registry.
+    pub username: String,
+    /// Password of the credentials against the registry.
+    pub password: Secret<String>,
 }
 
 /// The policy for pulling from remote locations.
@@ -51,7 +72,7 @@ pub enum PullPolicy {
 }
 
 impl Image {
-    /// Creates an `Image` with the given `repository`.
+    /// Creates an `Image` with the given repository.
     ///
     /// The default tag is `latest` and its source is `Source::Local`.
     pub fn with_repository<T: ToString>(repository: T) -> Image {
@@ -59,6 +80,7 @@ impl Image {
             repository: repository.to_string(),
             tag: "latest".to_string(),
             source: None,
+            pull_policy: PullPolicy::IfNotPresent,
             id: Rc::new(RwLock::new("".to_string())),
         }
     }
@@ -73,12 +95,22 @@ impl Image {
         }
     }
 
-    /// Set the `Source` for this `Image`.
+    /// Set the [Source] for this `Image`.
     ///
-    /// If left unconfigured, it will default to `Source::Local`.
+    /// If left unconfigured, it will default to [Source::Local].
     pub fn source(self, source: Source) -> Image {
         Image {
             source: Some(source),
+            ..self
+        }
+    }
+
+    /// The the [PullPolicy] of this `Image`.
+    ///
+    /// If left unconfigured, it will default to [PullPolicy::IfNotPresent].
+    pub fn pull_policy(self, policy: PullPolicy) -> Image {
+        Image {
+            pull_policy: policy,
             ..self
         }
     }
@@ -99,43 +131,44 @@ impl Image {
     // Pulls the image from its source with the given docker client.
     // NOTE(lint): uncertain how to structure this otherwise
     #[allow(clippy::match_single_binding)]
-    async fn do_pull(&self, client: &Docker) -> Result<(), DockerTestError> {
+    async fn do_pull(
+        &self,
+        client: &Docker,
+        auth: Option<DockerCredentials>,
+    ) -> Result<(), DockerTestError> {
+        debug!("pulling image: {}:{}", self.repository, self.tag);
         let options = Some(CreateImageOptions::<&str> {
             from_image: &self.repository,
-            repo: &self.repository,
             tag: &self.tag,
             ..Default::default()
         });
 
-        let mut stream = client.create_image(options, None, None);
+        let mut stream = client.create_image(options, None, auth);
         // This stream will intermittently yield a progress update.
         while let Some(result) = stream.next().await {
             match result {
-                Ok(intermitten_result) => {
-                    match intermitten_result {
-                        CreateImageInfo {
-                            id,
-                            error,
-                            status,
-                            progress,
-                            progress_detail,
-                        } => {
-                            if error.is_some() {
-                                event!(Level::ERROR, "pull error {}", error.clone().unwrap(),);
-                            } else {
-                                event!(
-                                    Level::TRACE,
-                                    "pull progress {} {:?} {:?} {:?}",
-                                    status.clone().unwrap(),
-                                    id.clone().unwrap(),
-                                    progress.clone().unwrap(),
-                                    progress_detail.clone().unwrap()
-                                );
-                            }
+                Ok(intermitten_result) => match intermitten_result {
+                    CreateImageInfo {
+                        id,
+                        error,
+                        status,
+                        progress,
+                        progress_detail,
+                    } => {
+                        if error.is_some() {
+                            event!(Level::ERROR, "pull error {}", error.clone().unwrap(),);
+                        } else {
+                            event!(
+                                Level::TRACE,
+                                "pull progress {} {:?} {:?} {:?}",
+                                status.clone().unwrap_or_default(),
+                                id.clone().unwrap_or_default(),
+                                progress.clone().unwrap_or_default(),
+                                progress_detail.clone().unwrap_or_default()
+                            );
                         }
                     }
-                    event!(Level::DEBUG, "successfully pulled image");
-                }
+                },
                 Err(e) => {
                     let msg = match e {
                         Error::DockerResponseNotFoundError { .. } => {
@@ -152,6 +185,13 @@ impl Image {
             }
         }
 
+        // TODO: Verify that we have actually pulled the image.
+        // NOTE: The engine may return a 500 when we unauthorized, but bollard does not give us
+        // this failure. Rather, it just does not provide anthing in the stream.
+        // If a repo is submitted that we do not have access to, and no auth is supplied,
+        // we will no error.
+
+        event!(Level::DEBUG, "successfully pulled image");
         Ok(())
     }
 
@@ -217,9 +257,9 @@ impl Image {
 
         let exists = self.does_image_exist(client).await?;
 
-        let pull = self.should_pull(exists, pull_source)?;
-        if pull {
-            self.do_pull(client).await?;
+        if self.should_pull(exists, pull_source)? {
+            let auth = self.resolve_auth(pull_source)?;
+            self.do_pull(client, auth).await?;
         }
 
         // FIXME: If we encounter a scenario where the image should not be pulled, we need to err
@@ -234,19 +274,35 @@ impl Image {
     /// exists on the local docker daemon.
     fn should_pull(&self, exists: bool, source: &Source) -> Result<bool, DockerTestError> {
         match source {
-            Source::Remote(r) => {
-                is_valid_pull_policy(exists, r.pull_policy()).map_err(|e| DockerTestError::Pull {
-                    repository: self.repository.to_string(),
-                    tag: self.tag.to_string(),
-                    error: e,
-                })
+            Source::RegistryWithCredentials(_) => {
+                let valid = is_valid_pull_policy(exists, &self.pull_policy).map_err(|e| {
+                    DockerTestError::Pull {
+                        repository: self.repository.to_string(),
+                        tag: self.tag.to_string(),
+                        error: e,
+                    }
+                })?;
+                Ok(valid)
             }
-            Source::DockerHub(p) => {
-                is_valid_pull_policy(exists, p).map_err(|e| DockerTestError::Pull {
-                    repository: self.repository.to_string(),
-                    tag: self.tag.to_string(),
-                    error: e,
-                })
+            Source::RegistryWithDockerLogin(_) => {
+                let valid = is_valid_pull_policy(exists, &self.pull_policy).map_err(|e| {
+                    DockerTestError::Pull {
+                        repository: self.repository.to_string(),
+                        tag: self.tag.to_string(),
+                        error: e,
+                    }
+                })?;
+                Ok(valid)
+            }
+            Source::DockerHub => {
+                let valid = is_valid_pull_policy(exists, &self.pull_policy).map_err(|e| {
+                    DockerTestError::Pull {
+                        repository: self.repository.to_string(),
+                        tag: self.tag.to_string(),
+                        error: e,
+                    }
+                })?;
+                Ok(valid)
             }
             Source::Local => {
                 if exists {
@@ -255,11 +311,41 @@ impl Image {
                     Err(DockerTestError::Pull {
                         repository: self.repository.to_string(),
                         tag: self.tag.to_string(),
-                        error: "image source was set to local, but the provided image does not exists on the local host".to_string(),
+                        error: "image does not exist locally and image source is set to local"
+                            .to_string(),
                     })
                 }
             }
         }
+    }
+
+    /// Resolve the auth credentials based on the provided [Source].
+    fn resolve_auth(&self, source: &Source) -> Result<Option<DockerCredentials>, DockerTestError> {
+        let potential = match source {
+            Source::RegistryWithDockerLogin(address) => {
+                let credentials =
+                    resolve_docker_login_auth(address).map_err(|e| DockerTestError::Pull {
+                        repository: self.repository.to_string(),
+                        tag: self.tag.to_string(),
+                        error: e,
+                    })?;
+
+                Some(credentials)
+            }
+            Source::RegistryWithCredentials(r) => {
+                let credentials = DockerCredentials {
+                    username: Some(r.username.clone()),
+                    password: Some(r.password.expose_secret().clone()),
+                    serveraddress: Some(r.address.clone()),
+                    ..Default::default()
+                };
+
+                Some(credentials)
+            }
+            Source::Local | Source::DockerHub => None,
+        };
+
+        Ok(potential)
     }
 }
 
@@ -269,7 +355,7 @@ fn is_valid_pull_policy(exists: bool, pull_policy: &PullPolicy) -> Result<bool, 
             if exists {
                 Ok(false)
             } else {
-                Err("image source was set to remote and pull_policy to never, but the provided image does not exists on the local host".to_string())
+                Err("image does not exist locally and pull policy is set to never".to_string())
             }
         }
 
@@ -285,23 +371,103 @@ fn is_valid_pull_policy(exists: bool, pull_policy: &PullPolicy) -> Result<bool, 
     }
 }
 
-impl Remote {
-    /// Creates a new remote with the given address and `PullPolicy`.
-    pub fn new(pull_policy: PullPolicy) -> Remote {
-        Remote { pull_policy }
-    }
+// TODO: Support existing identitytoken/registrytoken ?
+#[derive(Deserialize)]
+struct DockerAuthConfigEntry {
+    auth: Option<String>,
+}
 
-    /// Returns the `PullPolicy associated with  this `Remote`.
-    pub(crate) fn pull_policy(&self) -> &PullPolicy {
-        &self.pull_policy
+/// Read the local cache of login access credentials
+///
+/// See reference:
+/// https://docs.docker.com/engine/reference/commandline/login/
+fn resolve_docker_login_auth(address: &str) -> Result<DockerCredentials, String> {
+    // TODO: Only read this file once
+    // TODO: Support windows basepath %USERPROFILE%
+    let basepath = std::env::var("HOME").map_err(|e| {
+        debug!("reading env `HOME` failed: {}", e);
+        "unable to resolve basepath to read credentials from `docker login`: reading env `HOME`"
+    })?;
+    let filepath = format!("{}/.docker/config.json", basepath);
+    let error = "credentials for docker registry `{}` not available";
+
+    let file = std::fs::File::open(filepath).map_err(|e| {
+        debug!(
+            "resolving credentials from `docker login` failed to read file: {}",
+            e
+        );
+        error
+    })?;
+    let reader = std::io::BufReader::new(file);
+
+    let mut json: serde_json::Value = serde_json::from_reader(reader).map_err(|e| {
+        debug!("parsing credentials from `docker login` failed: {}", e);
+        error
+    })?;
+
+    // NOTE: There also exists a legacy auth config file format, but we don't care about this.
+    let entry: DockerAuthConfigEntry = serde_json::from_value(json["auths"][address].take())
+        .map_err(|e| {
+            debug!(
+                "no docker registry entry in credentials from `docker login` for `{}`",
+                address
+            );
+            trace!("convertion error: {}", e);
+            error
+        })?;
+
+    // The entry.auth field is base64 encoding of username:password.
+    // The daemon does not support unpacking this itself, it seems.
+    let auth_encoded = entry
+        .auth
+        .ok_or("expecting 'auth' field to be present from `docker login`")?;
+    let auth_decoded = base64::decode(auth_encoded)
+        .map(|s| String::from_utf8_lossy(&s).to_string())
+        .map_err(|e| {
+            debug!(
+                "decoding base64 'auth' field from `docker login` failed: {}",
+                e
+            );
+            error
+        })?;
+    let (username, password) = auth_decoded.split_once(':').ok_or_else(|| {
+        debug!("decoded base64 'auth' field from `docker login` does not contain expected ':' separator");
+        error
+    })?;
+
+    let credentials = DockerCredentials {
+        username: Some(username.to_string()),
+        password: Some(password.to_string()),
+        serveraddress: Some(address.to_string()),
+        ..Default::default()
+    };
+
+    debug!(
+        "resolved `docker login` credentials for docker registry `{}`",
+        address
+    );
+
+    Ok(credentials)
+}
+
+impl RegistryCredentials {
+    /// Creates a new [RegistryCredentials]
+    pub fn new(address: String, username: String, password: Secret<String>) -> RegistryCredentials {
+        RegistryCredentials {
+            address,
+            username,
+            password,
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::image::{Image, PullPolicy, Remote, Source};
+    use crate::image::{Image, PullPolicy, RegistryCredentials, Source};
     use crate::utils::connect_with_local_or_tls_defaults;
     use crate::{test_utils, test_utils::CONCURRENT_IMAGE_ACCESS_QUEUE};
+
+    use secrecy::Secret;
 
     /// Tests that our `Image::pull` method succeeds with a valid `Source::Local` repository image.
     /// After the pull operation has been performed the image id shall be sat on the object.
@@ -369,7 +535,7 @@ mod tests {
         let client = connect_with_local_or_tls_defaults().unwrap();
         let repository = CONCURRENT_IMAGE_ACCESS_QUEUE.access().await;
         let tag = "latest";
-        let source = Source::DockerHub(PullPolicy::Always);
+        let source = Source::DockerHub;
         let image = Image::with_repository(*repository).tag(&tag);
 
         let result = test_utils::delete_image_if_present(&client, *repository, tag).await;
@@ -406,8 +572,12 @@ mod tests {
     #[tokio::test]
     async fn test_pull_fails_with_invalid_remote_source() {
         let client = connect_with_local_or_tls_defaults().unwrap();
-        let remote = Remote::new(PullPolicy::Always);
-        let source = Source::Remote(remote);
+        let remote = RegistryCredentials::new(
+            "X".to_string(),
+            "Y".to_string(),
+            Secret::new("Z".to_string()),
+        );
+        let source = Source::RegistryWithCredentials(remote);
 
         let tag = "this_is_not_a_tag";
         let repository = "dockertest_pull_fails_with_invalid_remote_source";
@@ -458,7 +628,7 @@ mod tests {
         // Ensure image is present first
         // If it is already present, we skip the download time.
         image
-            .pull(&client, &Source::DockerHub(PullPolicy::Always))
+            .pull(&client, &Source::DockerHub)
             .await
             .expect("failed to pull image");
 
@@ -504,9 +674,7 @@ mod tests {
             .await
             .expect("failed to delete image");
 
-        let result = image
-            .pull(&client, &Source::DockerHub(PullPolicy::Always))
-            .await;
+        let result = image.pull(&client, &Source::DockerHub).await;
         assert!(
             result.is_ok(),
             "failed to pull image: {}",
@@ -522,28 +690,6 @@ mod tests {
             }
             Err(e) => panic!("failed to check image existence: {}", e),
         }
-    }
-
-    // Tests that we can new up a remote with correct variables
-    #[test]
-    fn test_new_remote() {
-        let pull_policy = PullPolicy::Always;
-        let remote = Remote::new(pull_policy);
-
-        let equal = match remote.pull_policy {
-            PullPolicy::Always => true,
-            _ => false,
-        };
-
-        assert!(equal, "remote was created with incorrect pull policy");
-
-        // Assert that the getter returns the correct value
-        let equal = match remote.pull_policy() {
-            PullPolicy::Always => true,
-            _ => false,
-        };
-
-        assert!(equal, "remote get method returned incorrect value");
     }
 
     // Tests the behaviour of the should_pull method with the
@@ -576,9 +722,9 @@ mod tests {
     // source set to remote and pull_policy set to always
     #[test]
     fn test_should_pull_remote_source_always() {
-        let source = Source::DockerHub(PullPolicy::Always);
+        let source = Source::DockerHub;
         let repository = "hello-world".to_string();
-        let image = Image::with_repository(&repository);
+        let image = Image::with_repository(&repository).pull_policy(PullPolicy::Always);
 
         let exists_locally = false;
         let res = image.should_pull(exists_locally, &source).expect("should not return an error when source is remote, pull_policy is always, and image does not exist locally");
@@ -593,9 +739,9 @@ mod tests {
     // source set to remote and pull_policy set to never
     #[test]
     fn test_should_pull_remote_source_never() {
-        let source = Source::DockerHub(PullPolicy::Never);
+        let source = Source::DockerHub;
         let repository = "hello-world".to_string();
-        let image = Image::with_repository(&repository);
+        let image = Image::with_repository(&repository).pull_policy(PullPolicy::Never);
 
         let exists_locally = false;
         let res = image.should_pull(exists_locally, &source);
@@ -612,7 +758,7 @@ mod tests {
     // source set to remote and pull_policy set to if_not_present
     #[test]
     fn test_should_pull_remote_source_if_not_present() {
-        let source = Source::DockerHub(PullPolicy::IfNotPresent);
+        let source = Source::DockerHub;
         let repository = "hello-world".to_string();
         let image = Image::with_repository(&repository);
 
@@ -651,24 +797,12 @@ mod tests {
             "image id should not be set before we pull the image"
         );
 
-        let remote = Remote::new(PullPolicy::Always);
-        let image = image.source(Source::Remote(remote));
-
-        let equal = match &image.source {
-            Some(r) => match r {
-                Source::Remote(r) => match r.pull_policy {
-                    PullPolicy::Always => true,
-                    _ => false,
-                },
-                _ => false,
-            },
-            None => false,
-        };
-
-        assert!(
-            equal,
-            "changing source does not change the image object correctly"
+        let remote = RegistryCredentials::new(
+            "X".to_string(),
+            "Y".to_string(),
+            Secret::new("Z".to_string()),
         );
+        let image = image.source(Source::RegistryWithCredentials(remote));
 
         let new_tag = "this_is_a_test_tag";
         let image = image.tag(&new_tag);
@@ -692,10 +826,14 @@ mod tests {
         let image = Image::with_repository(*repository)
             .tag(&tag)
             // Source is overridden to be DockerHub, a valid source.
-            .source(Source::DockerHub(PullPolicy::Always));
+            .source(Source::DockerHub);
 
         // Deinve a custom Remove registry that is invalid.
-        let invalid_source = Source::Remote(Remote::new(PullPolicy::Always));
+        let invalid_source = Source::RegistryWithCredentials(RegistryCredentials::new(
+            "X".to_string(),
+            "Y".to_string(),
+            Secret::new("Z".to_string()),
+        ));
 
         // Cleanup to force pull operation
         test_utils::delete_image_if_present(&client, *repository, tag)

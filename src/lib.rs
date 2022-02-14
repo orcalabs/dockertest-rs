@@ -13,7 +13,7 @@
 //!  * Support multiple containers per test.
 //!  * Support multiple containers from same image, with different configurations.
 //! * Retrieve [Image] from remote source according to [PullPolicy].
-//! * Support multiple [Remote] registries, which can be individually assigned to [Image].
+//! * Support custom registries, which can be individually assigned to [Image].
 //! * Dictate how each [RunningContainer] is created and operated from an [Image]
 //!   through a [Composition].
 //!  * This allows us to have muliple containers with the same Image,
@@ -156,5 +156,5 @@ pub use crate::composition::{
 pub use crate::container::{PendingContainer, RunningContainer};
 pub use crate::dockertest::DockerTest;
 pub use crate::error::DockerTestError;
-pub use crate::image::{Image, PullPolicy, Remote, Source};
+pub use crate::image::{Image, PullPolicy, RegistryCredentials, Source};
 pub use crate::runner::DockerOperations;

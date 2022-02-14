@@ -1,8 +1,8 @@
-use dockertest::{Composition, DockerTest, Image, PullPolicy, Source};
+use dockertest::{Composition, DockerTest, Image, Source};
 
 #[tokio::test]
 async fn test_with_tokio_test() {
-    let source = Source::DockerHub(PullPolicy::IfNotPresent);
+    let source = Source::DockerHub;
     let mut test = DockerTest::new().with_default_source(source);
 
     let repo = "hello-world".to_string();
