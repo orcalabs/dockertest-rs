@@ -7,6 +7,7 @@ use crate::{
 
 use bollard::{
     container::{InspectContainerOptions, RemoveContainerOptions},
+    models::{ContainerInspectResponse, ContainerStateStatusEnum},
     network::DisconnectNetworkOptions,
     Docker,
 };
@@ -36,6 +37,18 @@ lazy_static! {
 pub struct StaticContainers {
     containers: Arc<RwLock<HashMap<String, StaticContainer>>>,
     external: Arc<RwLock<HashMap<String, RunningContainer>>>,
+    on_demand: Arc<RwLock<HashMap<String, OnDemandStatus>>>,
+}
+
+#[derive(Clone)]
+enum OnDemandStatus {
+    /// The container was running prior to test invocation.
+    /// For all these containers we essentially handle them the way we handle external containers.
+    RunningPrior(RunningContainer),
+    /// The container is in a running state and was not running prior to test invocation
+    Running(RunningContainer, PendingContainer),
+    Pending(PendingContainer),
+    Failed(DockerTestError, Option<String>),
 }
 
 /// Represent a single static, managed container.
@@ -118,6 +131,10 @@ impl StaticContainers {
                         .await?;
                     Ok(CreatedContainer::StaticExternal(external))
                 }
+                StaticManagementPolicy::DockerTestOnDemand => {
+                    self.include_or_create_on_demand_container(composition, client, network)
+                        .await
+                }
             }
         } else {
             Err(DockerTestError::Startup(
@@ -126,11 +143,105 @@ impl StaticContainers {
         }
     }
 
-    #[allow(dead_code)]
     pub async fn external_containers(&self) -> Vec<RunningContainer> {
-        let map = self.external.read().await;
+        let mut external: Vec<RunningContainer> = {
+            let map = self.external.read().await;
+            map.values().cloned().collect()
+        };
 
-        map.values().cloned().collect()
+        // OnDemand containers that were running prior to test invocation are managed the same way
+        // as external containers
+        let on_demand_map = self.on_demand.read().await;
+
+        external.extend(
+            on_demand_map
+                .values()
+                .filter_map(|d| match d {
+                    OnDemandStatus::Running(_, _)
+                    | OnDemandStatus::Pending(_)
+                    | OnDemandStatus::Failed(_, _) => None,
+                    OnDemandStatus::RunningPrior(c) => Some(c),
+                })
+                .cloned(),
+        );
+        external
+    }
+
+    async fn include_or_create_on_demand_container(
+        &self,
+        composition: Composition,
+        client: &Docker,
+        network: Option<&str>,
+    ) -> Result<CreatedContainer, DockerTestError> {
+        let mut map = self.on_demand.write().await;
+
+        if let Some(status) = map.get(&composition.container_name) {
+            match status {
+                OnDemandStatus::Pending(p) | OnDemandStatus::Running(_, p) => {
+                    Ok(CreatedContainer::Pending(p.clone()))
+                }
+                OnDemandStatus::Failed(e, _) => Err(e.clone()),
+                OnDemandStatus::RunningPrior(c) => {
+                    Ok(CreatedContainer::StaticExternal(StaticExternalContainer {
+                        handle: c.handle.clone(),
+                    }))
+                }
+            }
+        } else {
+            let details = client
+                .inspect_container(&composition.container_name, None::<InspectContainerOptions>)
+                .await;
+
+            match details {
+                Ok(d) => {
+                    if let Some(container_state) = &d.state {
+                        if let Some(status) = container_state.status {
+                            if status != ContainerStateStatusEnum::RUNNING {
+                                let options = Some(RemoveContainerOptions {
+                                    force: true,
+                                    ..Default::default()
+                                });
+                                client
+                                    .remove_container(&composition.container_name, options)
+                                    .await
+                                    .map_err(|e| {
+                                        DockerTestError::Daemon(format!(
+                                            "failed to remove existing container: {}",
+                                            e
+                                        ))
+                                    })?;
+                            }
+                        }
+                    }
+                    let running = self
+                        .running_container_from_composition(composition, client, d)
+                        .await?;
+
+                    let external = StaticExternalContainer {
+                        handle: running.handle.clone(),
+                    };
+                    map.insert(running.name.clone(), OnDemandStatus::RunningPrior(running));
+
+                    Ok(CreatedContainer::StaticExternal(external))
+                }
+                Err(e) => match e {
+                    bollard::errors::Error::DockerResponseNotFoundError { message: _ } => {
+                        let pending = self
+                            .create_on_demand_container(composition, client, network)
+                            .await?;
+                        map.insert(
+                            pending.name.clone(),
+                            OnDemandStatus::Pending(pending.clone()),
+                        );
+                        Ok(CreatedContainer::Pending(pending))
+                    }
+                    _ => Err(DockerTestError::Daemon(format!(
+                        "failed to inspect on-demand container: {}",
+                        e
+                    ))),
+                },
+            }
+        }
     }
 
     async fn include_external_container(
@@ -157,32 +268,31 @@ impl StaticContainers {
                     DockerTestError::Daemon(format!("failed to inspect external container: {}", e))
                 })?;
 
-            if let Some(id) = details.id {
-                if let Some(n) = network {
-                    self.add_to_network(&id, n, client).await?;
-                }
-                let running = RunningContainer {
-                    client: client.clone(),
-                    id,
-                    name: composition.container_name.clone(),
-                    handle: composition.container_name.clone(),
-                    ip: std::net::Ipv4Addr::UNSPECIFIED,
-                    ports: HostPortMappings::default(),
-                    is_static: true,
-                    log_options: composition.log_options.clone(),
-                };
-                let external = StaticExternalContainer {
-                    handle: running.handle.clone(),
-                };
-                map.insert(composition.container_name, running);
+            let running = self
+                .running_container_from_composition(composition, client, details)
+                .await?;
+            let external = StaticExternalContainer {
+                handle: running.handle.clone(),
+            };
+            map.insert(running.name.clone(), running);
 
-                Ok(external)
-            } else {
-                Err(DockerTestError::Daemon(
-                    "failed to retrieve container id for external container".to_string(),
-                ))
-            }
+            Ok(external)
         }
+    }
+
+    async fn create_on_demand_container(
+        &self,
+        composition: Composition,
+        client: &Docker,
+        network: Option<&str>,
+    ) -> Result<PendingContainer, DockerTestError> {
+        let pending = composition.create_inner(client, network).await?;
+
+        if let Some(n) = network {
+            self.add_to_network(&pending.id, n, client).await?;
+        }
+
+        Ok(pending)
     }
 
     async fn create_static_container(
@@ -269,7 +379,7 @@ impl StaticContainers {
         }
     }
 
-    /// Start the PendingContainer representing a static container.
+    /// Start the PendingContainer representing a static/on_demand container.
     ///
     /// It is the responsibility of the test runner to use this interface to
     /// obtain a static a RunningContainer from a PendingContainer that is a managed.
@@ -277,6 +387,59 @@ impl StaticContainers {
     /// This method is responsible for setting the container id field of the Failed enum variant
     /// incase it fails to start the container.
     pub async fn start(
+        &self,
+        container: &PendingContainer,
+    ) -> Result<RunningContainer, DockerTestError> {
+        if let Some(policy) = &container.static_management_policy {
+            match policy {
+                StaticManagementPolicy::External => Err(DockerTestError::Startup(
+                    "tried to start an external container".to_string(),
+                )),
+                StaticManagementPolicy::DockerTest => self.start_static_container(container).await,
+                StaticManagementPolicy::DockerTestOnDemand => {
+                    self.start_on_demand_container(container).await
+                }
+            }
+        } else {
+            Err(DockerTestError::Startup(
+                "tried to start a non-exiting static container".to_string(),
+            ))
+        }
+    }
+
+    async fn start_on_demand_container(
+        &self,
+        container: &PendingContainer,
+    ) -> Result<RunningContainer, DockerTestError> {
+        let mut map = self.on_demand.write().await;
+
+        if let Some(status) = map.get_mut(&container.name) {
+            match &status {
+                OnDemandStatus::Running(r, _) | OnDemandStatus::RunningPrior(r) => Ok(r.clone()),
+                OnDemandStatus::Pending(p) => {
+                    let cloned = p.clone();
+                    let running = cloned.start_internal().await;
+                    match running {
+                        Ok(r) => {
+                            *status = OnDemandStatus::Running(r.clone(), p.clone());
+                            Ok(r)
+                        }
+                        Err(e) => {
+                            *status = OnDemandStatus::Failed(e.clone(), Some(container.id.clone()));
+                            Err(e)
+                        }
+                    }
+                }
+                OnDemandStatus::Failed(e, _) => Err(e.clone()),
+            }
+        } else {
+            Err(DockerTestError::Startup(
+                "tried to start a non-exiting static container".to_string(),
+            ))
+        }
+    }
+
+    async fn start_static_container(
         &self,
         container: &PendingContainer,
     ) -> Result<RunningContainer, DockerTestError> {
@@ -332,6 +495,8 @@ impl StaticContainers {
         self.disconnect_static_containers(client, network, to_cleanup)
             .await;
 
+        self.disconnect_on_demand_containers(client, network).await;
+
         // If we are operating with an existing network, we assume that this network
         // is externally managed for the external container.
         if !is_external_network {
@@ -352,6 +517,18 @@ impl StaticContainers {
                 if to_cleanup.contains(r.id()) {
                     disconnect_container(client, r.id(), network).await;
                 }
+            }
+        }
+    }
+
+    async fn disconnect_on_demand_containers(&self, client: &Docker, network: &str) {
+        let map = self.on_demand.read().await;
+        for (_, status) in map.iter() {
+            match status {
+                OnDemandStatus::RunningPrior(r) | OnDemandStatus::Running(r, _) => {
+                    disconnect_container(client, r.id(), network).await;
+                }
+                OnDemandStatus::Pending(_) | OnDemandStatus::Failed(_, _) => (),
             }
         }
     }
@@ -457,6 +634,30 @@ impl StaticContainers {
             ))
         })
     }
+
+    async fn running_container_from_composition(
+        &self,
+        composition: Composition,
+        client: &Docker,
+        container_details: ContainerInspectResponse,
+    ) -> Result<RunningContainer, DockerTestError> {
+        if let Some(id) = container_details.id {
+            Ok(RunningContainer {
+                client: client.clone(),
+                id,
+                name: composition.container_name.clone(),
+                handle: composition.container_name,
+                ip: std::net::Ipv4Addr::UNSPECIFIED,
+                ports: HostPortMappings::default(),
+                is_static: true,
+                log_options: composition.log_options,
+            })
+        } else {
+            Err(DockerTestError::Daemon(
+                "failed to retrieve container id for external container".to_string(),
+            ))
+        }
+    }
 }
 
 impl Default for StaticContainers {
@@ -464,6 +665,7 @@ impl Default for StaticContainers {
         StaticContainers {
             containers: Arc::new(RwLock::new(HashMap::new())),
             external: Arc::new(RwLock::new(HashMap::new())),
+            on_demand: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 }

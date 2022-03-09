@@ -2,7 +2,7 @@
 
 use crate::{
     composition::LogOptions, container::RunningContainer, static_container::STATIC_CONTAINERS,
-    waitfor::WaitFor, DockerTestError, StartPolicy,
+    waitfor::WaitFor, DockerTestError, StartPolicy, StaticManagementPolicy,
 };
 
 use bollard::{container::StartContainerOptions, errors::Error, Docker};
@@ -37,6 +37,9 @@ pub struct PendingContainer {
     /// Wheter this is a static container
     pub(crate) is_static: bool,
 
+    /// The StaticManagementPolicy of this container if any exists
+    pub(crate) static_management_policy: Option<StaticManagementPolicy>,
+
     /// Container log options, they are provided by `Composition`.
     pub(crate) log_options: Option<LogOptions>,
 }
@@ -52,7 +55,7 @@ impl PendingContainer {
         start_policy: StartPolicy,
         wait: Box<dyn WaitFor>,
         client: Docker,
-        is_static: bool,
+        static_management_policy: Option<StaticManagementPolicy>,
         log_options: Option<LogOptions>,
     ) -> PendingContainer {
         PendingContainer {
@@ -62,7 +65,8 @@ impl PendingContainer {
             handle: handle.to_string(),
             wait: Some(wait),
             start_policy,
-            is_static,
+            is_static: static_management_policy.is_some(),
+            static_management_policy,
             log_options,
         }
     }
@@ -131,7 +135,7 @@ mod tests {
             StartPolicy::Relaxed,
             Box::new(NoWait {}),
             client,
-            false,
+            None,
             None,
         );
         assert_eq!(id, container.id, "wrong id set in container creation");

@@ -123,6 +123,25 @@ fn test_static_containers_references_the_same_container_within_test_binary_2() {
     });
 }
 
+#[test]
+fn test_on_demand_containers_runs() {
+    let source = Source::DockerHub;
+    let mut test = DockerTest::new().with_default_source(source);
+
+    let repo = "hello-world".to_string();
+    let img = Image::with_repository(&repo);
+
+    let container_name = format!("hello_world-on-demand-{}", generate_random_string(20));
+    let mut hello_world = Composition::with_image(img).with_container_name(container_name);
+    hello_world.static_container(StaticManagementPolicy::DockerTestOnDemand);
+
+    test.add_composition(hello_world);
+
+    test.run(|_ops| async {
+        assert!(true);
+    });
+}
+
 #[derive(Debug)]
 struct ContainerName {
     name: Arc<Mutex<Option<String>>>,
