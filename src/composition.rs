@@ -223,7 +223,7 @@ impl Composition {
             user_provided_container_name: None,
             network_aliases: None,
             image: Image::with_repository(&copy),
-            container_name: copy.replace("/", "-"),
+            container_name: copy.replace('/', "-"),
             wait: Box::new(NoWait {}),
             env: HashMap::new(),
             cmd: Vec::new(),
@@ -247,7 +247,7 @@ impl Composition {
         Composition {
             user_provided_container_name: None,
             network_aliases: None,
-            container_name: image.repository().to_string().replace("/", "-"),
+            container_name: image.repository().to_string().replace('/', "-"),
             image,
             wait: Box::new(NoWait {}),
             env: HashMap::new(),
