@@ -223,7 +223,7 @@ impl Composition {
             user_provided_container_name: None,
             network_aliases: None,
             image: Image::with_repository(&copy),
-            container_name: copy.replace("/", "-"),
+            container_name: copy.replace('/', "-"),
             wait: Box::new(NoWait {}),
             env: HashMap::new(),
             cmd: Vec::new(),
@@ -247,7 +247,7 @@ impl Composition {
         Composition {
             user_provided_container_name: None,
             network_aliases: None,
-            container_name: image.repository().to_string().replace("/", "-"),
+            container_name: image.repository().to_string().replace('/', "-"),
             image,
             wait: Box::new(NoWait {}),
             env: HashMap::new(),
@@ -494,7 +494,7 @@ impl Composition {
 
         if !self.is_static() {
             // The docker daemon does not like '/' or '\' in container names
-            let stripped_name = name.replace("/", "_");
+            let stripped_name = name.replace('/', "_");
 
             self.container_name = format!("{}-{}-{}", namespace, stripped_name, suffix);
         } else {
@@ -550,7 +550,7 @@ impl Composition {
         // This Composition cannot be created without an image id, which
         // is set through `Image::pull`
         if image_id.is_empty() {
-            return Err(DockerTestError::Processing("`Composition::create()` invoked without populatting its image through `Image::pull()`".to_string()));
+            return Err(DockerTestError::Processing("`Composition::create()` invoked without populating its image through `Image::pull()`".to_string()));
         }
 
         // As we can't return temporary values owned by this closure
