@@ -494,7 +494,7 @@ impl Composition {
 
         if !self.is_static() {
             // The docker daemon does not like '/' or '\' in container names
-            let stripped_name = name.replace("/", "_");
+            let stripped_name = name.replace('/', "_");
 
             self.container_name = format!("{}-{}-{}", namespace, stripped_name, suffix);
         } else {
