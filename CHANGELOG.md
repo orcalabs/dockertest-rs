@@ -3,6 +3,21 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- Added support for custom docker registries.
+- Added support for static containers that can be used across multiple tests, both internally and externally managed.
+- Added support for capturing container logs.
+- Added support to run on an existing docker network.
+- Added support for container network aliases.
+- Added `Composition.publish_all_ports` to publish all exposed ports of a container on an ephemeral host port.
+- Added optional `tls` feature which when enabled and combined with setting the `DOCKER_TLS_VERIFY` env variable the connection with the docker daemon is done via TLS over tcp.
+
+### Changed
+- Anonymous volumes are now cleaned up during teardown.
+- `LogOptions` now has a default value if not specified.
+- BREAKING: `RunningContainer.ports` changed and renamed to `RunningContainer.host_port`. A specific port mapping can now be retrieved
+instead of all of them.
+
 ## 0.2.1
 
 ### Changed
