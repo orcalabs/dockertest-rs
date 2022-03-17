@@ -45,13 +45,13 @@ pub enum StartPolicy {
 ///     removed once the test terminates.
 ///     The externally managed container is assumed to be in a running state when the test starts.
 ///     If DockerTest cannot locate the the container, the test will fail.
-/// - [StaticManagementPolicy::DockerTest] indicates that DockerTest will handle the lifecycle of
+/// - [StaticManagementPolicy::Internal] indicates that DockerTest will handle the lifecycle of
 ///     the container between all DockerTest instances within the test binary.
-/// - [StaticManagementPolicy::DockerTestOnDemand] indicates that DockerTest will start the
+/// - [StaticManagementPolicy::Dynamic] indicates that DockerTest will start the
 ///     container if it does not already exists and will not clean it up. This way the same
 ///     container can be re-used across multiple `cargo test` invocations.
-///     If the `DOCKERTEST_ON_DEMAND` environment variable is set to `DOCKERTEST` or `EXTERNAL`, the management policy
-///     will instead be set accordingly (either [StaticManagementPolicy::DockerTest] or [StaticManagementPolicy::External].
+///     If the `DOCKERTEST_DYNAMIC` environment variable is set to `INTERNAL` or `EXTERNAL`, the management policy
+///     will instead be set accordingly (either [StaticManagementPolicy::Internal] or [StaticManagementPolicy::External].
 ///     The purpose of this is to facilitate running tests locally and in CI/CD pipelines without having to alter management policies.
 ///     If a container already exists in a non-running state with the same name as a container with this policy, the startup
 ///     procedure will fail.
@@ -60,10 +60,10 @@ pub enum StaticManagementPolicy {
     /// The lifecycle of the container is managed by the user.
     External,
     /// DockerTest handles the lifecycle of the container.
-    DockerTest,
+    Internal,
     /// DockerTest starts the container if it does not exist and does not remove it, and will
     /// re-use the container across `cargo test` invocations.
-    DockerTestOnDemand,
+    Dynamic,
 }
 
 /// Specifies how should a [Composition] handle logs.
@@ -480,20 +480,18 @@ impl Composition {
     /// name of the external container.
     pub fn static_container(&mut self, management: StaticManagementPolicy) -> &mut Composition {
         let management = match management {
-            StaticManagementPolicy::External | StaticManagementPolicy::DockerTest => management,
-            StaticManagementPolicy::DockerTestOnDemand => {
-                match std::env::var("DOCKERTEST_ON_DEMAND") {
-                    Ok(val) => match val.as_str() {
-                        "EXTERNAL" => StaticManagementPolicy::External,
-                        "STATIC" => StaticManagementPolicy::DockerTest,
-                        _ => {
-                            event!(Level::WARN, "DOCKERTEST_ON_DEMAND environment variable set to unknown value, defaulting to OnDemand policy");
-                            StaticManagementPolicy::DockerTestOnDemand
-                        }
-                    },
-                    Err(_) => management,
-                }
-            }
+            StaticManagementPolicy::External | StaticManagementPolicy::Internal => management,
+            StaticManagementPolicy::Dynamic => match std::env::var("DOCKERTEST_DYNAMIC") {
+                Ok(val) => match val.as_str() {
+                    "EXTERNAL" => StaticManagementPolicy::External,
+                    "INTERNAL" => StaticManagementPolicy::Internal,
+                    _ => {
+                        event!(Level::WARN, "DOCKERTEST_DYNAMIC environment variable set to unknown value, defaulting to Dynamic policy");
+                        StaticManagementPolicy::Dynamic
+                    }
+                },
+                Err(_) => management,
+            },
         };
         self.management = Some(management);
         self
