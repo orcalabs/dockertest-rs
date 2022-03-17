@@ -43,7 +43,7 @@ mod tests {
             StartPolicy::Relaxed,
             wait.clone(),
             client,
-            false,
+            None,
             None,
         );
 
