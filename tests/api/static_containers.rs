@@ -25,7 +25,7 @@ fn test_static_containers_runs() {
     let repo = "hello-world".to_string();
     let img = Image::with_repository(&repo);
     let mut hello_world = Composition::with_image(img);
-    hello_world.static_container(StaticManagementPolicy::DockerTest);
+    hello_world.static_container(StaticManagementPolicy::Internal);
 
     test.add_composition(hello_world);
 
@@ -93,7 +93,7 @@ fn test_static_containers_references_the_same_container_within_test_binary() {
     let repo = "hello-world".to_string();
     let img = Image::with_repository(&repo);
     let mut hello_world = Composition::with_image(img);
-    hello_world.static_container(StaticManagementPolicy::DockerTest);
+    hello_world.static_container(StaticManagementPolicy::Internal);
 
     test.add_composition(hello_world);
 
@@ -112,7 +112,7 @@ fn test_static_containers_references_the_same_container_within_test_binary_2() {
     let repo = "hello-world".to_string();
     let img = Image::with_repository(&repo);
     let mut hello_world = Composition::with_image(img);
-    hello_world.static_container(StaticManagementPolicy::DockerTest);
+    hello_world.static_container(StaticManagementPolicy::Internal);
 
     test.add_composition(hello_world);
 
@@ -133,7 +133,7 @@ fn test_on_demand_containers_runs() {
 
     let container_name = format!("hello_world-on-demand-{}", generate_random_string(20));
     let mut hello_world = Composition::with_image(img).with_container_name(container_name);
-    hello_world.static_container(StaticManagementPolicy::DockerTestOnDemand);
+    hello_world.static_container(StaticManagementPolicy::Dynamic);
 
     test.add_composition(hello_world);
 

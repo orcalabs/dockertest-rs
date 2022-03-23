@@ -35,13 +35,13 @@ lazy_static! {
 /// Callers are still responsible for checking if the container they are starting/creating are
 /// static and call the appropriate method.
 pub struct StaticContainers {
-    containers: Arc<RwLock<HashMap<String, StaticContainer>>>,
+    internal: Arc<RwLock<HashMap<String, InternalContainer>>>,
     external: Arc<RwLock<HashMap<String, RunningContainer>>>,
-    on_demand: Arc<RwLock<HashMap<String, OnDemandStatus>>>,
+    dynamic: Arc<RwLock<HashMap<String, DynamicStatus>>>,
 }
 
 #[derive(Clone)]
-enum OnDemandStatus {
+enum DynamicStatus {
     /// The container was running prior to test invocation.
     /// For all these containers we essentially handle them the way we handle external containers.
     RunningPrior(RunningContainer),
@@ -51,23 +51,23 @@ enum OnDemandStatus {
     Failed(DockerTestError, Option<String>),
 }
 
-/// Represent a single static, managed container.
-struct StaticContainer {
+/// Represent a single internal, managed container.
+struct InternalContainer {
     /// Current status of the container.
-    status: StaticStatus,
+    status: InternalStatus,
 
-    /// Represents a usage counter of the static container.
+    /// Represents a usage counter of the internal container.
     ///
-    /// This counter is incremented for each test that uses this static container.
+    /// This counter is incremented for each test that uses this internal container.
     /// On test completion each test will decrement this counter and test which decrements it to 0
     /// will perform the cleanup of the container.
     completion_counter: u8,
 }
 
-/// Represents the different states of a static container.
+/// Represents the different states of a internal container.
 // NOTE: allowing this clippy warning in pending of refactor
 #[allow(clippy::large_enum_variant)]
-enum StaticStatus {
+enum InternalStatus {
     /// As tests execute concurrently other tests might have already executed the WaitFor
     /// implementation and created a running container. However, as we do not want to alter our
     /// pipeline of Composition -> PendingContainer -> RunningContainer and start order logistics.
@@ -75,9 +75,9 @@ enum StaticStatus {
     /// clone of it if they are "behind" in the pipeline.
     Running(RunningContainer, PendingContainer),
     Pending(PendingContainer),
-    /// If a test utilizes the same managed static container with other tests, and completes
+    /// If a test utilizes the same managed internal container with other tests, and completes
     /// the entire test including cleanup prior to other tests even registering their need for
-    /// the same managed static container, then it will be cleaned up. This is to avoid
+    /// the same managed internal container, then it will be cleaned up. This is to avoid
     /// leaking the container on binary termination.
     ///
     /// The remaining tests should create the container again during container creation.
@@ -92,13 +92,13 @@ enum StaticStatus {
     Failed(DockerTestError, Option<String>),
 }
 
-impl StaticStatus {
+impl InternalStatus {
     fn container_id(&self) -> Option<&str> {
         match &self {
-            StaticStatus::Running(_, r) => Some(r.id.as_str()),
-            StaticStatus::Pending(p) => Some(p.id.as_str()),
-            StaticStatus::Failed(_, container_id) => container_id.as_ref().map(|id| id.as_str()),
-            StaticStatus::Cleaned => None,
+            InternalStatus::Running(_, r) => Some(r.id.as_str()),
+            InternalStatus::Pending(p) => Some(p.id.as_str()),
+            InternalStatus::Failed(_, container_id) => container_id.as_ref().map(|id| id.as_str()),
+            InternalStatus::Cleaned => None,
         }
     }
 }
@@ -115,8 +115,8 @@ impl StaticContainers {
     ) -> Result<CreatedContainer, DockerTestError> {
         if let Some(policy) = composition.static_management_policy() {
             match policy {
-                StaticManagementPolicy::DockerTest => self
-                    .create_static_container(composition, client, network)
+                StaticManagementPolicy::Internal => self
+                    .create_internal_container(composition, client, network)
                     .await
                     .map(CreatedContainer::Pending),
                 StaticManagementPolicy::External => {
@@ -131,8 +131,8 @@ impl StaticContainers {
                         .await?;
                     Ok(CreatedContainer::StaticExternal(external))
                 }
-                StaticManagementPolicy::DockerTestOnDemand => {
-                    self.include_or_create_on_demand_container(composition, client, network)
+                StaticManagementPolicy::Dynamic => {
+                    self.include_or_create_dynamic_container(composition, client, network)
                         .await
                 }
             }
@@ -151,37 +151,37 @@ impl StaticContainers {
 
         // OnDemand containers that were running prior to test invocation are managed the same way
         // as external containers
-        let on_demand_map = self.on_demand.read().await;
+        let on_demand_map = self.dynamic.read().await;
 
         external.extend(
             on_demand_map
                 .values()
                 .filter_map(|d| match d {
-                    OnDemandStatus::Running(_, _)
-                    | OnDemandStatus::Pending(_)
-                    | OnDemandStatus::Failed(_, _) => None,
-                    OnDemandStatus::RunningPrior(c) => Some(c),
+                    DynamicStatus::Running(_, _)
+                    | DynamicStatus::Pending(_)
+                    | DynamicStatus::Failed(_, _) => None,
+                    DynamicStatus::RunningPrior(c) => Some(c),
                 })
                 .cloned(),
         );
         external
     }
 
-    async fn include_or_create_on_demand_container(
+    async fn include_or_create_dynamic_container(
         &self,
         composition: Composition,
         client: &Docker,
         network: Option<&str>,
     ) -> Result<CreatedContainer, DockerTestError> {
-        let mut map = self.on_demand.write().await;
+        let mut map = self.dynamic.write().await;
 
         if let Some(status) = map.get(&composition.container_name) {
             match status {
-                OnDemandStatus::Pending(p) | OnDemandStatus::Running(_, p) => {
+                DynamicStatus::Pending(p) | DynamicStatus::Running(_, p) => {
                     Ok(CreatedContainer::Pending(p.clone()))
                 }
-                OnDemandStatus::Failed(e, _) => Err(e.clone()),
-                OnDemandStatus::RunningPrior(c) => {
+                DynamicStatus::Failed(e, _) => Err(e.clone()),
+                DynamicStatus::RunningPrior(c) => {
                     Ok(CreatedContainer::StaticExternal(StaticExternalContainer {
                         handle: c.handle.clone(),
                     }))
@@ -220,23 +220,23 @@ impl StaticContainers {
                     let external = StaticExternalContainer {
                         handle: running.handle.clone(),
                     };
-                    map.insert(running.name.clone(), OnDemandStatus::RunningPrior(running));
+                    map.insert(running.name.clone(), DynamicStatus::RunningPrior(running));
 
                     Ok(CreatedContainer::StaticExternal(external))
                 }
                 Err(e) => match e {
                     bollard::errors::Error::DockerResponseNotFoundError { message: _ } => {
                         let pending = self
-                            .create_on_demand_container(composition, client, network)
+                            .create_dynamic_container(composition, client, network)
                             .await?;
                         map.insert(
                             pending.name.clone(),
-                            OnDemandStatus::Pending(pending.clone()),
+                            DynamicStatus::Pending(pending.clone()),
                         );
                         Ok(CreatedContainer::Pending(pending))
                     }
                     _ => Err(DockerTestError::Daemon(format!(
-                        "failed to inspect on-demand container: {}",
+                        "failed to inspect dynamic container: {}",
                         e
                     ))),
                 },
@@ -280,7 +280,7 @@ impl StaticContainers {
         }
     }
 
-    async fn create_on_demand_container(
+    async fn create_dynamic_container(
         &self,
         composition: Composition,
         client: &Docker,
@@ -295,14 +295,14 @@ impl StaticContainers {
         Ok(pending)
     }
 
-    async fn create_static_container(
+    async fn create_internal_container(
         &self,
         composition: Composition,
         client: &Docker,
         network: Option<&str>,
     ) -> Result<PendingContainer, DockerTestError> {
         let container = self
-            .create_static_container_inner(composition, client, network)
+            .create_internal_container_inner(composition, client, network)
             .await?;
 
         if let Some(n) = network {
@@ -312,47 +312,47 @@ impl StaticContainers {
         Ok(container)
     }
 
-    async fn create_static_container_inner(
+    async fn create_internal_container_inner(
         &self,
         composition: Composition,
         client: &Docker,
         network: Option<&str>,
     ) -> Result<PendingContainer, DockerTestError> {
-        let mut map = self.containers.write().await;
+        let mut map = self.internal.write().await;
 
         // If we are the first test to try to create this container we are responsible for
-        // container creation and inserting a StaticContainer in the global map with the
+        // container creation and inserting a InternalContainer in the global map with the
         // PendingContainer instance.
         // Static containers have to be apart of all the test networks such that they
         // are reachable from all tests.
         if let Some(c) = map.get_mut(&composition.container_name) {
             match &c.status {
-                StaticStatus::Pending(p) => {
+                InternalStatus::Pending(p) => {
                     c.completion_counter += 1;
                     Ok(p.clone())
                 }
-                StaticStatus::Failed(e, _) => {
+                InternalStatus::Failed(e, _) => {
                     c.completion_counter += 1;
                     Err(e.clone())
                 }
-                StaticStatus::Running(_, p) => {
+                InternalStatus::Running(_, p) => {
                     c.completion_counter += 1;
                     Ok(p.clone())
                 }
-                StaticStatus::Cleaned => {
-                    self.create_static_container_impl(&mut map, composition, client, network)
+                InternalStatus::Cleaned => {
+                    self.create_internal_container_impl(&mut map, composition, client, network)
                         .await
                 }
             }
         } else {
-            self.create_static_container_impl(&mut map, composition, client, network)
+            self.create_internal_container_impl(&mut map, composition, client, network)
                 .await
         }
     }
 
-    async fn create_static_container_impl(
+    async fn create_internal_container_impl(
         &self,
-        containers: &mut HashMap<String, StaticContainer>,
+        containers: &mut HashMap<String, InternalContainer>,
         composition: Composition,
         client: &Docker,
         network: Option<&str>,
@@ -361,16 +361,16 @@ impl StaticContainers {
         let pending = composition.create_inner(client, network).await;
         match pending {
             Ok(p) => {
-                let c = StaticContainer {
-                    status: StaticStatus::Pending(p.clone()),
+                let c = InternalContainer {
+                    status: InternalStatus::Pending(p.clone()),
                     completion_counter: 1,
                 };
                 containers.insert(container_name, c);
                 Ok(p)
             }
             Err(e) => {
-                let c = StaticContainer {
-                    status: StaticStatus::Failed(e.clone(), None),
+                let c = InternalContainer {
+                    status: InternalStatus::Failed(e.clone(), None),
                     completion_counter: 1,
                 };
                 containers.insert(container_name, c);
@@ -379,10 +379,10 @@ impl StaticContainers {
         }
     }
 
-    /// Start the PendingContainer representing a static/on_demand container.
+    /// Start the PendingContainer representing a internal/dynamic container.
     ///
     /// It is the responsibility of the test runner to use this interface to
-    /// obtain a static a RunningContainer from a PendingContainer that is a managed.
+    /// obtain a RunningContainer from a PendingContainer that is statically managed.
     ///
     /// This method is responsible for setting the container id field of the Failed enum variant
     /// incase it fails to start the container.
@@ -395,10 +395,8 @@ impl StaticContainers {
                 StaticManagementPolicy::External => Err(DockerTestError::Startup(
                     "tried to start an external container".to_string(),
                 )),
-                StaticManagementPolicy::DockerTest => self.start_static_container(container).await,
-                StaticManagementPolicy::DockerTestOnDemand => {
-                    self.start_on_demand_container(container).await
-                }
+                StaticManagementPolicy::Internal => self.start_internal_container(container).await,
+                StaticManagementPolicy::Dynamic => self.start_dynamic_container(container).await,
             }
         } else {
             Err(DockerTestError::Startup(
@@ -407,43 +405,43 @@ impl StaticContainers {
         }
     }
 
-    async fn start_on_demand_container(
+    async fn start_dynamic_container(
         &self,
         container: &PendingContainer,
     ) -> Result<RunningContainer, DockerTestError> {
-        let mut map = self.on_demand.write().await;
+        let mut map = self.dynamic.write().await;
 
         if let Some(status) = map.get_mut(&container.name) {
             match &status {
-                OnDemandStatus::Running(r, _) | OnDemandStatus::RunningPrior(r) => Ok(r.clone()),
-                OnDemandStatus::Pending(p) => {
+                DynamicStatus::Running(r, _) | DynamicStatus::RunningPrior(r) => Ok(r.clone()),
+                DynamicStatus::Pending(p) => {
                     let cloned = p.clone();
                     let running = cloned.start_internal().await;
                     match running {
                         Ok(r) => {
-                            *status = OnDemandStatus::Running(r.clone(), p.clone());
+                            *status = DynamicStatus::Running(r.clone(), p.clone());
                             Ok(r)
                         }
                         Err(e) => {
-                            *status = OnDemandStatus::Failed(e.clone(), Some(container.id.clone()));
+                            *status = DynamicStatus::Failed(e.clone(), Some(container.id.clone()));
                             Err(e)
                         }
                     }
                 }
-                OnDemandStatus::Failed(e, _) => Err(e.clone()),
+                DynamicStatus::Failed(e, _) => Err(e.clone()),
             }
         } else {
             Err(DockerTestError::Startup(
-                "tried to start a non-exiting static container".to_string(),
+                "tried to start a non-existing dynamic container".to_string(),
             ))
         }
     }
 
-    async fn start_static_container(
+    async fn start_internal_container(
         &self,
         container: &PendingContainer,
     ) -> Result<RunningContainer, DockerTestError> {
-        let mut map = self.containers.write().await;
+        let mut map = self.internal.write().await;
 
         // If we are the first test to try to start the container we are responsible for starting
         // it and adding the RunningContainer instance to the global map.
@@ -451,18 +449,19 @@ impl StaticContainers {
         // far in their pipeline and need a PendingContainer instance.
         if let Some(c) = map.get_mut(&container.name) {
             match &c.status {
-                StaticStatus::Failed(e, _) => Err(e.clone()),
-                StaticStatus::Running(r, _) => Ok(r.clone()),
-                StaticStatus::Pending(p) => {
+                InternalStatus::Failed(e, _) => Err(e.clone()),
+                InternalStatus::Running(r, _) => Ok(r.clone()),
+                InternalStatus::Pending(p) => {
                     let cloned = p.clone();
                     let running = cloned.start_internal().await;
                     match running {
                         Ok(r) => {
-                            c.status = StaticStatus::Running(r.clone(), p.clone());
+                            c.status = InternalStatus::Running(r.clone(), p.clone());
                             Ok(r)
                         }
                         Err(e) => {
-                            c.status = StaticStatus::Failed(e.clone(), Some(container.id.clone()));
+                            c.status =
+                                InternalStatus::Failed(e.clone(), Some(container.id.clone()));
                             Err(e)
                         }
                     }
@@ -471,31 +470,31 @@ impl StaticContainers {
                 // we encounter a Cleaned container during creation, hence the container will never
                 // have it status set to Cleaned before this `Dockertest` instance has performed
                 // cleanup.
-                StaticStatus::Cleaned => Err(DockerTestError::Startup(
+                InternalStatus::Cleaned => Err(DockerTestError::Startup(
                     "encountered a cleaned container during startup".to_string(),
                 )),
             }
         } else {
             Err(DockerTestError::Startup(
-                "tried to start a non-exiting static container".to_string(),
+                "tried to start a non-existing internal container".to_string(),
             ))
         }
     }
 
-    /// Disconnects all static containers from the given network.
+    /// Disconnects all internal containers from the given network.
     ///
     /// If the network is external, we do not disconnect the external containers.
-    async fn disconnect_static_containers_from_network(
+    async fn disconnect_internal_containers_from_network(
         &self,
         client: &Docker,
         network: &str,
         is_external_network: bool,
         to_cleanup: &HashSet<&str>,
     ) {
-        self.disconnect_static_containers(client, network, to_cleanup)
+        self.disconnect_internal_containers(client, network, to_cleanup)
             .await;
 
-        self.disconnect_on_demand_containers(client, network).await;
+        self.disconnect_dynamic_containers(client, network).await;
 
         // If we are operating with an existing network, we assume that this network
         // is externally managed for the external container.
@@ -505,15 +504,15 @@ impl StaticContainers {
         }
     }
 
-    async fn disconnect_static_containers(
+    async fn disconnect_internal_containers(
         &self,
         client: &Docker,
         network: &str,
         to_cleanup: &HashSet<&str>,
     ) {
-        let map = self.containers.read().await;
+        let map = self.internal.read().await;
         for (_, container) in map.iter() {
-            if let StaticStatus::Running(r, _) = &container.status {
+            if let InternalStatus::Running(r, _) = &container.status {
                 if to_cleanup.contains(r.id()) {
                     disconnect_container(client, r.id(), network).await;
                 }
@@ -521,14 +520,14 @@ impl StaticContainers {
         }
     }
 
-    async fn disconnect_on_demand_containers(&self, client: &Docker, network: &str) {
-        let map = self.on_demand.read().await;
+    async fn disconnect_dynamic_containers(&self, client: &Docker, network: &str) {
+        let map = self.dynamic.read().await;
         for (_, status) in map.iter() {
             match status {
-                OnDemandStatus::RunningPrior(r) | OnDemandStatus::Running(r, _) => {
+                DynamicStatus::RunningPrior(r) | DynamicStatus::Running(r, _) => {
                     disconnect_container(client, r.id(), network).await;
                 }
-                OnDemandStatus::Pending(_) | OnDemandStatus::Failed(_, _) => (),
+                DynamicStatus::Pending(_) | DynamicStatus::Failed(_, _) => (),
             }
         }
     }
@@ -562,7 +561,7 @@ impl StaticContainers {
         // can be deleted.
         // We do not need to hold the lock for network disconnection as each Dockertest instance
         // generates its own docker network.
-        self.disconnect_static_containers_from_network(
+        self.disconnect_internal_containers_from_network(
             client,
             network,
             is_external_network,
@@ -577,7 +576,7 @@ impl StaticContainers {
     }
 
     async fn decrement_completion_counters(&self, to_cleanup: &HashSet<&str>) -> Vec<String> {
-        let mut containers = self.containers.write().await;
+        let mut containers = self.internal.write().await;
 
         let mut responsible_to_remove = Vec::new();
 
@@ -590,7 +589,7 @@ impl StaticContainers {
                     container.completion_counter -= 1;
                     if container.completion_counter == 0 {
                         responsible_to_remove.push(container_id.to_string());
-                        container.status = StaticStatus::Cleaned;
+                        container.status = InternalStatus::Cleaned;
                     }
                 }
             }
@@ -663,9 +662,9 @@ impl StaticContainers {
 impl Default for StaticContainers {
     fn default() -> StaticContainers {
         StaticContainers {
-            containers: Arc::new(RwLock::new(HashMap::new())),
+            internal: Arc::new(RwLock::new(HashMap::new())),
             external: Arc::new(RwLock::new(HashMap::new())),
-            on_demand: Arc::new(RwLock::new(HashMap::new())),
+            dynamic: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 }

@@ -71,7 +71,7 @@ impl DockerTest {
     /// If the container is created with a [crate::composition::StaticManagementPolicy::External],
     /// it is assumed that the container is already part of this network.
     ///
-    /// For [crate::composition::StaticManagementPolicy::DockerTest], the container will be included
+    /// For [crate::composition::StaticManagementPolicy::Internal], the container will be included
     /// into the network before test starts, and dropped once the statically managed container
     /// is removed.
     pub fn with_external_network<T: ToString>(self, network: T) -> Self {
