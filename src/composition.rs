@@ -485,6 +485,7 @@ impl Composition {
                 Ok(val) => match val.as_str() {
                     "EXTERNAL" => StaticManagementPolicy::External,
                     "INTERNAL" => StaticManagementPolicy::Internal,
+                    "DYNAMIC" => StaticManagementPolicy::Dynamic,
                     _ => {
                         event!(Level::WARN, "DOCKERTEST_DYNAMIC environment variable set to unknown value, defaulting to Dynamic policy");
                         StaticManagementPolicy::Dynamic
