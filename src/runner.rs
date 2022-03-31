@@ -11,7 +11,7 @@ use bollard::{
     Docker,
 };
 use futures::future::{join_all, Future};
-use tracing::{event, trace, Level};
+use tracing::{error, event, trace, Level};
 
 use std::any::Any;
 use std::clone::Clone;
@@ -193,13 +193,17 @@ impl Runner {
         {
             Ok(e) => e,
             Err(engine) => {
-                let mut cleanup = engine.cleanup().await?;
-                let total = cleanup.len();
-                cleanup.iter().enumerate().for_each(|(i, e)| {
+                let mut creation_failures = engine.creation_failures();
+                let total = creation_failures.len();
+                creation_failures.iter().enumerate().for_each(|(i, e)| {
                     trace!("container {} of {} creation failures: {}", i + 1, total, e);
                 });
+
+                let engine = engine.decommission();
+                self.teardown(engine, false).await;
+
                 // QUESTION: What is the best option for us to propagate multiple errors?
-                return Err(cleanup
+                return Err(creation_failures
                     .pop()
                     .expect("dockertest bug: cleanup path expected container creation error"));
             }
@@ -209,7 +213,11 @@ impl Runner {
         let mut engine = match engine.orbiting().await {
             Ok(e) => e,
             Err((engine, e)) => {
-                engine.cleanup().await?;
+                // TODO: Call handle_logs on startup errors?
+                // Teardown everything on error
+                let engine = engine.decommission();
+                self.teardown(engine, false).await;
+
                 return Err(e);
             }
         };
@@ -220,6 +228,11 @@ impl Runner {
             errors.iter().enumerate().for_each(|(i, e)| {
                 trace!("container {} of {} inspect failures: {}", i + 1, total, e);
             });
+
+            // Teardown everything on error
+            let engine = engine.decommission();
+            self.teardown(engine, false).await;
+
             // QUESTION: What is the best option for us to propagate multiple errors?
             return Err(errors
                 .pop()
@@ -251,8 +264,9 @@ impl Runner {
             };
 
         let engine = engine.decommission();
-
-        engine.handle_logs(result.is_err()).await?;
+        if let Err(e) = engine.handle_logs(result.is_err()).await {
+            error!("{e}");
+        }
         self.teardown(engine, result.is_err()).await;
 
         if let Err(option) = result {
