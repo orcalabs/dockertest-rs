@@ -3,20 +3,35 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## 0.3
+
 ### Added
-- Added support for custom docker registries.
-- Added support for static containers that can be used across multiple tests, both internally and externally managed.
-- Added support for capturing container logs.
-- Added support to run on an existing docker network.
-- Added support for container network aliases.
-- Added `Composition.publish_all_ports` to publish all exposed ports of a container on an ephemeral host port.
-- Added optional `tls` feature which when enabled and combined with setting the `DOCKER_TLS_VERIFY` env variable the connection with the docker daemon is done via TLS over tcp.
+- Added support for static containers that can be used across multiple tests, both internally
+    and externally managed.
+- Added support for capturing container logs. This is configurable through
+    `Composition::with_log_options`.
+- Added support to run on an existing docker network. This is configurable through
+    `DockerTest::with_external_network`.
+- Added support for container network aliases. This is configurable through `Composition::with_alias`
+    and `Composition::alias`.
+- Added `Composition::publish_all_ports` to publish all exposed ports of a container on an
+    ephemeral host port.
+- Added optional `tls` feature which when enabled and combined with setting the `DOCKER_TLS_VERIFY`
+    env variable the connection with the docker daemon is done via TLS over tcp.
 
 ### Changed
+- BREAKING Added support for custom docker registries. You may now specify a `Source`
+    (renamed from `Remote`).
+    Supplying `Source::RegistryWithDockerLogin` will extract the appropriate login token from the
+    dockerd daemon credentials file, appropriate to the registry you are attempting to pull
+    an image from. If `Source::RegistryWithCredentials` is used, you may specify the appropriate
+    registry address, username, and password directly.
+- BREAKING: `PullPolicy` is now specified on an `Image`, not the `Remote` (now `Source`) variant.
+- BREAKING: `RunningContainer.ports` changed and renamed to `RunningContainer.host_port`.
+    A specific port mapping can now be retrieved instead of all of them.
+
+### Fixed
 - Anonymous volumes are now cleaned up during teardown.
-- `LogOptions` now has a default value if not specified.
-- BREAKING: `RunningContainer.ports` changed and renamed to `RunningContainer.host_port`. A specific port mapping can now be retrieved
-instead of all of them.
 
 ## 0.2.1
 
