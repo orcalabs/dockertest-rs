@@ -306,7 +306,17 @@ impl Runner {
         );
 
         if let Some(id) = self.config.container_id.clone() {
-            self.add_self_to_network(id).await?;
+            if let Err(e) = self.add_self_to_network(id).await {
+                if let Err(e) = self.client.remove_network(&self.network).await {
+                    event!(
+                        Level::ERROR,
+                        "unable to remove docker network `{}`: {}",
+                        self.network,
+                        e
+                    );
+                }
+                return Err(e);
+            }
         }
 
         res
