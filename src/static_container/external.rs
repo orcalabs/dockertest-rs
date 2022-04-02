@@ -29,6 +29,7 @@ impl ExternalContainers {
             }
             let external = StaticExternalContainer {
                 handle: running.handle.clone(),
+                id: running.id().to_string(),
             };
             Ok(external)
         } else {
@@ -42,6 +43,7 @@ impl ExternalContainers {
             let running = running_container_from_composition(composition, client, details).await?;
             let external = StaticExternalContainer {
                 handle: running.handle.clone(),
+                id: running.id().to_string(),
             };
             map.insert(running.name.clone(), running);
 

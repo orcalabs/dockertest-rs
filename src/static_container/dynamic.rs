@@ -45,6 +45,7 @@ impl DynamicContainers {
                 DynamicStatus::RunningPrior(c) => {
                     Ok(CreatedContainer::StaticExternal(StaticExternalContainer {
                         handle: c.handle.clone(),
+                        id: c.id().to_string(),
                     }))
                 }
             }
@@ -79,6 +80,7 @@ impl DynamicContainers {
 
                     let external = StaticExternalContainer {
                         handle: running.handle.clone(),
+                        id: running.id().to_string(),
                     };
                     map.insert(running.name.clone(), DynamicStatus::RunningPrior(running));
 

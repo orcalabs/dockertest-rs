@@ -40,6 +40,7 @@ pub struct Orbiting {
 /// The last phase.
 pub struct Debris {
     kept: Vec<CleanupContainer>,
+    external: Vec<StaticExternalContainer>,
 }
 
 /// The internal mechanism to separate the lifecycles of a container.
@@ -405,19 +406,24 @@ impl Engine<Igniting> {
 
 impl Engine<Orbiting> {
     pub fn decommission(self) -> Engine<Debris> {
+        let mut external = Vec::new();
         let kept = self
             .phase
             .kept
             .into_iter()
             .flat_map(|x| match x {
                 Transitional::Running(r) => Some(r.into()),
+                Transitional::StaticExternal(r) => {
+                    external.push(r);
+                    None
+                }
                 _ => None,
             })
             .collect();
 
         Engine::<Debris> {
             keeper: self.keeper,
-            phase: Debris { kept },
+            phase: Debris { kept, external },
         }
     }
 
@@ -591,7 +597,7 @@ impl Engine<Debris> {
         network: &str,
         is_external_network: bool,
     ) {
-        let static_cleanup = self
+        let mut static_cleanup: Vec<&str> = self
             .phase
             .kept
             .iter()
@@ -603,6 +609,12 @@ impl Engine<Debris> {
                 }
             })
             .collect();
+
+        self.phase
+            .external
+            .iter()
+            .for_each(|e| static_cleanup.push(e.id.as_str()));
+
         STATIC_CONTAINERS
             .cleanup(client, network, is_external_network, static_cleanup)
             .await;
