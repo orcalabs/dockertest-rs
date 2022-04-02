@@ -15,6 +15,7 @@ pub use running::RunningContainer;
 #[derive(Clone)]
 pub struct StaticExternalContainer {
     pub handle: String,
+    pub id: String,
 }
 
 pub enum CreatedContainer {
