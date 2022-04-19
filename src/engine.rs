@@ -126,7 +126,6 @@ impl Engine<Bootstrapping> {
 
 impl Engine<Fueling> {
     // TODO(REFACTOR): Create a type for the absurd (String, String, String) tuple
-    // This function assumes that `resolve_final_container_name` has already been called.
     pub fn resolve_inject_container_name_env(&mut self) -> Result<(), DockerTestError> {
         // Due to ownership issues, we must iterate once to verify that the handlers resolve
         // correctly, and thereafter we must apply the mutable changes to the env
@@ -236,12 +235,9 @@ impl Engine<Fueling> {
 }
 
 impl Engine<Igniting> {
-    /// On success, all the original error clauses for creating the container will be returned.
-    pub async fn cleanup(self) -> Result<Vec<DockerTestError>, DockerTestError> {
-        // Create futures for each container we should cleanup
-        todo!("cleanup")
-    }
-
+    /// Move the engine forward into [Orbiting] phase.
+    ///
+    /// This will start and execute the relevant waitfor directives for each container.
     pub async fn orbiting(
         mut self,
     ) -> Result<Engine<Orbiting>, (Engine<Igniting>, DockerTestError)> {
@@ -400,6 +396,45 @@ impl Engine<Igniting> {
         match first_error {
             None => Ok(running_relaxed),
             Some(e) => Err(e),
+        }
+    }
+
+    // QUESTION: Create a structured object with metadata from the composition for
+    // the object representation a creation failure?
+    pub fn creation_failures(&self) -> Vec<DockerTestError> {
+        self.phase
+            .kept
+            .iter()
+            .flat_map(|e| match e {
+                Transitional::CreationFailure(err) => Some(err),
+                _ => None,
+            })
+            .cloned()
+            .collect()
+    }
+
+    /// Transforming the engine into one holding all debris containers
+    /// we can teardown and handle.
+    pub fn decommission(self) -> Engine<Debris> {
+        let mut external = Vec::new();
+        let kept = self
+            .phase
+            .kept
+            .into_iter()
+            .flat_map(|x| match x {
+                Transitional::Running(r) => Some(r.into()),
+                Transitional::Pending(r) => Some(r.into()),
+                Transitional::StaticExternal(s) => {
+                    external.push(s);
+                    None
+                }
+                Transitional::Sentinel | Transitional::CreationFailure(_) => None,
+            })
+            .collect();
+
+        Engine::<Debris> {
+            keeper: self.keeper,
+            phase: Debris { kept, external },
         }
     }
 }
@@ -646,37 +681,22 @@ impl Engine<Debris> {
             .filter(|c| !c.is_static())
             .collect();
 
-        join_all(
-            cleanup
-                .iter()
-                .map(|c| {
-                    // It's unlikely that anonymous volumes will be used by several containers. In this
-                    // case there will be remove errors that it's possible just to ignore (see
-                    // https://github.com/moby/moby/blob/7b9275c0da707b030e62c96b679a976f31f929d3/daemon/mounts.go#L34).
-                    //
-                    let options = Some(RemoveContainerOptions {
-                        force: true,
-                        v: true,
-                        ..Default::default()
-                    });
+        let futures = cleanup
+            .iter()
+            .map(|c| {
+                // It's unlikely that anonymous volumes will be used by several containers.
+                // In this case there will be remove errors that it's possible just to ignore
+                // See:
+                // https://github.com/moby/moby/blob/7b9275c0da707b030e62c96b679a976f31f929d3/daemon/mounts.go#L34).
+                let options = Some(RemoveContainerOptions {
+                    force: true,
+                    v: true,
+                    ..Default::default()
+                });
 
-                    client.remove_container(&c.id, options)
-                })
-                .collect::<Vec<_>>(),
-        )
-        .await;
-
-        let mut remove_futs = Vec::new();
-        for c in cleanup.iter() {
-            // It's unlikely that anonymous volumes will be used by several containers. In this
-            // case there will be remove errors that it's possible just to ignore. See:
-            // https://github.com/moby/moby/blob/7b9275c0da707b030e62c96b679a976f31f929d3/daemon/mounts.go#L34
-            let options = Some(RemoveContainerOptions {
-                force: true,
-                v: true,
-                ..Default::default()
-            });
-            remove_futs.push(client.remove_container(&c.id, options));
-        }
+                client.remove_container(&c.id, options)
+            })
+            .collect::<Vec<_>>();
+        join_all(futures).await;
     }
 }
