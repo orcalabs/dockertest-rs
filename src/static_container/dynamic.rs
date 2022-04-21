@@ -39,10 +39,17 @@ impl DynamicContainers {
         if let Some(status) = map.get(&composition.container_name) {
             match status {
                 DynamicStatus::Pending(p) | DynamicStatus::Running(_, p) => {
+                    if let Some(n) = network {
+                        add_to_network(&p.id, n, client).await?;
+                    }
                     Ok(CreatedContainer::Pending(p.clone()))
                 }
                 DynamicStatus::Failed(e, _) => Err(e.clone()),
                 DynamicStatus::RunningPrior(c) => {
+                    if let Some(n) = network {
+                        add_to_network(&c.id, n, client).await?;
+                    }
+
                     Ok(CreatedContainer::StaticExternal(StaticExternalContainer {
                         handle: c.handle.clone(),
                         id: c.id().to_string(),
@@ -77,6 +84,10 @@ impl DynamicContainers {
                     }
                     let running =
                         running_container_from_composition(composition, client, d).await?;
+
+                    if let Some(n) = network {
+                        add_to_network(&running.id, n, client).await?;
+                    }
 
                     let external = StaticExternalContainer {
                         handle: running.handle.clone(),
