@@ -1,6 +1,7 @@
 use crate::{
     container::{CreatedContainer, HostPortMappings},
-    Composition, DockerTestError, PendingContainer, RunningContainer, StaticManagementPolicy,
+    Composition, DockerTestError, Network, PendingContainer, RunningContainer,
+    StaticManagementPolicy,
 };
 use dynamic::DynamicContainers;
 use external::ExternalContainers;
@@ -17,6 +18,9 @@ use tracing::{event, Level};
 mod dynamic;
 mod external;
 mod internal;
+mod network;
+
+pub(crate) use network::SCOPED_NETWORKS;
 
 // Internal static object to keep track of all static containers.
 //
@@ -47,30 +51,26 @@ impl StaticContainers {
         composition: Composition,
         client: &Docker,
         network: Option<&str>,
-        is_external_network: bool,
+        network_mode: &Network,
     ) -> Result<CreatedContainer, DockerTestError> {
         if let Some(policy) = composition.static_management_policy() {
             match policy {
                 StaticManagementPolicy::Internal => self
                     .internal
-                    .create(composition, client, network)
+                    .create(composition, client, network, network_mode)
                     .await
                     .map(CreatedContainer::Pending),
                 StaticManagementPolicy::External => {
                     let external = self
                         .external
-                        .include(
-                            composition,
-                            client,
-                            // Do not include network for external container if the network
-                            // is already an existing network, externally managed.
-                            network.filter(|_| !is_external_network),
-                        )
+                        .include(composition, client, network, network_mode)
                         .await?;
                     Ok(CreatedContainer::StaticExternal(external))
                 }
                 StaticManagementPolicy::Dynamic => {
-                    self.dynamic.create(composition, client, network).await
+                    self.dynamic
+                        .create(composition, client, network, network_mode)
+                        .await
                 }
             }
         } else {
@@ -114,14 +114,16 @@ impl StaticContainers {
         &self,
         client: &Docker,
         network: &str,
-        is_external_network: bool,
+        network_mode: &Network,
         to_cleanup: Vec<&str>,
     ) {
-        let cleanup_map: HashSet<&str> = to_cleanup.into_iter().collect();
-        self.internal.cleanup(client, network, &cleanup_map).await;
-        self.dynamic.disconnect(client, network).await;
+        let cleanup: HashSet<&str> = to_cleanup.into_iter().collect();
+        self.internal.cleanup(client, network, &cleanup).await;
+        self.dynamic
+            .disconnect(client, network, network_mode, &cleanup)
+            .await;
         self.external
-            .disconnect(client, network, is_external_network, &cleanup_map)
+            .disconnect(client, network, network_mode, &cleanup)
             .await;
     }
 }
@@ -143,12 +145,30 @@ async fn add_to_network(
         container_id
     );
 
-    client.connect_network(network, opts).await.map_err(|e| {
-        DockerTestError::Startup(format!(
-            "failed to add static container to dockertest network: {}",
-            e
-        ))
-    })
+    match client.connect_network(network, opts).await {
+        Ok(_) => Ok(()),
+        Err(e) => match e {
+            bollard::errors::Error::DockerResponseServerError {
+                status_code,
+                message: _,
+            } => {
+                // The container was already connected to the network which is what we wanted
+                // anyway
+                if status_code == 403 {
+                    Ok(())
+                } else {
+                    Err(DockerTestError::Startup(format!(
+                        "failed to add static container to dockertest network: {}",
+                        e
+                    )))
+                }
+            }
+            _ => Err(DockerTestError::Startup(format!(
+                "failed to add static container to dockertest network: {}",
+                e
+            ))),
+        },
+    }
 }
 
 async fn remove_container(id: &str, client: &Docker) {

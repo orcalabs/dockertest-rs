@@ -7,7 +7,7 @@ use crate::container::{
 };
 use crate::static_container::STATIC_CONTAINERS;
 use crate::utils::generate_random_string;
-use crate::{Composition, DockerTestError, Source, StartPolicy};
+use crate::{Composition, DockerTestError, Network, Source, StartPolicy};
 
 use bollard::{
     container::{InspectContainerOptions, RemoveContainerOptions, StopContainerOptions},
@@ -192,7 +192,7 @@ impl Engine<Fueling> {
         self,
         client: &Docker,
         network: &str,
-        external_network: bool,
+        network_settings: &Network,
     ) -> Result<Engine<Igniting>, Engine<Igniting>> {
         event!(Level::TRACE, "creating containers");
 
@@ -203,7 +203,7 @@ impl Engine<Fueling> {
             self.phase
                 .kept
                 .into_iter()
-                .map(|c| c.create(client, Some(network), external_network)),
+                .map(|c| c.create(client, Some(network), network_settings)),
         )
         .await;
 
@@ -483,7 +483,7 @@ impl Engine<Orbiting> {
     pub async fn inspect(
         &mut self,
         client: &Docker,
-        network: &str,
+        network_name: &str,
     ) -> Result<(), Vec<DockerTestError>> {
         // TODO: Run the inspect operation in paralell with futures, and join_all
         // Need to figure out how to best update their state in their future.
@@ -529,7 +529,7 @@ impl Engine<Orbiting> {
                 .networks
                 .as_ref()
                 .unwrap()
-                .get(network)
+                .get(network_name)
             {
                 event!(
                     Level::DEBUG,
@@ -630,7 +630,7 @@ impl Engine<Debris> {
         &self,
         client: &Docker,
         network: &str,
-        is_external_network: bool,
+        network_mode: &Network,
     ) {
         let mut static_cleanup: Vec<&str> = self
             .phase
@@ -651,7 +651,7 @@ impl Engine<Debris> {
             .for_each(|e| static_cleanup.push(e.id.as_str()));
 
         STATIC_CONTAINERS
-            .cleanup(client, network, is_external_network, static_cleanup)
+            .cleanup(client, network, network_mode, static_cleanup)
             .await;
     }
 

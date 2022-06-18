@@ -1,19 +1,27 @@
 use super::{add_to_network, disconnect_container, running_container_from_composition};
 use crate::{
     container::{CreatedContainer, StaticExternalContainer},
-    Composition, DockerTestError, PendingContainer, RunningContainer,
+    Composition, DockerTestError, Network, PendingContainer, RunningContainer,
 };
 use bollard::{
     container::{InspectContainerOptions, RemoveContainerOptions},
     models::ContainerStateStatusEnum,
     Docker,
 };
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 use tokio::sync::RwLock;
 
 #[derive(Default)]
 pub struct DynamicContainers {
-    inner: Arc<RwLock<HashMap<String, DynamicStatus>>>,
+    inner: Arc<RwLock<HashMap<String, DynamicContainer>>>,
+}
+
+#[derive(Clone)]
+pub struct DynamicContainer {
+    status: DynamicStatus,
 }
 
 #[derive(Clone)]
@@ -33,22 +41,25 @@ impl DynamicContainers {
         composition: Composition,
         client: &Docker,
         network: Option<&str>,
+        network_setting: &Network,
     ) -> Result<CreatedContainer, DockerTestError> {
         let mut map = self.inner.write().await;
 
-        if let Some(status) = map.get(&composition.container_name) {
-            match status {
+        if let Some(container) = map.get_mut(&composition.container_name) {
+            match &container.status {
                 DynamicStatus::Pending(p) | DynamicStatus::Running(_, p) => {
-                    if let Some(n) = network {
-                        add_to_network(&p.id, n, client).await?;
-                    }
+                    match (network, network_setting) {
+                        (Some(n), Network::Isolated) => add_to_network(&p.id, n, client).await,
+                        _ => Ok(()),
+                    }?;
                     Ok(CreatedContainer::Pending(p.clone()))
                 }
                 DynamicStatus::Failed(e, _) => Err(e.clone()),
                 DynamicStatus::RunningPrior(c) => {
-                    if let Some(n) = network {
-                        add_to_network(&c.id, n, client).await?;
-                    }
+                    match (network, network_setting) {
+                        (Some(n), Network::Isolated) => add_to_network(&c.id, n, client).await,
+                        _ => Ok(()),
+                    }?;
 
                     Ok(CreatedContainer::StaticExternal(StaticExternalContainer {
                         handle: c.handle.clone(),
@@ -85,6 +96,8 @@ impl DynamicContainers {
                     let running =
                         running_container_from_composition(composition, client, d).await?;
 
+                    // Regardless of network mode the first to create a Dynamic container is
+                    // responsible for adding it to the network
                     if let Some(n) = network {
                         add_to_network(&running.id, n, client).await?;
                     }
@@ -93,7 +106,12 @@ impl DynamicContainers {
                         handle: running.handle.clone(),
                         id: running.id().to_string(),
                     };
-                    map.insert(running.name.clone(), DynamicStatus::RunningPrior(running));
+                    map.insert(
+                        running.name.clone(),
+                        DynamicContainer {
+                            status: DynamicStatus::RunningPrior(running),
+                        },
+                    );
 
                     Ok(CreatedContainer::StaticExternal(external))
                 }
@@ -102,13 +120,16 @@ impl DynamicContainers {
                         message: _,
                         status_code,
                     } => {
+                        // The container does not exists, we have to create it.
                         if status_code == 404 {
                             let pending = self
                                 .create_dynamic_container(composition, client, network)
                                 .await?;
                             map.insert(
                                 pending.name.clone(),
-                                DynamicStatus::Pending(pending.clone()),
+                                DynamicContainer {
+                                    status: DynamicStatus::Pending(pending.clone()),
+                                },
                             );
                             Ok(CreatedContainer::Pending(pending))
                         } else {
@@ -133,19 +154,20 @@ impl DynamicContainers {
     ) -> Result<RunningContainer, DockerTestError> {
         let mut map = self.inner.write().await;
 
-        if let Some(status) = map.get_mut(&container.name) {
-            match &status {
+        if let Some(existing) = map.get_mut(&container.name) {
+            match &existing.status {
                 DynamicStatus::Running(r, _) | DynamicStatus::RunningPrior(r) => Ok(r.clone()),
                 DynamicStatus::Pending(p) => {
                     let cloned = p.clone();
                     let running = cloned.start_internal().await;
                     match running {
                         Ok(r) => {
-                            *status = DynamicStatus::Running(r.clone(), p.clone());
+                            existing.status = DynamicStatus::Running(r.clone(), p.clone());
                             Ok(r)
                         }
                         Err(e) => {
-                            *status = DynamicStatus::Failed(e.clone(), Some(container.id.clone()));
+                            existing.status =
+                                DynamicStatus::Failed(e.clone(), Some(container.id.clone()));
                             Err(e)
                         }
                     }
@@ -164,24 +186,31 @@ impl DynamicContainers {
             .read()
             .await
             .values()
-            .filter_map(|d| match d {
+            .filter_map(|d| match &d.status {
                 DynamicStatus::Running(_, _)
                 | DynamicStatus::Pending(_)
                 | DynamicStatus::Failed(_, _) => None,
-                DynamicStatus::RunningPrior(c) => Some(c),
+                DynamicStatus::RunningPrior(c) => Some(c.clone()),
             })
-            .cloned()
             .collect()
     }
 
-    pub async fn disconnect(&self, client: &Docker, network: &str) {
-        let map = self.inner.read().await;
-        for (_, status) in map.iter() {
-            match status {
-                DynamicStatus::RunningPrior(r) | DynamicStatus::Running(r, _) => {
-                    disconnect_container(client, r.id(), network).await;
+    pub async fn disconnect(
+        &self,
+        client: &Docker,
+        network: &str,
+        network_mode: &Network,
+        to_cleanup: &HashSet<&str>,
+    ) {
+        match network_mode {
+            Network::External(_) | Network::Singular => (),
+            Network::Isolated => {
+                let containers = self.inner.read().await;
+                for (id, _) in containers.iter() {
+                    if to_cleanup.contains(id.as_str()) {
+                        disconnect_container(client, id, network).await;
+                    }
                 }
-                DynamicStatus::Pending(_) | DynamicStatus::Failed(_, _) => (),
             }
         }
     }

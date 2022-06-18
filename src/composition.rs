@@ -4,7 +4,7 @@ use crate::container::{CreatedContainer, PendingContainer};
 use crate::image::Image;
 use crate::static_container::STATIC_CONTAINERS;
 use crate::waitfor::{NoWait, WaitFor};
-use crate::DockerTestError;
+use crate::{DockerTestError, Network};
 
 use bollard::{
     container::{
@@ -533,11 +533,11 @@ impl Composition {
         self,
         client: &Docker,
         network: Option<&str>,
-        is_external_network: bool,
+        network_settings: &Network,
     ) -> Result<CreatedContainer, DockerTestError> {
         if self.is_static() {
             STATIC_CONTAINERS
-                .create(self, client, network, is_external_network)
+                .create(self, client, network, network_settings)
                 .await
         } else {
             self.create_inner(client, network)
@@ -724,7 +724,7 @@ mod tests {
     use crate::composition::{remove_container_if_exists, Composition, StartPolicy};
     use crate::image::{Image, Source};
     use crate::utils::connect_with_local_or_tls_defaults;
-    use crate::DockerTestError;
+    use crate::{DockerTestError, Network};
 
     use std::collections::HashMap;
 
@@ -902,7 +902,7 @@ mod tests {
             .is_err());
 
         // This will then fail due to missing image id
-        let result = composition.create(&client, None, false).await;
+        let result = composition.create(&client, None, &Network::Isolated).await;
         // TODO: assert a proper error message
         assert!(
             result.is_err(),
@@ -926,7 +926,7 @@ mod tests {
             .await
             .unwrap();
 
-        let result = composition.create(&client, None, false).await;
+        let result = composition.create(&client, None, &Network::Isolated).await;
         assert!(
             result.is_ok(),
             "failed to start Composition: {}",
@@ -959,7 +959,7 @@ mod tests {
         let composition2 = composition1.clone();
 
         // Initial setup - first container that already exists.
-        let result = composition1.create(&client, None, false).await;
+        let result = composition1.create(&client, None, &Network::Isolated).await;
         assert!(
             result.is_ok(),
             "failed to start first composition: {}",
@@ -968,7 +968,7 @@ mod tests {
 
         // Creating a second one should still be allowed, since we expect the first one
         // to be removed.
-        let result = composition2.create(&client, None, false).await;
+        let result = composition2.create(&client, None, &Network::Isolated).await;
         assert!(
             result.is_ok(),
             "failed to start second composition: {}",
@@ -993,7 +993,7 @@ mod tests {
             .unwrap();
 
         // Create out composition
-        let result = composition.create(&client, None, false).await;
+        let result = composition.create(&client, None, &Network::Isolated).await;
         assert!(
             result.is_ok(),
             "failed to start composition: {}",
