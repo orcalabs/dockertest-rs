@@ -98,15 +98,25 @@ impl DynamicContainers {
                     Ok(CreatedContainer::StaticExternal(external))
                 }
                 Err(e) => match e {
-                    bollard::errors::Error::DockerResponseNotFoundError { message: _ } => {
-                        let pending = self
-                            .create_dynamic_container(composition, client, network)
-                            .await?;
-                        map.insert(
-                            pending.name.clone(),
-                            DynamicStatus::Pending(pending.clone()),
-                        );
-                        Ok(CreatedContainer::Pending(pending))
+                    bollard::errors::Error::DockerResponseServerError {
+                        message: _,
+                        status_code,
+                    } => {
+                        if status_code == 404 {
+                            let pending = self
+                                .create_dynamic_container(composition, client, network)
+                                .await?;
+                            map.insert(
+                                pending.name.clone(),
+                                DynamicStatus::Pending(pending.clone()),
+                            );
+                            Ok(CreatedContainer::Pending(pending))
+                        } else {
+                            Err(DockerTestError::Daemon(format!(
+                                "failed to inspect dynamic container: {}",
+                                e
+                            )))
+                        }
                     }
                     _ => Err(DockerTestError::Daemon(format!(
                         "failed to inspect dynamic container: {}",

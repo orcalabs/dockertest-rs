@@ -171,8 +171,15 @@ impl Image {
                 },
                 Err(e) => {
                     let msg = match e {
-                        Error::DockerResponseNotFoundError { .. } => {
-                            "unknown registry or image".to_string()
+                        Error::DockerResponseServerError {
+                            message: _,
+                            status_code,
+                        } => {
+                            if status_code == 404 {
+                                "unknown registry or image".to_string()
+                            } else {
+                                e.to_string()
+                            }
                         }
                         _ => e.to_string(),
                     };
@@ -206,7 +213,7 @@ impl Image {
         {
             Ok(details) => {
                 let mut id = self.id.write().expect("failed to get id lock");
-                *id = details.id;
+                *id = details.id.expect("image did not have an id");
                 Ok(())
             }
             Err(e) => {
@@ -236,7 +243,16 @@ impl Image {
         {
             Ok(_) => Ok(true),
             Err(e) => match e {
-                Error::DockerResponseNotFoundError { .. } => Ok(false),
+                Error::DockerResponseServerError {
+                    message: _,
+                    status_code,
+                } => {
+                    if status_code == 404 {
+                        Ok(false)
+                    } else {
+                        Err(DockerTestError::Daemon(e.to_string()))
+                    }
+                }
                 _ => Err(DockerTestError::Daemon(e.to_string())),
             },
         }

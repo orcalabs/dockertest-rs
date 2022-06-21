@@ -63,7 +63,16 @@ pub(crate) async fn image_exists_locally(
         .map(|result| match result {
             Ok(_) => Ok(true),
             Err(e) => match e {
-                Error::DockerResponseNotFoundError { .. } => Ok(false),
+                Error::DockerResponseServerError {
+                    message: _,
+                    status_code,
+                } => {
+                    if status_code == 404 {
+                        Ok(false)
+                    } else {
+                        Err(DockerTestError::Daemon(e.to_string()))
+                    }
+                }
                 _ => Err(DockerTestError::Daemon(e.to_string())),
             },
         })
@@ -148,7 +157,7 @@ pub(crate) async fn image_id(
         .inspect_image(&format!("{}:{}", repository, tag))
         .await
         .map_err(|e| DockerTestError::Processing(format!("failed to get image id {}", e)))
-        .map(|res| res.id)
+        .map(|res| res.id.unwrap())
 }
 
 /*
