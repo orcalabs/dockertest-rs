@@ -88,18 +88,25 @@ impl PendingContainer {
             .start_container(&self.name, None::<StartContainerOptions<String>>)
             .await
             .map_err(|e| match e {
-                Error::DockerResponseNotFoundError { message } => {
-                    let json: Result<serde_json::Value, serde_json::error::Error> =
-                        serde_json::from_str(message.as_str());
-                    match json {
-                        Ok(json) => DockerTestError::Startup(format!(
-                            "failed to start container due to `{}`",
-                            json["message"].as_str().unwrap()
-                        )),
-                        Err(e) => DockerTestError::Daemon(format!(
-                            "daemon json response decode failure: {}",
-                            e
-                        )),
+                Error::DockerResponseServerError {
+                    message,
+                    status_code,
+                } => {
+                    if status_code == 404 {
+                        let json: Result<serde_json::Value, serde_json::error::Error> =
+                            serde_json::from_str(message.as_str());
+                        match json {
+                            Ok(json) => DockerTestError::Startup(format!(
+                                "failed to start container due to `{}`",
+                                json["message"].as_str().unwrap()
+                            )),
+                            Err(e) => DockerTestError::Daemon(format!(
+                                "daemon json response decode failure: {}",
+                                e
+                            )),
+                        }
+                    } else {
+                        DockerTestError::Daemon(format!("failed to start container: {}", message))
                     }
                 }
                 _ => DockerTestError::Daemon(format!("failed to start container: {}", e)),

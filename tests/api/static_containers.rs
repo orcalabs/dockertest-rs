@@ -61,7 +61,7 @@ async fn test_external_static_container_handle_resolves_correctly_mixed_with_oth
             client
                 .inspect_image(&format!("{}:{}", "dockertest-rs/hello", "latest"))
                 .await
-                .map(|res| res.id)
+                .map(|res| res.id.unwrap())
                 .expect("should get image id"),
         ),
         ..Default::default()
