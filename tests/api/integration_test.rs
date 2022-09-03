@@ -247,3 +247,26 @@ fn test_host_port_returns_ports_exposed_by_publish_all() {
         assert_eq!(Ipv4Addr::UNSPECIFIED, ports.0);
     });
 }
+
+#[test]
+fn test_ip_on_running_container_with_namespaced_instance() {
+    let source = Source::DockerHub;
+    let mut test = DockerTest::new()
+        .with_default_source(source)
+        .with_namespace("test");
+
+    let repo = "luca3m/sleep";
+    let sleep_container = Composition::with_repository(repo).with_wait_for(Box::new(RunningWait {
+        max_checks: 10,
+        check_interval: 60,
+    }));
+
+    test.add_composition(sleep_container);
+
+    test.run(|ops| async move {
+        let handle = ops.handle(repo);
+        // UNSPECIFIED is the default ip-addr.
+        // - we simply check that we have populated with something else.
+        assert_ne!(handle.ip(), &std::net::Ipv4Addr::UNSPECIFIED);
+    });
+}

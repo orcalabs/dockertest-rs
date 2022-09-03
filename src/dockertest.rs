@@ -32,6 +32,7 @@ pub struct DockerTest {
 
 /// Describes the docker network configuration for [DockerTest]
 /// The default value if not provided is [Network::Singular]
+#[derive(Debug)]
 pub enum Network {
     /// A singular docker network named `dockertest` is created and shared by all dockertest instances and the network
     /// itself will never be deleted. It will be reused instead of created if it already exists.

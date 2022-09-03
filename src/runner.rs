@@ -152,7 +152,11 @@ impl Runner {
             // And since we need the network reference now, we need to create the network upfront instead of during `resolve_network'.
             Network::Singular => {
                 SCOPED_NETWORKS
-                    .create_singular_network(&client, own_container_id().as_deref())
+                    .create_singular_network(
+                        &client,
+                        own_container_id().as_deref(),
+                        &config.namespace,
+                    )
                     .await?
             }
         };
@@ -235,12 +239,12 @@ impl Runner {
         // which of the networks named `dockertest` to use and it will be the only network the
         // containers are connected to.
         let network_name = match self.config.network {
-            Network::Singular => SCOPED_NETWORKS.name(),
-            Network::External(_) | Network::Isolated => self.network.as_str(),
+            Network::Singular => SCOPED_NETWORKS.name(&self.config.namespace),
+            Network::External(_) | Network::Isolated => self.network.clone(),
         };
 
         // Run container inspection to get up-to-date runtime information
-        if let Err(mut errors) = engine.inspect(&self.client, network_name).await {
+        if let Err(mut errors) = engine.inspect(&self.client, &network_name).await {
             let total = errors.len();
             errors.iter().enumerate().for_each(|(i, e)| {
                 trace!("container {} of {} inspect failures: {}", i + 1, total, e);
