@@ -28,7 +28,7 @@ use tracing::{event, Level};
 ///     all Compositions with a relaxed policy will be started concurrently.
 ///     These are all started asynchrously started before the strict policy containers
 ///     are started sequentially.
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Eq)]
 pub enum StartPolicy {
     /// Concurrently start the Container with other Relaxed instances.
     Relaxed,
@@ -55,7 +55,7 @@ pub enum StartPolicy {
 ///     The purpose of this is to facilitate running tests locally and in CI/CD pipelines without having to alter management policies.
 ///     If a container already exists in a non-running state with the same name as a container with this policy, the startup
 ///     procedure will fail.
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Eq)]
 pub enum StaticManagementPolicy {
     /// The lifecycle of the container is managed by the user.
     External,
@@ -755,10 +755,7 @@ mod tests {
             "there should be no commands after constructing a Composition"
         );
 
-        let equal = match instance.start_policy {
-            StartPolicy::Relaxed => true,
-            _ => false,
-        };
+        let equal = matches!(instance.start_policy, StartPolicy::Relaxed);
         assert!(equal, "start_policy should default to relaxed");
     }
 
@@ -790,10 +787,7 @@ mod tests {
             "there should be no commands after constructing a Composition"
         );
 
-        let equal = match instance.start_policy {
-            StartPolicy::Relaxed => true,
-            _ => false,
-        };
+        let equal = matches!(instance.start_policy, StartPolicy::Relaxed);
         assert!(equal, "start_policy should default to relaxed");
     }
 
@@ -810,8 +804,7 @@ mod tests {
         let expected_env = env.clone();
 
         let cmd = "this_is_a_command".to_string();
-        let mut cmds = Vec::new();
-        cmds.push(cmd);
+        let cmds = vec![cmd];
 
         let expected_cmds = cmds.clone();
 
@@ -825,10 +818,7 @@ mod tests {
             .with_cmd(cmds)
             .with_container_name(container_name);
 
-        let equal = match instance.start_policy {
-            StartPolicy::Strict => true,
-            _ => false,
-        };
+        let equal = matches!(instance.start_policy, StartPolicy::Strict);
 
         assert!(equal, "start_policy was not changed after invoking mutator");
         assert_eq!(
@@ -1019,10 +1009,7 @@ mod tests {
 
         let res = match result {
             Ok(_) => false,
-            Err(e) => match e {
-                DockerTestError::Recoverable(_) => true,
-                _ => false,
-            },
+            Err(e) => matches!(e, DockerTestError::Recoverable(_)),
         };
         assert!(res, "should fail to remove non-existing container");
     }
@@ -1039,7 +1026,7 @@ mod tests {
 
         let expected_output = format!("{}-{}-{}", namespace, repository, suffix);
 
-        composition.configure_container_name(&namespace, suffix);
+        composition.configure_container_name(namespace, suffix);
 
         assert_eq!(
             composition.container_name, expected_output,
@@ -1061,7 +1048,7 @@ mod tests {
 
         let expected_output = format!("{}-{}-{}", namespace, container_name, suffix);
 
-        composition.configure_container_name(&namespace, suffix);
+        composition.configure_container_name(namespace, suffix);
 
         assert_eq!(
             composition.container_name, expected_output,
@@ -1086,7 +1073,7 @@ mod tests {
 
         let expected_output = format!("{}-{}-{}", namespace, expected_container_name, suffix);
 
-        composition.configure_container_name(&namespace, suffix);
+        composition.configure_container_name(namespace, suffix);
 
         assert_eq!(
             composition.container_name, expected_output,
@@ -1109,7 +1096,7 @@ mod tests {
 
         let expected_output = format!("{}-{}-{}", namespace, expected_container_name, suffix);
 
-        composition.configure_container_name(&namespace, suffix);
+        composition.configure_container_name(namespace, suffix);
 
         assert_eq!(
             composition.container_name, expected_output,

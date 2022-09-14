@@ -106,7 +106,7 @@ pub(crate) async fn remove_containers(
 
     let options = ListContainersOptions {
         all: true,
-        filters: filters,
+        filters,
         ..Default::default()
     };
 

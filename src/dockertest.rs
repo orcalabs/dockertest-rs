@@ -196,10 +196,7 @@ mod tests {
             "default namespace was not set correctly"
         );
 
-        let equal = match *test.source() {
-            Source::Local => true,
-            _ => false,
-        };
+        let equal = matches!(*test.source(), Source::Local);
 
         assert!(equal, "source not set to local by default");
     }
@@ -221,10 +218,7 @@ mod tests {
     fn test_with_default_source() {
         let test = DockerTest::new().with_default_source(Source::DockerHub);
 
-        let equal = match test.default_source {
-            Source::DockerHub => true,
-            _ => false,
-        };
+        let equal = matches!(test.default_source, Source::DockerHub);
 
         assert!(equal, "default_source was not set correctly");
     }
