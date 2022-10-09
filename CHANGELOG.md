@@ -3,6 +3,20 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- Added new mechanism to construct Compositions, which are now private. The trait
+    `ContainerSpecification` is implemented for each struct that represent a different lifecycle
+    management mode for the container it specifies. Thus, providing a `StaticManagement` mode is
+    no longer directly exposed, but indirectly through the four container specifications:
+    `TestBodyContainer`(normal), `TestSuiteContainer`(internal), `DynamicContainer`(dynamic),
+    and `ExternalContainer`(external).
+- Added `DockerTest::provide_container(c: impl ContainerSpecification)`.
+
+### Changed
+- BREAKING `WaitFor` now has a `Debug` trait bound.
+- BREAKING Made `Composition` non-public.
+- BREAKING Removed `DockerTest::add_composition`. Use `DockerTest::provide_container` instead.
+
 ## 0.3
 
 ### Added

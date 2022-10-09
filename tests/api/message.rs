@@ -1,13 +1,12 @@
 use dockertest::waitfor::MessageSource;
-use dockertest::{Composition, DockerTest};
+use dockertest::{DockerTest, TestBodySpecification};
 use test_log::test;
 
 #[test]
 fn test_assert_message_in_test_body_succeeds() {
     let mut test = DockerTest::new();
-    let composition = Composition::with_repository("dockertest-rs/hello");
-
-    test.add_composition(composition);
+    let composition = TestBodySpecification::with_repository("dockertest-rs/hello");
+    test.provide_container(composition);
 
     test.run(|ops| async move {
         let hello = ops.handle("dockertest-rs/hello");
@@ -21,9 +20,8 @@ fn test_assert_message_in_test_body_succeeds() {
 #[should_panic]
 fn test_assert_message_in_test_body_panics_not_present() {
     let mut test = DockerTest::new();
-    let composition = Composition::with_repository("dockertest-rs/hello");
-
-    test.add_composition(composition);
+    let composition = TestBodySpecification::with_repository("dockertest-rs/hello");
+    test.provide_container(composition);
 
     test.run(|ops| async move {
         let hello = ops.handle("dockertest-rs/hello");

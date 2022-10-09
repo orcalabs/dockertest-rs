@@ -123,8 +123,8 @@ impl RunningContainer {
     /// if the docker container enters an exited state, this function will still return
     /// the original ip assigned to the container.
     ///
-    /// If the [ExitedWait] for strategy is employed on the `Composition`, the `RunningContainer`
-    /// will, somewhat contradictory to its name, be in an exited status when the test body
+    /// If the [ExitedWait] for strategy is employed, the `RunningContainer` will, somewhat
+    /// contradictory to its name, be in an exited status when the test body
     /// is entered. For this scenarion, this function will return [Ipv4Addr::UNSPECIFIED].
     ///
     /// On Windows this method always returns `127.0.0.1` due to Windows not supporting using

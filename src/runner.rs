@@ -101,16 +101,14 @@ impl DockerOperations {
 
     /// Retrieve the `RunningContainer` identified by this handle.
     ///
-    /// A handle for a [RunningContainer] will be either:
-    /// a) the `repository` name for the [Image](crate::image::Image) when creating the `Composition`
-    /// b) the container name configured on `Composition` [with_container_name].
+    /// A container is identified within dockertest by its assigned or derived handler.
+    /// If no explictly set through `set_handle`, the value will be equal to the
+    /// repository name used when creating the container.
     ///
     /// # Panics
     /// This function panics if the requested handle does not exist, or there
     /// are conflicting containers with the same repository name is present without custom
     /// configured container names.
-    ///
-    /// [with_container_name]: crate::Composition::with_container_name
     pub fn handle<'a>(&'a self, handle: &'a str) -> &'a RunningContainer {
         event!(Level::DEBUG, "requesting handle '{}", handle);
         match self.try_handle(handle) {

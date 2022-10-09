@@ -18,7 +18,7 @@ use std::sync::RwLock;
 /// Represents a docker `Image`.
 ///
 /// This structure embeds the information related to its naming, tag and `Source` location.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Image {
     repository: String,
     tag: String,

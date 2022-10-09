@@ -18,17 +18,19 @@ use bollard::{
 
 use futures::future::TryFutureExt;
 use std::collections::HashMap;
-use tracing::{event, Level};
+use tracing::{event, trace, Level};
 
-/// Specifies the starting policy of a [Composition].
+/// Specifies the starting policy of a container specification.
 ///
-/// - [StartPolicy::Strict] policy will enforce that the composition is started in the order
-///     it was added to [crate::DockerTest].
+/// - [StartPolicy::Strict] policy will enforce that the container is started in the order
+///     it was added to [DockerTest].
 /// - [StartPolicy::Relaxed] policy will not enforce any ordering,
-///     all Compositions with a relaxed policy will be started concurrently.
+///     all container specifications with a relaxed policy will be started concurrently.
 ///     These are all started asynchrously started before the strict policy containers
 ///     are started sequentially.
-#[derive(Clone, PartialEq, Eq)]
+///
+/// [DockerTest]: crate::DockerTest
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum StartPolicy {
     /// Concurrently start the Container with other Relaxed instances.
     Relaxed,
@@ -40,7 +42,7 @@ pub enum StartPolicy {
 ///
 /// - [StaticManagementPolicy::External] indicates that the user is responsible for managing the
 ///     container, DockerTest will never start or remove/stop the container. The container will
-///     be available through its handle in [crate::DockerOperations]. If no external network is
+///     be available through its handle in [DockerOperations]. If no external network is
 ///     supplied, the test-scoped network will be added to the external network, and subsequently
 ///     removed once the test terminates.
 ///     The externally managed container is assumed to be in a running state when the test starts.
@@ -55,7 +57,9 @@ pub enum StartPolicy {
 ///     The purpose of this is to facilitate running tests locally and in CI/CD pipelines without having to alter management policies.
 ///     If a container already exists in a non-running state with the same name as a container with this policy, the startup
 ///     procedure will fail.
-#[derive(Clone, PartialEq, Eq)]
+///
+/// [DockerOperations]: crate::DockerOperations
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum StaticManagementPolicy {
     /// The lifecycle of the container is managed by the user.
     External,
@@ -66,7 +70,7 @@ pub enum StaticManagementPolicy {
     Dynamic,
 }
 
-/// Specifies how should a [Composition] handle logs.
+/// Specifies how should dockertest should handle log output from this container.
 #[derive(Clone, Debug)]
 pub enum LogAction {
     /// Forward all outputs to their respective output sources of the dockertest process.
@@ -104,10 +108,10 @@ pub enum LogPolicy {
     OnStartupError,
 }
 
-/// Specifies how [Composition] should handle container logging.
+/// Specifies how dockertest should handle logging output from this specific container.
 #[derive(Clone, Debug)]
 pub struct LogOptions {
-    /// The logging actions to be performed
+    /// The logging actions to be performed.
     pub action: LogAction,
     /// Under which conditions should we perform the log actions?
     pub policy: LogPolicy,
@@ -127,23 +131,15 @@ impl Default for LogOptions {
 
 /// Represents an instance of an [Image].
 ///
-/// The [Composition] is used to specialize an image whose name, version, tag and source is known,
+/// The Composition is used to specialize an image whose name, version, tag and source is known,
 /// but before one can create a [crate::container:: RunningContainer] from an image,
 /// it must be augmented with information about how to start it, how to ensure it has been
 /// started, environment variables and runtime commands.
 /// Thus, this structure represents the concrete instance of an [Image] that will be started
 /// and become a [crate::container::RunningContainer].
 ///
-/// # Examples
-/// ```rust
-/// # use dockertest::Composition;
-/// let mut hello = Composition::with_repository("hello-world")
-///     .with_container_name("my-hello-world")
-///     .with_cmd(vec!["command".to_string(), "arg".to_string()]);
-/// hello.env("MY_ENV", "MY VALUE");
-/// hello.cmd("appended_to_original_cmd!");
-/// ```
-#[derive(Clone)]
+/// NOTE: This is an internal implementation detail. This used to be a public interface.
+#[derive(Clone, Debug)]
 pub struct Composition {
     /// User provided name of the container.
     ///
@@ -327,8 +323,8 @@ impl Composition {
     /// Allocates an ephemeral host port for all of the container's exposed ports.
     ///
     /// Mapped host ports can be found via [crate::container::RunningContainer::host_port] method.
-    pub fn publish_all_ports(&mut self) -> &mut Composition {
-        self.publish_all_ports = true;
+    pub fn publish_all_ports(&mut self, publish: bool) -> &mut Composition {
+        self.publish_all_ports = publish;
         self
     }
 
@@ -505,7 +501,7 @@ impl Composition {
         &self.management
     }
 
-    /// Query whether or not a [StaticManagementPolicy] has been assigned to this composition.
+    /// Query whether this Composition should be handled through static container checks.
     fn is_static(&self) -> bool {
         self.management.is_some()
     }
@@ -537,6 +533,7 @@ impl Composition {
         network: Option<&str>,
         network_settings: &Network,
     ) -> Result<CreatedContainer, DockerTestError> {
+        trace!("evaluating composition: {self:#?}");
         if self.is_static() {
             STATIC_CONTAINERS
                 .create(self, client, network, network_settings)
@@ -666,6 +663,8 @@ impl Composition {
             exposed_ports: Some(exposed_ports),
             ..Default::default()
         };
+
+        trace!("creating container from options: {options:#?}, config: {config:#?}");
 
         let container_info = client
             .create_container(options, config)

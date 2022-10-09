@@ -5,54 +5,60 @@
 
 //! _dockertest_ is a testing and automation abstraction for Docker.
 //!
-//! The primary utility for this crate is to easily employ docker in test infrastructure,
-//! with the following key features:
-//! * Optionally enable connection to a Docker daemon via TLS on top of TCP or connect locally via
-//!   unix socket (named pipe on Windows)
-//! * Ensure that the docker container is running prior to test code.
-//!  * Support multiple containers per test.
-//!  * Support multiple containers from same image, with different configurations.
-//! * Retrieve [Image] from remote source according to [PullPolicy].
-//! * Support custom registries, which can be individually assigned to [Image].
-//! * Dictate how each [RunningContainer] is created and operated from an [Image]
-//!   through a [Composition].
-//!  * This allows us to have muliple containers with the same Image,
-//!    but with different start conditions.
-//! * Control each [Composition] condition for when it is deemed running through [WaitFor].
-//!  * There exists multiple convenient [WaitFor] implementations, however, user-supplied
-//!    implementations through the trait can be provided.
-//! * Control the [StartPolicy] of each [Composition]. For inter-dependant
-//!   containers, a Strict policy can be sat, and they will be started in succession until
-//!   their [WaitFor] condition is met, according to the order they where added to [DockerTest].
+//! This testing library enables control and lifecycle management with docker containers
+//! from an integration test, taking full care of start and cleanup phases. Containers can
+//! be backed by various container registries, even behind authentication barrier.
 //!
-//! Once the [DockerTest] test is `run`, the provided closure will be ran once
-//! all predicates for each supplied [Composition] has successfully been fulfilled.
-//! The closure is provided with one [DockerOperations] parameter, allowing the test body
-//! to interact with [DockerTest] and each individual [RunningContainer].
-//! The reference to each [RunningContainer] is queried through a handle, which is the user-provided
-//! container name, specified in [Composition] through [Composition::with_container_name]. See the Handle
-//! section.
+//! The main entrypoint to construct and a run a dockertest powered integration test starts
+//! with [DockerTest].
 //!
-//! # Handle - referencing the same container throughout your test
+//! The underlying docker engine to use can be configured through:
+//! - UNIX domain socket (linux)
+//! - Named pipes (windows)
+//! - TCP with TLS
+//! - Piped through a docker-in-docker container where the execution occurs, to run on the
+//! underlying docker engine.
 //!
-//! _dockertest_ assigns a `handle` to each [Composition], which carries over to a
-//! [RunningContainer]. When writing a test, one will reference the intended object through its
-//! handle.
+//! The main bread-and-butter of this library is the ability to specify which containers are
+//! required for a test, and how one should ensure that the container is properly running prior
+//! to starting the actual test body. Furthermore, dockertest supports interacting with existing
+//! containers, without interfering with its lifecycle management.
 //!
-//! By default, the handle is auto-assigned to be the repository name of the [Composition].
+//! ## Lifecycle management
 //!
-//! The user may change the handle by changing the container name
-//! (as seen from the user - the final container name will be disambiguated for each _dockertest_)
-//! through the [Composition::with_container_name] builder method on [Composition].
+//! There are multiple ways to control and interact with containers, with various trade-offs.
 //!
-//! If the test includes multiple [Composition]s with the same handle,
-//! attempting to reference one that has multiple occurrences will fail the test at runtime.
+//! ### Full isolation - `TestBodySpecification`
 //!
-//! # WaitFor - Control how to determine when the container is ready
+//! The container is created, started, and cleaned up entirely within a single test body. This is
+//! the highest level of isolation, and no other tests can interfere with this container. The main
+//! drawback of this method is the high wall-time needed to start these containers. If there are
+//! many integration tests in this mode, the total test run-time will be made primarily by the
+//! container management overhead.
 //!
-//! Each [Composition] require a trait object of [WaitFor] whose method
-//! [WaitFor::wait_for_ready] must resolve until the container can become a [RunningContainer].
-//! This trait may be implemented and supplied to [Composition] through [Composition::with_wait_for].
+//! ### Externally managed - `ExternalSpecification`
+//!
+//! The container is _never_ touched by dockertest. It is assumed to be started by some external
+//! entity, and the container is never teared down by dockertest. Prior to running the test body,
+//! the existence of the external container is verified.
+//!
+//! ### Conditionally managed - `DynamicSpecification`
+//!
+//! The containers lifecycle is only managed for creation, but not deletion. When multiple
+//! specifications relate to the same underlying container, dockertest will attempt to locate
+//! an existing container, and reuse this container to fulfill the specification. Once the
+//! test body exists, the container will be left running.
+//!
+//! This mode is useful in when there are multiple tests, over a long period of development time,
+//! that can utilize the same underlying container without causing cross-test contamination.
+//! This will lead to significantly faster test execution time.
+//!
+//! # `WaitFor` - determining when a container is ready
+//!
+//! Each container that dockertest creates and starts must also have a policy to detect
+//! when the container it has started is actually ready to start serving the test body.
+//! This is achived through a trait object [WaitFor], where an implementation can be provided
+//! outside of dockertest.
 //!
 //! The batteries included implementations are:
 //! * [RunningWait] - wait for the container to report _running_ status.
@@ -60,39 +66,36 @@
 //! * [NoWait] - don't wait for anything
 //! * [MessageWait] - wait for the following message to appear in the log stream.
 //!
-//! # Prune policy
+//! # Environment variables
 //!
-//! By default, _dockertest_ will stop and remove all containers and created volumes
+//! The following set of environment variables can impact running tests utilizing dockertest.
+//!
+//! ## Prune policy
+//!
+//! By default, dockertest will stop and remove all containers and created volumes
 //! regardless of execution result. You can control this policy by setting the environment variable
 //! `DOCKERTEST_PRUNE`:
-//! * "always": default remove everything
-//! * "never": leave all containers running
-//! * "stop_on_failure": stop containers on execution failure
-//! * "running_on_failure": leave containers running on execution failure
+//! * `always`: default remove everything
+//! * `never`: leave all containers running
+//! * `stop_on_failure`: stop containers on execution failure
+//! * `running_on_failure`: leave containers running on execution failure
 //!
-//! # Viewing logs of test execution
-//! _dockertest_ utilizes the `tracing` log infrastructure. To enable this log output,
-//! you must perform enable a subscriber to handle the events.
-//! This can easily be done by for instance the wrapper crate `test-env-log`, that provides
-//! a new impl of the `#[test]` attribute.
+//! ## Dockertest in Docker
 //!
-//! `Cargo.toml`
-//! ```no_compile
-//! [dev-dependencies]
-//! tracing = "0.1.13"
-//! tracing-subscriber = "0.2"
-//! test-log = { version = "0.2", default-features = false, features = ["trace"] }
-//! ```
+//! If the execution environment of running dockertest is itself a docker-in-docker container, one
+//! may have connectivity issues between the test body code, and the container dependencies.
+//! To ensure connectivity, dockertest must be instructed about the name/identifier of the
+//! execution container to include it into the docker network of the test containers.
+//! This is usually because the docker-in-docker docker daemon connection is routed to
+//! the underlying host itself.
 //!
-//! `Top of test file`
-//! ```
-//! use test_log::test;
-//! ```
+//! `DOCKERTEST_CONTAINER_ID_INJECT_TO_NETWORK=your_container_id/name`
 //!
 //! # Example
 //!
 //! ```rust
-//! use dockertest::{Composition, DockerTest};
+//!
+//! use dockertest::{TestBodySpecification, DockerTest};
 //! use std::sync::{Arc, Mutex};
 //!
 //! #[test]
@@ -100,14 +103,17 @@
 //!     // Define our test instance
 //!     let mut test = DockerTest::new();
 //!
-//!     // Construct the Composition to be added to the test.
-//!     // A Composition is an Image configured with environment, arguments, StartPolicy, etc.,
-//!     // seen as an instance of the Image prior to constructing the Container.
-//!     let hello = Composition::with_repository("hello-world");
+//!     // A container specification can have multiple properties, depending on how the
+//!     // lifecycle management of the container should be handled by dockertest.
+//!     //
+//!     // For any container specification where dockertest needs to create and start the container,
+//!     // we must provide enough information to construct a composition of
+//!     // an Image configured with provided environment variables, arguments, StartPolicy, etc.
+//!     let hello = TestBodySpecification::with_repository("hello-world");
 //!
 //!     // Populate the test instance.
 //!     // The order of compositions added reflect the execution order (depending on StartPolicy).
-//!     test.add_composition(hello);
+//!     test.provide_container(hello);
 //!
 //!     let has_ran: Arc<Mutex<bool>> = Arc::new(Mutex::new(false));
 //!     let has_ran_test = has_ran.clone();
@@ -126,12 +132,11 @@
 //! }
 //! ```
 //!
-//! [ExitedWait]: (waitfor::ExitedWait);
-//! [MessageWait]: (waitfor::MessageWait);
-//! [NoWait]: (waitfor::NoWait);
-//! [RunningWait]: (waitfor::RunningWait);
-//! [WaitFor]: (waitfor::WaitFor);
-//! [WaitFor::wait_for_ready]: (waitfor::WaitFor::wait_for_ready);
+//! [WaitFor]: crate::waitfor::WaitFor
+//! [RunningWait]: crate::waitfor::RunningWait
+//! [ExitedWait]: crate::waitfor::ExitedWait
+//! [NoWait]: crate::waitfor::NoWait
+//! [MessageWait]: crate::waitfor::MessageWait
 
 mod composition;
 mod container;
@@ -140,6 +145,7 @@ mod engine;
 mod error;
 mod image;
 mod runner;
+mod specification;
 mod static_container;
 // We only make this public because a function is used in our integration test
 #[doc(hidden)]
@@ -150,12 +156,14 @@ pub mod waitfor;
 #[cfg(test)]
 mod test_utils;
 
-pub use crate::composition::{
-    Composition, LogAction, LogOptions, LogPolicy, LogSource, StartPolicy, StaticManagementPolicy,
-};
+pub use crate::composition::{LogAction, LogOptions, LogPolicy, LogSource, StartPolicy};
 pub use crate::container::{PendingContainer, RunningContainer};
 pub use crate::dockertest::DockerTest;
 pub use crate::dockertest::Network;
 pub use crate::error::DockerTestError;
 pub use crate::image::{Image, PullPolicy, RegistryCredentials, Source};
 pub use crate::runner::DockerOperations;
+pub use crate::specification::{
+    ContainerSpecification, DynamicSpecification, ExternalSpecification, TestBodySpecification,
+    TestSuiteSpecification,
+};

@@ -10,7 +10,7 @@ use tokio::time::{interval, Duration};
 
 /// The RunningWait `WaitFor` implementation for containers.
 /// This variant will wait until the docker daemon reports the container as running.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct RunningWait {
     /// How many seconds shall there be between each check for running state.
     pub check_interval: u64,
@@ -20,7 +20,7 @@ pub struct RunningWait {
 
 /// The ExitedWait `WaitFor` implementation for containers.
 /// This variant will wait until the docker daemon reports that the container has exited.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ExitedWait {
     /// How many seconds shall there be between each check for running state.
     pub check_interval: u64,

@@ -1,7 +1,7 @@
 use std::net::Ipv4Addr;
 
 use dockertest::waitfor::RunningWait;
-use dockertest::{Composition, DockerTest, Image, Source};
+use dockertest::{DockerTest, Source, TestBodySpecification};
 use test_log::test;
 
 #[test]
@@ -10,10 +10,8 @@ fn test_run_with_no_failure() {
     let mut test = DockerTest::new().with_default_source(source);
 
     let repo = "hello-world".to_string();
-    let img = Image::with_repository(&repo);
-    let hello_world = Composition::with_image(img);
-
-    test.add_composition(hello_world);
+    let hello_world = TestBodySpecification::with_repository(repo);
+    test.provide_container(hello_world);
 
     test.run(|_ops| async {
         assert!(true);
@@ -27,10 +25,8 @@ fn test_run_with_failure() {
     let mut test = DockerTest::new().with_default_source(source);
 
     let repo = "hello-world".to_string();
-    let img = Image::with_repository(&repo);
-    let hello_world = Composition::with_image(img);
-
-    test.add_composition(hello_world);
+    let hello_world = TestBodySpecification::with_repository(repo);
+    test.provide_container(hello_world);
 
     test.run(|_ops| async {
         assert!(false);
@@ -44,10 +40,8 @@ fn test_resolve_handle_with_repository_as_key() {
     let mut test = DockerTest::new().with_default_source(source);
 
     let repo = "hello-world";
-    let img = Image::with_repository(&repo);
-    let hello_world = Composition::with_image(img);
-
-    test.add_composition(hello_world);
+    let hello_world = TestBodySpecification::with_repository(repo);
+    test.provide_container(hello_world);
 
     test.run(|ops| async move {
         let _ = ops.handle(repo);
@@ -64,10 +58,8 @@ fn test_resolve_handle_with_invalid_key() {
     let mut test = DockerTest::new().with_default_source(source);
 
     let repo = "hello-world";
-    let img = Image::with_repository(&repo);
-    let hello_world = Composition::with_image(img);
-
-    test.add_composition(hello_world);
+    let hello_world = TestBodySpecification::with_repository(repo);
+    test.provide_container(hello_world);
 
     test.run(|ops| async move {
         let _ = ops.handle("handle_does_not_exist");
@@ -83,10 +75,8 @@ fn test_resolve_handle_with_user_provided_container_name_as_key() {
 
     let repo = "hello-world";
     let container_name = "this_is_a_container_name";
-    let img = Image::with_repository(&repo);
-    let hello_world = Composition::with_image(img).with_container_name(container_name);
-
-    test.add_composition(hello_world);
+    let hello_world = TestBodySpecification::with_repository(repo).set_handle(container_name);
+    test.provide_container(hello_world);
 
     test.run(|ops| async move {
         let _ = ops.handle(container_name);
@@ -105,11 +95,10 @@ fn test_resolve_handle_with_identical_user_provided_container_name() {
 
     let repo = "hello-world";
     let container_name = "this_is_a_container_name";
-    let hello_world = Composition::with_repository(repo).with_container_name(container_name);
-    let hello_world2 = Composition::with_repository(repo).with_container_name(container_name);
-
-    test.add_composition(hello_world);
-    test.add_composition(hello_world2);
+    let hello_world = TestBodySpecification::with_repository(repo).set_handle(container_name);
+    let hello_world2 = TestBodySpecification::with_repository(repo).set_handle(container_name);
+    test.provide_container(hello_world)
+        .provide_container(hello_world2);
 
     test.run(|ops| async move {
         let _ = ops.handle(container_name);
@@ -125,11 +114,10 @@ fn test_resolve_handle_with_identical_repository() {
     let mut test = DockerTest::new().with_default_source(source);
 
     let repo = "hello-world";
-    let hello_world = Composition::with_repository(repo);
-    let hello_world2 = Composition::with_repository(repo);
-
-    test.add_composition(hello_world);
-    test.add_composition(hello_world2);
+    let hello_world = TestBodySpecification::with_repository(repo);
+    let hello_world2 = TestBodySpecification::with_repository(repo);
+    test.provide_container(hello_world)
+        .provide_container(hello_world2);
 
     test.run(|ops| async move {
         let _ = ops.handle(repo);
@@ -143,12 +131,12 @@ fn test_ip_on_running_container() {
     let mut test = DockerTest::new().with_default_source(source);
 
     let repo = "luca3m/sleep";
-    let sleep_container = Composition::with_repository(repo).with_wait_for(Box::new(RunningWait {
-        max_checks: 10,
-        check_interval: 60,
-    }));
-
-    test.add_composition(sleep_container);
+    let sleep_container =
+        TestBodySpecification::with_repository(repo).set_wait_for(Box::new(RunningWait {
+            max_checks: 10,
+            check_interval: 60,
+        }));
+    test.provide_container(sleep_container);
 
     test.run(|ops| async move {
         let handle = ops.handle(repo);
@@ -164,14 +152,13 @@ fn test_host_port_returns_correct_host_port_when_using_port_mapping() {
     let mut test = DockerTest::new().with_default_source(source);
 
     let repo = "luca3m/sleep";
-    let mut composition = Composition::with_repository(repo).with_wait_for(Box::new(RunningWait {
-        max_checks: 10,
-        check_interval: 60,
-    }));
-
-    composition.port_map(7900, 8500);
-
-    test.add_composition(composition);
+    let mut composition =
+        TestBodySpecification::with_repository(repo).set_wait_for(Box::new(RunningWait {
+            max_checks: 10,
+            check_interval: 60,
+        }));
+    composition.modify_port_map(7900, 8500);
+    test.provide_container(composition);
 
     test.run(|ops| async move {
         let handle = ops.handle(repo);
@@ -189,15 +176,15 @@ fn test_host_port_returns_the_last_port_mapping_if_multiple_mappings_applied_to_
     let mut test = DockerTest::new().with_default_source(source);
 
     let repo = "luca3m/sleep";
-    let mut composition = Composition::with_repository(repo).with_wait_for(Box::new(RunningWait {
-        max_checks: 10,
-        check_interval: 60,
-    }));
+    let mut composition =
+        TestBodySpecification::with_repository(repo).set_wait_for(Box::new(RunningWait {
+            max_checks: 10,
+            check_interval: 60,
+        }));
+    composition.modify_port_map(7900, 8500);
+    composition.modify_port_map(7900, 8501);
 
-    composition.port_map(7900, 8500);
-    composition.port_map(7900, 8501);
-
-    test.add_composition(composition);
+    test.provide_container(composition);
 
     test.run(|ops| async move {
         let handle = ops.handle(repo);
@@ -214,9 +201,8 @@ fn test_host_port_returns_none_if_the_port_is_not_mapped() {
     let mut test = DockerTest::new().with_default_source(source);
 
     let repo = "hello-world";
-    let hello_world = Composition::with_repository(repo);
-
-    test.add_composition(hello_world);
+    let hello_world = TestBodySpecification::with_repository(repo);
+    test.provide_container(hello_world);
 
     test.run(|ops| async move {
         let handle = ops.handle(repo);
@@ -230,9 +216,8 @@ fn test_host_port_returns_ports_exposed_by_publish_all() {
     let mut test = DockerTest::new().with_default_source(source);
 
     let repo = "dockertest-rs/expose_ports";
-    let mut composition = Composition::with_repository(repo);
-    composition.publish_all_ports();
-    test.add_composition(composition);
+    let composition = TestBodySpecification::with_repository(repo).set_publish_all_ports(true);
+    test.provide_container(composition);
 
     test.run(|ops| async move {
         let handle = ops.handle(repo);
@@ -256,12 +241,12 @@ fn test_ip_on_running_container_with_namespaced_instance() {
         .with_namespace("test");
 
     let repo = "luca3m/sleep";
-    let sleep_container = Composition::with_repository(repo).with_wait_for(Box::new(RunningWait {
-        max_checks: 10,
-        check_interval: 60,
-    }));
-
-    test.add_composition(sleep_container);
+    let sleep_container =
+        TestBodySpecification::with_repository(repo).set_wait_for(Box::new(RunningWait {
+            max_checks: 10,
+            check_interval: 60,
+        }));
+    test.provide_container(sleep_container);
 
     test.run(|ops| async move {
         let handle = ops.handle(repo);
