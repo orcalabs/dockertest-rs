@@ -22,12 +22,42 @@ pub struct DockerTest {
     /// The default pull source to use for all images.
     /// Images with a specified source will override this default.
     pub(crate) default_source: Source,
-    /// The name of an external network to use for this test, if any.
-    /// If not provided, DockerTest will determine its own networking needs.
-    pub(crate) external_network: Option<String>,
     /// Retrieved internally by an env variable the user has to set.
     /// Will only be used in environments where dockertest itself is running inside a container.
     pub(crate) container_id: Option<String>,
+    /// Network configuration, defaults to [Network::Singular] if not specified by
+    /// user.
+    pub(crate) network: Network,
+}
+
+/// Describes the docker network configuration for [DockerTest]
+/// The default value if not provided is [Network::Singular]
+#[derive(Debug)]
+pub enum Network {
+    /// A singular docker network named `dockertest` is created and shared by all dockertest instances and the network
+    /// itself will never be deleted. It will be reused instead of created if it already exists.
+    ///
+    /// All static containers with the policy [crate::composition::StaticManagementPolicy::External] or [crate::composition::StaticManagementPolicy::Dynamic]
+    /// will never be de-attached from this network.
+    ///
+    /// In the event that multiple `dockertest` networks exists the most recent created network is
+    /// used. This might occur if multiple tests are running in parallel while there are no
+    /// pre-existing `dockertest` network.
+    Singular,
+    /// Test will use an externally managed docker network.
+    ///
+    /// All created containers will attach itself to the existing, externally managed network.
+    ///
+    /// If a container is created with a [crate::composition::StaticManagementPolicy::External],
+    /// it is assumed that the container is already part of this network.
+    ///
+    /// For [crate::composition::StaticManagementPolicy::Internal], the container will be included
+    /// into the network before test starts, and dropped once the statically managed container
+    /// is removed.
+    External(String),
+    /// Each dockertest instance creates its own isolated docker network which will be deleted upon
+    /// test completion.
+    Isolated,
 }
 
 impl DockerTest {
@@ -38,7 +68,7 @@ impl DockerTest {
             compositions: Vec::new(),
             namespace: "dockertest-rs".to_string(),
             container_id: None,
-            external_network: None,
+            network: Network::Singular,
         }
     }
 
@@ -64,21 +94,9 @@ impl DockerTest {
         }
     }
 
-    /// Test will use an externally managed docker network.
-    ///
-    /// All created containers will attach itself to the existing, externally managed network.
-    ///
-    /// If the container is created with a [crate::composition::StaticManagementPolicy::External],
-    /// it is assumed that the container is already part of this network.
-    ///
-    /// For [crate::composition::StaticManagementPolicy::Internal], the container will be included
-    /// into the network before test starts, and dropped once the statically managed container
-    /// is removed.
-    pub fn with_external_network<T: ToString>(self, network: T) -> Self {
-        Self {
-            external_network: Some(network.to_string()),
-            ..self
-        }
+    /// Sets the network configuration
+    pub fn with_network(self, network: Network) -> Self {
+        Self { network, ..self }
     }
 
     /// Add a Composition to this DockerTest.
@@ -114,7 +132,7 @@ impl DockerTest {
             }
         };
 
-        let runner = Runner::new(self);
+        let runner = rt.block_on(Runner::new(self));
         process_run(rt.block_on(runner.run_impl(test).in_current_span()))
     }
 
@@ -132,7 +150,7 @@ impl DockerTest {
         let span = span!(Level::ERROR, "run");
         let _guard = span.enter();
 
-        let runner = Runner::new(self);
+        let runner = Runner::new(self).await;
         process_run(runner.run_impl(test).in_current_span().await);
     }
 }
@@ -178,10 +196,7 @@ mod tests {
             "default namespace was not set correctly"
         );
 
-        let equal = match *test.source() {
-            Source::Local => true,
-            _ => false,
-        };
+        let equal = matches!(*test.source(), Source::Local);
 
         assert!(equal, "source not set to local by default");
     }
@@ -203,10 +218,7 @@ mod tests {
     fn test_with_default_source() {
         let test = DockerTest::new().with_default_source(Source::DockerHub);
 
-        let equal = match test.default_source {
-            Source::DockerHub => true,
-            _ => false,
-        };
+        let equal = matches!(test.default_source, Source::DockerHub);
 
         assert!(equal, "default_source was not set correctly");
     }

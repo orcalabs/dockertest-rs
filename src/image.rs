@@ -573,7 +573,7 @@ mod tests {
             result.unwrap_err()
         );
 
-        let expected_id = test_utils::image_id(&client, *repository, &tag)
+        let expected_id = test_utils::image_id(&client, *repository, tag)
             .await
             .expect("failed to get image_id");
 

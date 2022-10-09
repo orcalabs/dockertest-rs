@@ -7,7 +7,7 @@ use tokio::sync::RwLock;
 use bollard::Docker;
 
 use super::{add_to_network, disconnect_container, remove_container};
-use crate::{Composition, DockerTestError, PendingContainer, RunningContainer};
+use crate::{Composition, DockerTestError, Network, PendingContainer, RunningContainer};
 
 #[derive(Default)]
 pub struct InternalContainers {
@@ -61,14 +61,11 @@ impl InternalContainers {
         composition: Composition,
         client: &Docker,
         network: Option<&str>,
+        network_setting: &Network,
     ) -> Result<PendingContainer, DockerTestError> {
         let container = self
-            .create_internal_container_inner(composition, client, network)
+            .create_internal_container_inner(composition, client, network, network_setting)
             .await?;
-
-        if let Some(n) = network {
-            add_to_network(&container.id, n, client).await?;
-        }
 
         Ok(container)
     }
@@ -120,8 +117,8 @@ impl InternalContainers {
     pub async fn cleanup(&self, client: &Docker, network: &str, to_cleanup: &HashSet<&str>) {
         self.disconnect(client, network, to_cleanup).await;
         let to_remove = self.decrement_completion_counters(to_cleanup).await;
-        for id in to_remove {
-            remove_container(&id, client).await;
+        for to_cleanup in to_remove {
+            remove_container(&to_cleanup, client).await;
         }
     }
 
@@ -130,6 +127,7 @@ impl InternalContainers {
         composition: Composition,
         client: &Docker,
         network: Option<&str>,
+        network_setting: &Network,
     ) -> Result<PendingContainer, DockerTestError> {
         let mut map = self.inner.write().await;
 
@@ -138,28 +136,52 @@ impl InternalContainers {
         // PendingContainer instance.
         // Static containers have to be apart of all the test networks such that they
         // are reachable from all tests.
+        //
+        // When `Network::Singular/Network::External` is used only the first test needs to add it to the
+        // network.
         if let Some(c) = map.get_mut(&composition.container_name) {
             match &c.status {
-                InternalStatus::Pending(p) => {
+                InternalStatus::Pending(p) | InternalStatus::Running(_, p) => {
+                    // Only when the Isolated network mode is set do we need to add it to the
+                    // network, as for External/Singular it will be added upon creation.
+                    match (network, network_setting) {
+                        (Some(n), Network::Isolated) => add_to_network(&p.id, n, client).await,
+                        _ => Ok(()),
+                    }?;
+
                     c.completion_counter += 1;
+
                     Ok(p.clone())
                 }
                 InternalStatus::Failed(e, _) => {
                     c.completion_counter += 1;
                     Err(e.clone())
                 }
-                InternalStatus::Running(_, p) => {
-                    c.completion_counter += 1;
-                    Ok(p.clone())
-                }
                 InternalStatus::Cleaned => {
-                    self.create_internal_container_impl(&mut map, composition, client, network)
-                        .await
+                    let container = self
+                        .create_internal_container_impl(&mut map, composition, client, network)
+                        .await?;
+
+                    // This is the same case as upon first container creation
+                    if let Some(n) = network {
+                        add_to_network(&container.id, n, client).await?;
+                    }
+
+                    Ok(container)
                 }
             }
         } else {
-            self.create_internal_container_impl(&mut map, composition, client, network)
-                .await
+            let container = self
+                .create_internal_container_impl(&mut map, composition, client, network)
+                .await?;
+
+            // First to create the container adds it to the network regardless of which network
+            // mode is set
+            if let Some(n) = network {
+                add_to_network(&container.id, n, client).await?;
+            }
+
+            Ok(container)
         }
     }
 

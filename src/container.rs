@@ -29,7 +29,7 @@ mod tests {
     use crate::image::Source;
     use crate::utils::connect_with_local_or_tls_defaults;
     use crate::waitfor::{async_trait, WaitFor};
-    use crate::{Composition, DockerTestError};
+    use crate::{Composition, DockerTestError, Network};
 
     use std::sync::{Arc, RwLock};
 
@@ -75,7 +75,7 @@ mod tests {
 
         // Create and start the container
         let pending = composition
-            .create(&client, None, false)
+            .create(&client, None, &Network::Isolated)
             .await
             .expect("failed to create container");
         let container = match pending {

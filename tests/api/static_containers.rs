@@ -2,7 +2,7 @@
 
 use dockertest::{
     utils::{connect_with_local_or_tls_defaults, generate_random_string},
-    Composition, DockerTest, Image, Source, StaticManagementPolicy,
+    Composition, DockerTest, Image, Network, Source, StaticManagementPolicy,
 };
 
 use bollard::container::{Config, CreateContainerOptions, StartContainerOptions};
@@ -124,7 +124,7 @@ fn test_static_containers_references_the_same_container_within_test_binary_2() {
 }
 
 #[test]
-fn test_on_demand_containers_runs() {
+fn test_dynamic_containers_runs() {
     let source = Source::DockerHub;
     let mut test = DockerTest::new().with_default_source(source);
 
@@ -136,6 +136,30 @@ fn test_on_demand_containers_runs() {
     hello_world.static_container(StaticManagementPolicy::Dynamic);
 
     test.add_composition(hello_world);
+
+    test.run(|_ops| async {
+        assert!(true);
+    });
+}
+
+#[test]
+fn test_multiple_internal_containers_with_singular_network() {
+    let mut test = DockerTest::new()
+        .with_default_source(Source::DockerHub)
+        .with_network(Network::Singular);
+
+    let repo = "hello-world".to_string();
+    let img = Image::with_repository(&repo);
+    let mut hello_world = Composition::with_image(img);
+    hello_world.static_container(StaticManagementPolicy::Internal);
+
+    let repo = "hello-world".to_string();
+    let img = Image::with_repository(&repo);
+    let hello_world2 = Composition::with_image(img).with_container_name("test");
+    hello_world.static_container(StaticManagementPolicy::Internal);
+
+    test.add_composition(hello_world);
+    test.add_composition(hello_world2);
 
     test.run(|_ops| async {
         assert!(true);

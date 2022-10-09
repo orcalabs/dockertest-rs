@@ -155,6 +155,7 @@ pub use crate::composition::{
 };
 pub use crate::container::{PendingContainer, RunningContainer};
 pub use crate::dockertest::DockerTest;
+pub use crate::dockertest::Network;
 pub use crate::error::DockerTestError;
 pub use crate::image::{Image, PullPolicy, RegistryCredentials, Source};
 pub use crate::runner::DockerOperations;
