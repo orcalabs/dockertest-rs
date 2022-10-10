@@ -3,7 +3,7 @@
 use crate::{
     composition::{LogAction, LogOptions},
     container::{PendingContainer, RunningContainer},
-    DockerTestError,
+    DockerTestError, LogSource,
 };
 
 use bollard::{container::LogOutput, Docker};
@@ -107,10 +107,22 @@ impl CleanupContainer {
     pub(crate) async fn handle_log(
         &self,
         action: &LogAction,
-        should_log_stderr: bool,
-        should_log_stdout: bool,
+        source: &LogSource,
     ) -> Result<(), DockerTestError> {
         use bollard::container::LogsOptions;
+
+        // check if we need to capture stderr and/or stdout
+        let should_log_stderr = match source {
+            LogSource::StdErr => true,
+            LogSource::StdOut => false,
+            LogSource::Both => true,
+        };
+
+        let should_log_stdout = match source {
+            LogSource::StdErr => false,
+            LogSource::StdOut => true,
+            LogSource::Both => true,
+        };
 
         let options = Some(LogsOptions::<String> {
             stdout: should_log_stdout,

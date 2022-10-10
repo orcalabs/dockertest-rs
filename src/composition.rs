@@ -100,6 +100,8 @@ pub enum LogPolicy {
     Always,
     /// [LogAction] is applicable only if an error occures.
     OnError,
+    /// [LogAction] is applicable only if a startup error occures.
+    OnStartupError,
 }
 
 /// Specifies how [Composition] should handle container logging.

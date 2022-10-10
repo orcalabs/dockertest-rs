@@ -209,6 +209,11 @@ impl Runner {
                 });
 
                 let engine = engine.decommission();
+                if let Err(errors) = engine.handle_startup_logs().await {
+                    for err in errors {
+                        error!("{err}");
+                    }
+                }
                 self.teardown(engine, false).await;
 
                 // QUESTION: What is the best option for us to propagate multiple errors?
@@ -222,9 +227,13 @@ impl Runner {
         let mut engine = match engine.orbiting().await {
             Ok(e) => e,
             Err((engine, e)) => {
-                // TODO: Call handle_logs on startup errors?
                 // Teardown everything on error
                 let engine = engine.decommission();
+                if let Err(errors) = engine.handle_startup_logs().await {
+                    for err in errors {
+                        error!("{err}");
+                    }
+                }
                 self.teardown(engine, false).await;
 
                 return Err(e);
@@ -285,8 +294,10 @@ impl Runner {
             };
 
         let engine = engine.decommission();
-        if let Err(e) = engine.handle_logs(result.is_err()).await {
-            error!("{e}");
+        if let Err(errors) = engine.handle_logs(result.is_err()).await {
+            for err in errors {
+                error!("{err}");
+            }
         }
         self.teardown(engine, result.is_err()).await;
 
