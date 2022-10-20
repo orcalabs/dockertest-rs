@@ -1,4 +1,4 @@
-use dockertest::{Composition, DockerTest, Source};
+use dockertest::{Composition, DockerTest};
 
 #[tokio::test]
 async fn test_privileged_container() {
