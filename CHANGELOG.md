@@ -3,6 +3,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- Added support for privileged containers, and related tests.
+
 ## 0.3
 
 ### Added
