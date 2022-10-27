@@ -1,12 +1,12 @@
 //! This is the example test to be featured in the README
 
-use dockertest::{Composition, DockerTest};
+use dockertest::{Composition, DockerTest, Source::DockerHub};
 use std::sync::{Arc, Mutex};
 
 #[test]
 fn hello_world_test() {
-    // Define our test instance
-    let mut test = DockerTest::new();
+    // Define our test instance, will pull images from dockerhub.
+    let mut test = DockerTest::new().with_default_source(DockerHub);
 
     // Construct the Composition to be added to the test.
     // A Composition is an Image configured with environment, arguments, StartPolicy, etc.,
