@@ -1,6 +1,6 @@
 //! The meaty internals of executing a single test.
 
-use crate::composition::{LogPolicy, LogSource};
+use crate::composition::LogPolicy;
 use crate::container::{
     CleanupContainer, CreatedContainer, HostPortMappings, PendingContainer, RunningContainer,
     StaticExternalContainer,
@@ -578,30 +578,18 @@ impl Engine<Orbiting> {
 }
 
 impl Engine<Debris> {
-    /// Handle container logs.
+    /// Handle container logs during test execution.
     ///
     /// This function handles logs on per-container bases.
-    pub async fn handle_logs(&self, test_failed: bool) -> Result<(), DockerTestError> {
+    pub async fn handle_logs(&self, test_failed: bool) -> Result<(), Vec<DockerTestError>> {
+        let mut errors = vec![];
+
         for container in self.phase.kept.iter() {
-            // we need to handle logs only if log_options is not None
             if let Some(log_options) = &container.log_options {
-                // check if we need to capture stderr and/or stdout
-                let should_log_stderr = match log_options.source {
-                    LogSource::StdErr => true,
-                    LogSource::StdOut => false,
-                    LogSource::Both => true,
-                };
-
-                let should_log_stdout = match log_options.source {
-                    LogSource::StdErr => false,
-                    LogSource::StdOut => true,
-                    LogSource::Both => true,
-                };
-
                 let result = match log_options.policy {
                     LogPolicy::Always => {
                         container
-                            .handle_log(&log_options.action, should_log_stderr, should_log_stdout)
+                            .handle_log(&log_options.action, &log_options.source)
                             .await
                     }
                     LogPolicy::OnError => {
@@ -609,20 +597,61 @@ impl Engine<Debris> {
                             continue;
                         }
                         container
-                            .handle_log(&log_options.action, should_log_stderr, should_log_stdout)
+                            .handle_log(&log_options.action, &log_options.source)
                             .await
                     }
+                    LogPolicy::OnStartupError => continue,
                 };
 
-                result.map_err(|error| {
+                let result = result.map_err(|error| {
                     DockerTestError::LogWriteError(format!(
                         "unable to handle logs for: {}: {}",
                         container.name, error
                     ))
-                })?;
+                });
+
+                if let Err(err) = result {
+                    errors.push(err);
+                }
             }
         }
-        Ok(())
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
+
+    /// Handle container logs during startup.
+    ///
+    /// This function handles logs on per-container bases.
+    pub async fn handle_startup_logs(&self) -> Result<(), Vec<DockerTestError>> {
+        let mut errors = vec![];
+
+        for container in self.phase.kept.iter() {
+            if let Some(log_options) = &container.log_options {
+                let result = container
+                    .handle_log(&log_options.action, &log_options.source)
+                    .await
+                    .map_err(|error| {
+                        DockerTestError::LogWriteError(format!(
+                            "unable to handle logs for: {}: {}",
+                            container.name, error
+                        ))
+                    });
+
+                if let Err(err) = result {
+                    errors.push(err);
+                }
+            }
+        }
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
     }
 
     /// Ensure that our static containers are cleaned up individually.
