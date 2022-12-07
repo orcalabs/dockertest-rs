@@ -122,6 +122,28 @@ macro_rules! impl_specify_container {
                 self
             }
 
+            /// Specify the privilege mode of the started container.
+            ///
+            /// This may be required for some containers to run correctly.
+            /// See the corresponding [docker reference] on this topic.
+            ///
+            /// [docker reference]: https://docs.docker.com/engine/reference/run/#runtime-privilege-and-linux-capabilities
+            pub fn privileged(&mut self, privileged: bool) -> &mut Self {
+                self.composition.privileged = privileged;
+                self
+            }
+
+            /// Specify the privilege mode of the started container.
+            ///
+            /// This may be required for some containers to run correctly.
+            /// See the corresponding [docker reference] on this topic.
+            ///
+            /// [docker reference]: https://docs.docker.com/engine/reference/run/#runtime-privilege-and-linux-capabilities
+            pub fn set_privileged(mut self, privileged: bool) -> Self {
+                self.composition.privileged = privileged;
+                self
+            }
+
             /// Specify a string handle used to retrieve a reference to the [RunningContainer]
             /// within the test body.
             ///
