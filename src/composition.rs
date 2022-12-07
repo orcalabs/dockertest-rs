@@ -216,6 +216,17 @@ pub struct Composition {
 
     /// Logging options for this specific container.
     pub(crate) log_options: Option<LogOptions>,
+
+    /// Whether this composition should be started in privileged mode.
+    /// Privileged mode is required for some images, such as the `docker:dind` image.
+    /// See https://docs.docker.com/engine/reference/run/#runtime-privilege-and-linux-capabilities
+    /// for more information.
+    /// Defaults to false.
+    /// NOTE: This is only supported on Linux.
+    /// NOTE: This is only supported on Docker 1.13 and above.
+    /// NOTE: This is only supported on Docker API 1.25 and above.
+    /// NOTE: This is only supported on Docker Engine 1.13 and above.
+    pub(crate) privileged: bool,
 }
 
 impl Composition {
@@ -245,6 +256,7 @@ impl Composition {
             publish_all_ports: false,
             management: None,
             log_options: Some(LogOptions::default()),
+            privileged: false,
         }
     }
 
@@ -270,6 +282,7 @@ impl Composition {
             publish_all_ports: false,
             management: None,
             log_options: Some(LogOptions::default()),
+            privileged: false,
         }
     }
 
@@ -496,6 +509,15 @@ impl Composition {
         self
     }
 
+    /// Should this container be started with priviledged mode enabled?
+    /// This is required for some containers to run correctly.
+    /// See https://docs.docker.com/engine/reference/run/#runtime-privilege-and-linux-capabilities
+    /// for more details.
+    pub fn privileged(&mut self) -> &mut Composition {
+        self.privileged = true;
+        self
+    }
+
     /// Fetch the assigned [StaticManagementPolicy], if any.
     pub(crate) fn static_management_policy(&self) -> &Option<StaticManagementPolicy> {
         &self.management
@@ -632,6 +654,7 @@ impl Composition {
             binds: Some(volumes),
             port_bindings: Some(port_map),
             publish_all_ports: Some(self.publish_all_ports),
+            privileged: Some(self.privileged),
             ..Default::default()
         });
 

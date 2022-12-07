@@ -11,6 +11,7 @@ All notable changes to this project will be documented in this file.
     `TestBodyContainer`(normal), `TestSuiteContainer`(internal), `DynamicContainer`(dynamic),
     and `ExternalContainer`(external).
 - Added `DockerTest::provide_container(c: impl ContainerSpecification)`.
+- Added support for privileged containers.
 
 ### Changed
 - BREAKING `WaitFor` now has a `Debug` trait bound.
