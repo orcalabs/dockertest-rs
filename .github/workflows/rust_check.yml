@@ -1,0 +1,62 @@
+name: Rust check
+
+concurrency:
+  group: ${{ github.head_ref }}
+  cancel-in-progress: true
+
+on:
+  pull_request:
+    branches:
+      - master
+
+jobs:
+  fmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install rustup toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+      - name: cargo fmt
+        run: |
+          cd src
+          cargo fmt -- --check
+  clippy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install rustup toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+      - name: cargo clippy
+        run: |
+          cd src
+          cargo clippy
+  doc:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install rustup toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+      - name: cargo doc
+        run: |
+          cd src
+          cargo doc --no-deps
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install rustup toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+      - name: cargo test
+        run: |
+          cd src
+          export DOCKERTEST_DYNAMIC=INTERNAL
+          export DOCKERTEST_BUILD_TEST_IMAGES=1
+          cargo test
