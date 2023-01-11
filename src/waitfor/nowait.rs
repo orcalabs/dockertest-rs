@@ -6,7 +6,7 @@ use crate::DockerTestError;
 
 /// The NoWait `WaitFor` implementation for containers.
 /// This variant does not wait for anything, resolves immediately.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct NoWait {}
 
 #[async_trait]

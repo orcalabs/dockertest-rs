@@ -8,7 +8,8 @@ use bollard::{container::InspectContainerOptions, Docker};
 
 use super::{add_to_network, disconnect_container, running_container_from_composition};
 use crate::{
-    container::StaticExternalContainer, Composition, DockerTestError, Network, RunningContainer,
+    composition::Composition, container::StaticExternalContainer, DockerTestError, Network,
+    RunningContainer,
 };
 
 #[derive(Default)]

@@ -1,8 +1,11 @@
 //! Represents a created container, in transit to become a RunningContainer.
 
 use crate::{
-    composition::LogOptions, container::RunningContainer, static_container::STATIC_CONTAINERS,
-    waitfor::WaitFor, DockerTestError, StartPolicy, StaticManagementPolicy,
+    composition::{LogOptions, StaticManagementPolicy},
+    container::RunningContainer,
+    static_container::STATIC_CONTAINERS,
+    waitfor::WaitFor,
+    DockerTestError, StartPolicy,
 };
 
 use bollard::{container::StartContainerOptions, errors::Error, Docker};

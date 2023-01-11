@@ -5,3 +5,5 @@ mod multiple_containers;
 mod readme;
 mod static_containers;
 mod waitfor;
+mod privileged_container;
+

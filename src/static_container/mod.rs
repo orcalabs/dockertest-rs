@@ -1,7 +1,7 @@
 use crate::{
+    composition::{Composition, StaticManagementPolicy},
     container::{CreatedContainer, HostPortMappings},
-    Composition, DockerTestError, Network, PendingContainer, RunningContainer,
-    StaticManagementPolicy,
+    DockerTestError, Network, PendingContainer, RunningContainer,
 };
 use dynamic::DynamicContainers;
 use external::ExternalContainers;

@@ -3,15 +3,15 @@ use dockertest::waitfor::{
     async_trait, ExitedWait, MessageSource, MessageWait, RunningWait, WaitFor,
 };
 use dockertest::{
-    Composition, DockerTest, DockerTestError, PendingContainer, RunningContainer, Source,
-    StartPolicy,
+    DockerTest, DockerTestError, PendingContainer, RunningContainer, Source, StartPolicy,
+    TestBodySpecification,
 };
 
 use bollard::container::InspectContainerOptions;
 use futures::future::TryFutureExt;
 use test_log::test;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct FailWait {}
 
 #[async_trait]
@@ -45,12 +45,13 @@ fn test_running_wait_for() {
     let mut test = DockerTest::new().with_default_source(source);
 
     let repo = "luca3m/sleep";
-    let sleep_container = Composition::with_repository(repo).with_wait_for(Box::new(RunningWait {
-        max_checks: 10,
-        check_interval: 6,
-    }));
+    let sleep_container =
+        TestBodySpecification::with_repository(repo).set_wait_for(Box::new(RunningWait {
+            max_checks: 10,
+            check_interval: 6,
+        }));
 
-    test.add_composition(sleep_container);
+    test.provide_container(sleep_container);
 
     test.run(|ops| async move {
         let handle = ops.handle(repo);
@@ -71,12 +72,13 @@ fn test_exit_wait_for() {
     let mut test = DockerTest::new().with_default_source(source);
 
     let repo = "hello-world";
-    let sleep_container = Composition::with_repository(repo).with_wait_for(Box::new(ExitedWait {
-        max_checks: 10,
-        check_interval: 6,
-    }));
+    let sleep_container =
+        TestBodySpecification::with_repository(repo).set_wait_for(Box::new(ExitedWait {
+            max_checks: 10,
+            check_interval: 6,
+        }));
 
-    test.add_composition(sleep_container);
+    test.provide_container(sleep_container);
 
     test.run(|ops| async move {
         let handle = ops.handle(repo);
@@ -98,11 +100,11 @@ fn test_wait_for_relaxed_failed() {
     let mut test = DockerTest::new().with_default_source(source);
 
     let repo = "hello-world";
-    let hello_container = Composition::with_repository(repo)
-        .with_wait_for(Box::new(FailWait {}))
-        .with_start_policy(StartPolicy::Relaxed);
+    let hello_container = TestBodySpecification::with_repository(repo)
+        .set_wait_for(Box::new(FailWait {}))
+        .set_start_policy(StartPolicy::Relaxed);
 
-    test.add_composition(hello_container);
+    test.provide_container(hello_container);
 
     test.run(|_ops| async {
         assert!(false);
@@ -117,11 +119,11 @@ fn test_wait_for_strict_failed() {
     let mut test = DockerTest::new().with_default_source(source);
 
     let repo = "hello-world";
-    let hello_container = Composition::with_repository(repo)
-        .with_wait_for(Box::new(FailWait {}))
-        .with_start_policy(StartPolicy::Strict);
+    let hello_container = TestBodySpecification::with_repository(repo)
+        .set_wait_for(Box::new(FailWait {}))
+        .set_start_policy(StartPolicy::Strict);
 
-    test.add_composition(hello_container);
+    test.provide_container(hello_container);
 
     test.run(|_ops| async {
         assert!(false);
@@ -135,13 +137,14 @@ fn test_message_wait_for_success_on_stdout() {
     let mut test = DockerTest::new().with_default_source(source);
 
     let repo = "hello-world";
-    let hello_container = Composition::with_repository(repo).with_wait_for(Box::new(MessageWait {
-        message: "Hello from Docker!".to_string(),
-        source: MessageSource::Stdout,
-        timeout: 5,
-    }));
+    let hello_container =
+        TestBodySpecification::with_repository(repo).set_wait_for(Box::new(MessageWait {
+            message: "Hello from Docker!".to_string(),
+            source: MessageSource::Stdout,
+            timeout: 5,
+        }));
 
-    test.add_composition(hello_container);
+    test.provide_container(hello_container);
 
     test.run(|_ops| async {
         // TODO: Determine how we can assert that this wait for was successful?
@@ -157,13 +160,14 @@ fn test_message_wait_for_not_found_on_stream() {
     let mut test = DockerTest::new().with_default_source(source);
 
     let repo = "hello-world";
-    let hello_container = Composition::with_repository(repo).with_wait_for(Box::new(MessageWait {
-        message: "MESSAGE NOT PRESENT IN OUTPUT".to_string(),
-        source: MessageSource::Stdout,
-        timeout: 5,
-    }));
+    let hello_container =
+        TestBodySpecification::with_repository(repo).set_wait_for(Box::new(MessageWait {
+            message: "MESSAGE NOT PRESENT IN OUTPUT".to_string(),
+            source: MessageSource::Stdout,
+            timeout: 5,
+        }));
 
-    test.add_composition(hello_container);
+    test.provide_container(hello_container);
 
     test.run(|_ops| async {
         assert!(false);

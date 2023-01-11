@@ -1,13 +1,13 @@
 //! The meaty internals of executing a single test.
 
-use crate::composition::LogPolicy;
+use crate::composition::{Composition, LogPolicy};
 use crate::container::{
     CleanupContainer, CreatedContainer, HostPortMappings, PendingContainer, RunningContainer,
     StaticExternalContainer,
 };
 use crate::static_container::STATIC_CONTAINERS;
 use crate::utils::generate_random_string;
-use crate::{Composition, DockerTestError, Network, Source, StartPolicy};
+use crate::{DockerTestError, Network, Source, StartPolicy};
 
 use bollard::{
     container::{InspectContainerOptions, RemoveContainerOptions, StopContainerOptions},

@@ -7,7 +7,9 @@ use tokio::sync::RwLock;
 use bollard::Docker;
 
 use super::{add_to_network, disconnect_container, remove_container};
-use crate::{Composition, DockerTestError, Network, PendingContainer, RunningContainer};
+use crate::{
+    composition::Composition, DockerTestError, Network, PendingContainer, RunningContainer,
+};
 
 #[derive(Default)]
 pub struct InternalContainers {

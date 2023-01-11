@@ -15,7 +15,7 @@ use tracing::{event, Level};
 
 /// The MessageWait `WaitFor` implementation for containers.
 /// This variant will wait until the message appears in the requested source.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct MessageWait {
     /// The message to be contained in source.
     pub message: String,
@@ -27,7 +27,7 @@ pub struct MessageWait {
 
 /// The various sources to listen for a message on.
 /// Used by `MessageWait`.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum MessageSource {
     /// Listen to the container Stdout.
     Stdout,

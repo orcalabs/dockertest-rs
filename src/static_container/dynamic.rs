@@ -1,7 +1,8 @@
 use super::{add_to_network, disconnect_container, running_container_from_composition};
 use crate::{
+    composition::Composition,
     container::{CreatedContainer, StaticExternalContainer},
-    Composition, DockerTestError, Network, PendingContainer, RunningContainer,
+    DockerTestError, Network, PendingContainer, RunningContainer,
 };
 use bollard::{
     container::{InspectContainerOptions, RemoveContainerOptions},

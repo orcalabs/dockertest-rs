@@ -2,7 +2,8 @@
 
 use dockertest::{
     utils::{connect_with_local_or_tls_defaults, generate_random_string},
-    Composition, DockerTest, Image, Network, Source, StaticManagementPolicy,
+    DockerTest, DynamicSpecification, ExternalSpecification, Network, Source,
+    TestBodySpecification, TestSuiteSpecification,
 };
 
 use bollard::container::{Config, CreateContainerOptions, StartContainerOptions};
@@ -23,11 +24,8 @@ fn test_static_containers_runs() {
     let mut test = DockerTest::new().with_default_source(source);
 
     let repo = "hello-world".to_string();
-    let img = Image::with_repository(&repo);
-    let mut hello_world = Composition::with_image(img);
-    hello_world.static_container(StaticManagementPolicy::Internal);
-
-    test.add_composition(hello_world);
+    let hello_world = TestSuiteSpecification::with_repository(&repo);
+    test.provide_container(hello_world);
 
     test.run(|_ops| async {
         assert!(true);
@@ -44,15 +42,13 @@ async fn test_external_static_container_handle_resolves_correctly_mixed_with_oth
     let d2_name = "marvelous";
     let s1_name = format!("extravagant-{}", generate_random_string(20));
 
-    let d1 = Composition::with_repository(repo).with_container_name(d1_name);
-    let d2 = Composition::with_repository(repo).with_container_name(d2_name);
-    let mut s1 = Composition::with_repository(repo).with_container_name(&s1_name);
+    let d1 = TestBodySpecification::with_repository(repo).set_handle(d1_name);
+    let d2 = TestBodySpecification::with_repository(repo).set_handle(d2_name);
+    let s1 = ExternalSpecification::with_container_name(&s1_name);
 
-    s1.static_container(StaticManagementPolicy::External);
-
-    test.add_composition(d1);
-    test.add_composition(s1);
-    test.add_composition(d2);
+    test.provide_container(d1)
+        .provide_container(s1)
+        .provide_container(d2);
 
     // Run the external container
     let client = connect_with_local_or_tls_defaults().expect("connect to docker engine");
@@ -91,11 +87,8 @@ fn test_static_containers_references_the_same_container_within_test_binary() {
     let mut test = DockerTest::new().with_default_source(source);
 
     let repo = "hello-world".to_string();
-    let img = Image::with_repository(&repo);
-    let mut hello_world = Composition::with_image(img);
-    hello_world.static_container(StaticManagementPolicy::Internal);
-
-    test.add_composition(hello_world);
+    let hello_world = TestSuiteSpecification::with_repository(&repo);
+    test.provide_container(hello_world);
 
     test.run(|ops| async move {
         let handle = ops.handle("hello-world");
@@ -110,14 +103,11 @@ fn test_static_containers_references_the_same_container_within_test_binary_2() {
     let mut test = DockerTest::new().with_default_source(source);
 
     let repo = "hello-world".to_string();
-    let img = Image::with_repository(&repo);
-    let mut hello_world = Composition::with_image(img);
-    hello_world.static_container(StaticManagementPolicy::Internal);
-
-    test.add_composition(hello_world);
+    let hello_world = TestSuiteSpecification::with_repository(&repo);
+    test.provide_container(hello_world);
 
     test.run(|ops| async move {
-        let handle = ops.handle("hello-world");
+        let handle = ops.handle(&repo);
         let container_name = handle.name();
         assert!(STATIC_CONTAINER_NAME.set_and_compare(container_name));
     });
@@ -129,13 +119,10 @@ fn test_dynamic_containers_runs() {
     let mut test = DockerTest::new().with_default_source(source);
 
     let repo = "hello-world".to_string();
-    let img = Image::with_repository(&repo);
 
     let container_name = format!("hello_world-on-demand-{}", generate_random_string(20));
-    let mut hello_world = Composition::with_image(img).with_container_name(container_name);
-    hello_world.static_container(StaticManagementPolicy::Dynamic);
-
-    test.add_composition(hello_world);
+    let hello_world = DynamicSpecification::with_repository(&repo, container_name);
+    test.provide_container(hello_world);
 
     test.run(|_ops| async {
         assert!(true);
@@ -149,17 +136,12 @@ fn test_multiple_internal_containers_with_singular_network() {
         .with_network(Network::Singular);
 
     let repo = "hello-world".to_string();
-    let img = Image::with_repository(&repo);
-    let mut hello_world = Composition::with_image(img);
-    hello_world.static_container(StaticManagementPolicy::Internal);
-
+    let hello_world = TestSuiteSpecification::with_repository(&repo);
     let repo = "hello-world".to_string();
-    let img = Image::with_repository(&repo);
-    let hello_world2 = Composition::with_image(img).with_container_name("test");
-    hello_world.static_container(StaticManagementPolicy::Internal);
+    let hello_world2 = TestSuiteSpecification::with_repository(&repo).set_handle("test");
 
-    test.add_composition(hello_world);
-    test.add_composition(hello_world2);
+    test.provide_container(hello_world);
+    test.provide_container(hello_world2);
 
     test.run(|_ops| async {
         assert!(true);

@@ -29,11 +29,11 @@ mod tests {
     use crate::image::Source;
     use crate::utils::connect_with_local_or_tls_defaults;
     use crate::waitfor::{async_trait, WaitFor};
-    use crate::{Composition, DockerTestError, Network};
+    use crate::{composition::Composition, DockerTestError, Network};
 
     use std::sync::{Arc, RwLock};
 
-    #[derive(Clone)]
+    #[derive(Clone, Debug)]
     struct TestWaitFor {
         invoked: Arc<RwLock<bool>>,
     }

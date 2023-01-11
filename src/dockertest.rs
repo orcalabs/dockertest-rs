@@ -3,13 +3,14 @@
 use crate::composition::Composition;
 use crate::image::Source;
 use crate::runner::{DockerOperations, Runner};
+use crate::specification::ContainerSpecification;
 use crate::DockerTestError;
 
 use futures::future::Future;
 use tokio::runtime::Runtime;
 use tracing::{event, span, Instrument, Level};
 
-/// The internal configuration object of a DockerTest instance.
+/// The main entry point to specify a test.
 pub struct DockerTest {
     /// All Compositions that have been added to this test run.
     /// They are stored in the order they where added by `add_composition`.
@@ -30,38 +31,35 @@ pub struct DockerTest {
     pub(crate) network: Network,
 }
 
-/// Describes the docker network configuration for [DockerTest]
-/// The default value if not provided is [Network::Singular]
+/// Configure how the docker network should be applied to the containers within this test.
+///
+/// The default value for a [DockerTest], if not provided, is [Network::Singular].
 #[derive(Debug)]
 pub enum Network {
-    /// A singular docker network named `dockertest` is created and shared by all dockertest instances and the network
-    /// itself will never be deleted. It will be reused instead of created if it already exists.
+    /// A single statically named network, with the namespace of the [DockerTest] as a prefix.
     ///
-    /// All static containers with the policy [crate::composition::StaticManagementPolicy::External] or [crate::composition::StaticManagementPolicy::Dynamic]
-    /// will never be de-attached from this network.
+    /// This network will be shared between each test using the same namespace, and the network
+    /// itself will never be deleted. This network is created on demand, but is never deleted.
+    /// This is to facilitate reuse between tests, to avoid the cost of creating a new
+    /// docker network when not necessary.
     ///
-    /// In the event that multiple `dockertest` networks exists the most recent created network is
-    /// used. This might occur if multiple tests are running in parallel while there are no
-    /// pre-existing `dockertest` network.
+    /// In the event that multiple networks matching the same name exists, the most recently
+    /// created network is selected. This situation might occur when multiple tests are running
+    /// in parallel while there are no pre-existing network. No locking is performed to avoid
+    /// this race condition, since it has no impact on test performance.
     Singular,
     /// Test will use an externally managed docker network.
     ///
     /// All created containers will attach itself to the existing, externally managed network.
-    ///
-    /// If a container is created with a [crate::composition::StaticManagementPolicy::External],
-    /// it is assumed that the container is already part of this network.
-    ///
-    /// For [crate::composition::StaticManagementPolicy::Internal], the container will be included
-    /// into the network before test starts, and dropped once the statically managed container
-    /// is removed.
     External(String),
-    /// Each dockertest instance creates its own isolated docker network which will be deleted upon
-    /// test completion.
+    /// Each [DockerTest] instance will create and manage its own isolated docker network.
+    ///
+    /// The network will be deleted once the test body exits.
     Isolated,
 }
 
 impl DockerTest {
-    /// Configure a new instance of [DockerTest].
+    /// Start the configuration process of a new [DockerTest] instance.
     pub fn new() -> Self {
         Self {
             default_source: Source::Local,
@@ -72,10 +70,12 @@ impl DockerTest {
         }
     }
 
-    /// Sets the default source for all images.
+    /// Sets the default [Source] for all [Image]s.
     ///
     /// All images without a specified source will be pulled from the default source.
-    /// DockerTest will default to Local if no default source is provided.
+    /// DockerTest will default to [Source::Local] if not configured.
+    ///
+    /// [Image]: crate::image::Image
     pub fn with_default_source(self, default_source: Source) -> Self {
         Self {
             default_source,
@@ -99,9 +99,26 @@ impl DockerTest {
         Self { network, ..self }
     }
 
-    /// Add a Composition to this DockerTest.
-    pub fn add_composition(&mut self, instance: Composition) {
-        self.compositions.push(instance);
+    /// Append a container specification as part of this specific test.
+    ///
+    /// The order of which container specifications are added to DockerTest is significant
+    /// for the start-up order for strict order dependencies.
+    ///
+    /// Please refer to one of the following variants to construct your container specification:
+    /// * [TestBodySpecification]
+    /// * [DynamicSpecification]
+    /// * [ExternalSpecification]
+    ///
+    /// [TestBodySpecification]: crate::specification::TestBodySpecification
+    /// [DynamicSpecification]: crate::specification::DynamicSpecification
+    /// [ExternalSpecification]: crate::specification::ExternalSpecification
+    pub fn provide_container(
+        &mut self,
+        specification: impl ContainerSpecification,
+    ) -> &mut DockerTest {
+        let composition = specification.into_composition();
+        self.compositions.push(composition);
+        self
     }
 
     /// Retrieve the default source for Images unless explicitly specified per Image.
@@ -112,7 +129,7 @@ impl DockerTest {
     /// Execute the test with the constructed environment in full operation.
     ///
     /// # Synchronous
-    /// This synchronous version of executes the test with its own runtime.
+    /// This non-async version creates its own runtime to execute the test.
     // NOTE(clippy): tracing generates cognitive complexity due to macro expansion.
     #[allow(clippy::cognitive_complexity)]
     pub fn run<T, Fut>(self, test: T)
