@@ -697,7 +697,7 @@ impl Composition {
         let static_management_policy = self.static_management_policy().clone();
         Ok(PendingContainer::new(
             &container_name_clone,
-            &container_info.id,
+            container_info.id,
             self.handle(),
             start_policy_clone,
             self.wait,
