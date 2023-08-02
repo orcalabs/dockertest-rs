@@ -106,8 +106,8 @@ fn test_wait_for_relaxed_failed() {
 
     test.provide_container(hello_container);
 
-    test.run(|_ops| async {
-        assert!(false);
+    test.run(|ops| async move {
+        ops.handle("hello-world");
     });
 }
 
@@ -125,8 +125,8 @@ fn test_wait_for_strict_failed() {
 
     test.provide_container(hello_container);
 
-    test.run(|_ops| async {
-        assert!(false);
+    test.run(|ops| async move {
+        ops.handle("hello-world");
     });
 }
 
@@ -146,9 +146,9 @@ fn test_message_wait_for_success_on_stdout() {
 
     test.provide_container(hello_container);
 
-    test.run(|_ops| async {
+    test.run(|ops| async move {
         // TODO: Determine how we can assert that this wait for was successful?
-        assert!(true);
+        ops.handle("hello-world");
     });
 }
 
@@ -169,7 +169,7 @@ fn test_message_wait_for_not_found_on_stream() {
 
     test.provide_container(hello_container);
 
-    test.run(|_ops| async {
-        assert!(false);
+    test.run(|ops| async move {
+        ops.handle("hello-world");
     });
 }

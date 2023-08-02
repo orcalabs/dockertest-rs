@@ -839,7 +839,7 @@ mod tests {
 
         let container_name = "this_is_a_container_name";
 
-        let instance = Composition::with_repository(&repository)
+        let instance = Composition::with_repository(repository)
             .with_start_policy(StartPolicy::Strict)
             .with_env(env)
             .with_cmd(cmds)
@@ -871,7 +871,7 @@ mod tests {
         let env_value = "this_is_an_env_value".to_string();
 
         let repository = "this_is_a_repository".to_string();
-        let mut instance = Composition::with_repository(&repository);
+        let mut instance = Composition::with_repository(repository);
 
         instance.env(env_variable.clone(), env_value.clone());
 
@@ -893,7 +893,7 @@ mod tests {
         let expected_cmd = vec![cmd.clone()];
 
         let repository = "this_is_a_repository".to_string();
-        let mut instance = Composition::with_repository(&repository);
+        let mut instance = Composition::with_repository(repository);
 
         instance.cmd(cmd);
 
@@ -1046,7 +1046,7 @@ mod tests {
     #[test]
     fn test_configurate_container_name_without_user_supplied_name() {
         let repository = "hello-world";
-        let mut composition = Composition::with_repository(&repository);
+        let mut composition = Composition::with_repository(repository);
 
         let suffix = "test123";
         let namespace = "namespace";
@@ -1068,7 +1068,7 @@ mod tests {
         let repository = "hello-world";
         let container_name = "this_is_a_container";
         let mut composition =
-            Composition::with_repository(&repository).with_container_name(container_name);
+            Composition::with_repository(repository).with_container_name(container_name);
 
         let suffix = "test123";
         let namespace = "namespace";
@@ -1093,7 +1093,7 @@ mod tests {
         let expected_container_name = "this_is_a_container";
 
         let mut composition =
-            Composition::with_repository(&repository).with_container_name(container_name);
+            Composition::with_repository(repository).with_container_name(container_name);
 
         let suffix = "test123";
         let namespace = "namespace";
@@ -1116,7 +1116,7 @@ mod tests {
         let repository = "hello/world";
         let expected_container_name = "hello_world";
 
-        let mut composition = Composition::with_repository(&repository);
+        let mut composition = Composition::with_repository(repository);
 
         let suffix = "test123";
         let namespace = "namespace";

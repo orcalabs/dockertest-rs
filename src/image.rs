@@ -495,7 +495,7 @@ mod tests {
 
         let repository = "dockertest-rs/hello";
         let tag = "latest";
-        let image = Image::with_repository(&repository);
+        let image = Image::with_repository(repository);
 
         // This repository image exists locally (pre-requisuite build.rs)
         assert!(test_utils::image_exists_locally(&client, repository, tag)
@@ -534,7 +534,7 @@ mod tests {
         let client = connect_with_local_or_tls_defaults().unwrap();
         let repository = CONCURRENT_IMAGE_ACCESS_QUEUE.access().await;
         let tag = "latest";
-        let image = Image::with_repository(*repository).tag(&tag);
+        let image = Image::with_repository(*repository).tag(tag);
         let result = test_utils::delete_image_if_present(&client, *repository, tag).await;
         assert!(
             result.is_ok(),
@@ -554,7 +554,7 @@ mod tests {
         let repository = CONCURRENT_IMAGE_ACCESS_QUEUE.access().await;
         let tag = "latest";
         let source = Source::DockerHub;
-        let image = Image::with_repository(*repository).tag(&tag);
+        let image = Image::with_repository(*repository).tag(tag);
 
         let result = test_utils::delete_image_if_present(&client, *repository, tag).await;
         assert!(
@@ -614,7 +614,7 @@ mod tests {
         let client = connect_with_local_or_tls_defaults().unwrap();
         let repository = "dockertest-rs/hello";
         let tag = "latest";
-        let image = Image::with_repository(&repository).tag(&tag);
+        let image = Image::with_repository(repository).tag(tag);
 
         assert_eq!(
             image.retrieved_id(),
@@ -641,7 +641,7 @@ mod tests {
         let client = connect_with_local_or_tls_defaults().unwrap();
         let repository = CONCURRENT_IMAGE_ACCESS_QUEUE.access().await;
         let tag = "latest";
-        let image = Image::with_repository(*repository).tag(&tag);
+        let image = Image::with_repository(*repository).tag(tag);
 
         // Ensure image is present first
         // If it is already present, we skip the download time.
@@ -686,9 +686,9 @@ mod tests {
         let client = connect_with_local_or_tls_defaults().unwrap();
         let repository = CONCURRENT_IMAGE_ACCESS_QUEUE.access().await;
         let tag = "latest";
-        let image = Image::with_repository(*repository).tag(&tag);
+        let image = Image::with_repository(*repository).tag(tag);
 
-        test_utils::delete_image_if_present(&client, *repository, &tag)
+        test_utils::delete_image_if_present(&client, *repository, tag)
             .await
             .expect("failed to delete image");
 
@@ -699,7 +699,7 @@ mod tests {
             result.unwrap_err()
         );
 
-        match test_utils::image_exists_locally(&client, *repository, &tag).await {
+        match test_utils::image_exists_locally(&client, *repository, tag).await {
             Ok(exists) => {
                 assert!(
                     exists,
@@ -716,7 +716,7 @@ mod tests {
     fn test_should_pull_local_source() {
         let source = Source::Local;
         let repository = "hello-world".to_string();
-        let image = Image::with_repository(&repository);
+        let image = Image::with_repository(repository);
 
         let exists_locally = true;
         let res = image
@@ -742,7 +742,7 @@ mod tests {
     fn test_should_pull_remote_source_always() {
         let source = Source::DockerHub;
         let repository = "hello-world".to_string();
-        let image = Image::with_repository(&repository).pull_policy(PullPolicy::Always);
+        let image = Image::with_repository(repository).pull_policy(PullPolicy::Always);
 
         let exists_locally = false;
         let res = image.should_pull(exists_locally, &source).expect("should not return an error when source is remote, pull_policy is always, and image does not exist locally");
@@ -759,7 +759,7 @@ mod tests {
     fn test_should_pull_remote_source_never() {
         let source = Source::DockerHub;
         let repository = "hello-world".to_string();
-        let image = Image::with_repository(&repository).pull_policy(PullPolicy::Never);
+        let image = Image::with_repository(repository).pull_policy(PullPolicy::Never);
 
         let exists_locally = false;
         let res = image.should_pull(exists_locally, &source);
@@ -778,7 +778,7 @@ mod tests {
     fn test_should_pull_remote_source_if_not_present() {
         let source = Source::DockerHub;
         let repository = "hello-world".to_string();
-        let image = Image::with_repository(&repository);
+        let image = Image::with_repository(repository);
 
         let exists_locally = true;
         let res = image.should_pull(exists_locally, &source).expect(
@@ -799,10 +799,7 @@ mod tests {
         let repository = "hello-world".to_string();
         let image = Image::with_repository(&repository);
 
-        let equal = match image.source {
-            None => true,
-            Some(_) => false,
-        };
+        let equal = image.source.is_none();
         assert!(equal, "should not have source set as default");
         assert_eq!(image.tag, "latest", "should have latest as default tag");
         assert_eq!(
@@ -823,7 +820,7 @@ mod tests {
         let image = image.source(Source::RegistryWithCredentials(remote));
 
         let new_tag = "this_is_a_test_tag";
-        let image = image.tag(&new_tag);
+        let image = image.tag(new_tag);
         assert_eq!(image.tag, new_tag, "changing tag does not change image tag");
     }
 
@@ -842,7 +839,7 @@ mod tests {
         let repository = CONCURRENT_IMAGE_ACCESS_QUEUE.access().await;
         let tag = "latest";
         let image = Image::with_repository(*repository)
-            .tag(&tag)
+            .tag(tag)
             // Source is overridden to be DockerHub, a valid source.
             .source(Source::DockerHub);
 
