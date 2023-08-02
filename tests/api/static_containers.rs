@@ -24,11 +24,11 @@ fn test_static_containers_runs() {
     let mut test = DockerTest::new().with_default_source(source);
 
     let repo = "hello-world".to_string();
-    let hello_world = TestSuiteSpecification::with_repository(&repo);
+    let hello_world = TestSuiteSpecification::with_repository(repo);
     test.provide_container(hello_world);
 
-    test.run(|_ops| async {
-        assert!(true);
+    test.run(|ops| async move {
+        ops.handle("hello-world");
     });
 }
 
@@ -90,7 +90,7 @@ fn test_static_containers_references_the_same_container_within_test_binary() {
     let mut test = DockerTest::new().with_default_source(source);
 
     let repo = "hello-world".to_string();
-    let hello_world = TestSuiteSpecification::with_repository(&repo);
+    let hello_world = TestSuiteSpecification::with_repository(repo);
     test.provide_container(hello_world);
 
     test.run(|ops| async move {
@@ -124,11 +124,11 @@ fn test_dynamic_containers_runs() {
     let repo = "hello-world".to_string();
 
     let container_name = format!("hello_world-on-demand-{}", generate_random_string(20));
-    let hello_world = DynamicSpecification::with_repository(&repo, container_name);
+    let hello_world = DynamicSpecification::with_repository(repo, container_name.clone());
     test.provide_container(hello_world);
 
-    test.run(|_ops| async {
-        assert!(true);
+    test.run(|ops| async move {
+        ops.handle(&container_name);
     });
 }
 
@@ -139,15 +139,15 @@ fn test_multiple_internal_containers_with_singular_network() {
         .with_network(Network::Singular);
 
     let repo = "hello-world".to_string();
-    let hello_world = TestSuiteSpecification::with_repository(&repo);
+    let hello_world = TestSuiteSpecification::with_repository(repo);
     let repo = "hello-world".to_string();
-    let hello_world2 = TestSuiteSpecification::with_repository(&repo).set_handle("test");
+    let hello_world2 = TestSuiteSpecification::with_repository(repo).set_handle("test");
 
     test.provide_container(hello_world);
     test.provide_container(hello_world2);
 
-    test.run(|_ops| async {
-        assert!(true);
+    test.run(|ops| async move {
+        ops.handle("hello-world");
     });
 }
 

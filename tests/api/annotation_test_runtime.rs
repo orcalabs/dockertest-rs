@@ -9,8 +9,8 @@ async fn test_with_tokio_test() {
     let hello_world = TestBodySpecification::with_repository(repo);
     test.provide_container(hello_world);
 
-    test.run_async(|_ops| async {
-        assert!(true);
+    test.run_async(|ops| async move {
+        ops.handle("hello-world");
     })
     .await;
 }

@@ -1,3 +1,6 @@
+#![deny(warnings)]
+#![deny(rust_2018_idioms)]
+
 mod annotation_test_runtime;
 mod integration_test;
 mod message;

@@ -9,8 +9,8 @@ async fn test_privileged_container() {
 
     test.provide_container(hello_world);
 
-    test.run_async(|_ops| async {
-        assert!(true);
+    test.run_async(|ops| async move {
+        ops.handle("dockertest-rs/hello-privileged");
     })
     .await;
 }

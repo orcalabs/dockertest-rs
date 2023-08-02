@@ -13,8 +13,8 @@ fn test_run_with_no_failure() {
     let hello_world = TestBodySpecification::with_repository(repo);
     test.provide_container(hello_world);
 
-    test.run(|_ops| async {
-        assert!(true);
+    test.run(|ops| async move {
+        ops.handle("hello-world");
     });
 }
 
@@ -28,8 +28,8 @@ fn test_run_with_failure() {
     let hello_world = TestBodySpecification::with_repository(repo);
     test.provide_container(hello_world);
 
-    test.run(|_ops| async {
-        assert!(false);
+    test.run(|_ops| async move {
+        panic!();
     });
 }
 
@@ -44,7 +44,7 @@ fn test_resolve_handle_with_repository_as_key() {
     test.provide_container(hello_world);
 
     test.run(|ops| async move {
-        let _ = ops.handle(repo);
+        ops.handle("hello-world");
     });
 }
 
@@ -62,7 +62,7 @@ fn test_resolve_handle_with_invalid_key() {
     test.provide_container(hello_world);
 
     test.run(|ops| async move {
-        let _ = ops.handle("handle_does_not_exist");
+        ops.handle("handle_does_not_exist");
     });
 }
 
@@ -79,7 +79,7 @@ fn test_resolve_handle_with_user_provided_container_name_as_key() {
     test.provide_container(hello_world);
 
     test.run(|ops| async move {
-        let _ = ops.handle(container_name);
+        ops.handle(container_name);
     });
 }
 
@@ -101,7 +101,7 @@ fn test_resolve_handle_with_identical_user_provided_container_name() {
         .provide_container(hello_world2);
 
     test.run(|ops| async move {
-        let _ = ops.handle(container_name);
+        ops.handle(container_name);
     });
 }
 
@@ -120,7 +120,7 @@ fn test_resolve_handle_with_identical_repository() {
         .provide_container(hello_world2);
 
     test.run(|ops| async move {
-        let _ = ops.handle(repo);
+        ops.handle(repo);
     });
 }
 
