@@ -675,6 +675,9 @@ impl Composition {
         // Construct options for create container
         let options = Some(CreateContainerOptions {
             name: &self.container_name,
+            // Sets the platform of the server if its multi-platform capable, we might support user
+            // provided values here at a later time.
+            platform: None,
         });
 
         let config = Config::<&str> {

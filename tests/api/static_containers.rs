@@ -62,7 +62,10 @@ async fn test_external_static_container_handle_resolves_correctly_mixed_with_oth
         ),
         ..Default::default()
     };
-    let options = Some(CreateContainerOptions { name: &s1_name });
+    let options = Some(CreateContainerOptions {
+        name: &s1_name,
+        platform: None,
+    });
     let id = client
         .create_container(options, config)
         .await

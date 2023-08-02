@@ -7,6 +7,7 @@ use bollard::{
     Docker,
 };
 
+use base64::{engine::general_purpose, Engine};
 use futures::stream::StreamExt;
 use secrecy::{ExposeSecret, Secret};
 use serde::Deserialize;
@@ -437,7 +438,8 @@ fn resolve_docker_login_auth(address: &str) -> Result<DockerCredentials, String>
     let auth_encoded = entry
         .auth
         .ok_or("expecting 'auth' field to be present from `docker login`")?;
-    let auth_decoded = base64::decode(auth_encoded)
+    let auth_decoded = general_purpose::STANDARD
+        .decode(auth_encoded)
         .map(|s| String::from_utf8_lossy(&s).to_string())
         .map_err(|e| {
             debug!(
