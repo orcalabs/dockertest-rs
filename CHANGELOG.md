@@ -22,6 +22,9 @@ All notable changes to this project will be documented in this file.
 - BREAKING Made `Composition` non-public.
 - BREAKING Removed `DockerTest::add_composition`. Use
   `DockerTest::provide_container` instead.
+- Upgrade all dependencies, notable:
+  - tokio from 1.19 to 1.29
+  - bollard from 0.13 to 0.14
 
 ## 0.3
 
