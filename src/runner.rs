@@ -416,7 +416,7 @@ impl Runner {
         let suffix = self.id.clone();
 
         // Add the dockertest ID as a suffix to all named volume names.
-        self.config.compositions.iter_mut().for_each(|mut c| {
+        self.config.compositions.iter_mut().for_each(|c| {
             // Includes path aswell: "USER_PROVIDED_VOLUME_NAME-DOCKERTEST_ID:PATH_IN_CONTAINER"
             let mut volume_names_with_path: Vec<String> = Vec::new();
 
