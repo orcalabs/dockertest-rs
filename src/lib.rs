@@ -152,10 +152,6 @@ mod static_container;
 pub mod utils;
 pub mod waitfor;
 
-// Private module containing utility functions used for testing purposes
-#[cfg(test)]
-mod test_utils;
-
 pub use crate::composition::{LogAction, LogOptions, LogPolicy, LogSource, StartPolicy};
 pub use crate::container::{PendingContainer, RunningContainer};
 pub use crate::dockertest::DockerTest;
