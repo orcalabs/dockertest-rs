@@ -152,12 +152,18 @@ impl Image {
                     CreateImageInfo {
                         id,
                         error,
+                        error_detail,
                         status,
                         progress,
                         progress_detail,
                     } => {
                         if error.is_some() {
-                            event!(Level::ERROR, "pull error {}", error.clone().unwrap(),);
+                            event!(
+                                Level::ERROR,
+                                "pull error {} {:?}",
+                                error.clone().unwrap(),
+                                error_detail.unwrap_or_default()
+                            );
                         } else {
                             event!(
                                 Level::TRACE,
