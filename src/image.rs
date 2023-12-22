@@ -13,8 +13,7 @@ use secrecy::{ExposeSecret, Secret};
 use serde::Deserialize;
 use tracing::{debug, event, trace, Level};
 
-use std::rc::Rc;
-use std::sync::RwLock;
+use std::sync::{Arc, RwLock};
 
 /// Represents a docker `Image`.
 ///
@@ -25,7 +24,7 @@ pub struct Image {
     tag: String,
     source: Option<Source>,
     pull_policy: PullPolicy,
-    id: Rc<RwLock<String>>,
+    id: Arc<RwLock<String>>,
 }
 
 /// Represents the `Source` of an `Image`.
@@ -82,7 +81,7 @@ impl Image {
             tag: "latest".to_string(),
             source: None,
             pull_policy: PullPolicy::IfNotPresent,
-            id: Rc::new(RwLock::new("".to_string())),
+            id: Arc::new(RwLock::new("".to_string())),
         }
     }
 
