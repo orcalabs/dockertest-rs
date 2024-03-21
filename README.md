@@ -20,7 +20,7 @@ See the [crate documentation](https://docs.rs/dockertest) for extensive explanat
 This is a trivial example showing of the general structure of a naive test.
 
  ```rust
-use dockertest::{DockerTest, TestBodyContainer};
+use dockertest::{DockerTest, TestBodySpecification};
 use std::sync::{Arc, Mutex};
 
 #[test]
@@ -36,7 +36,7 @@ fn hello_world_test() {
     // For any container specification where dockertest needs to create and start the container,
     // we must provide enough information to construct a composition of
     // an Image configured with provided environment variables, arguments, StartPolicy, etc.
-    let hello = TestBodyContainer::with_repository("hello-world");
+    let hello = TestBodySpecification::with_repository("hello-world");
 
     // Populate the test instance.
     // The order of compositions added reflect the execution order (depending on StartPolicy).
