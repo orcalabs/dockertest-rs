@@ -17,7 +17,7 @@
 //! - Named pipes (windows)
 //! - TCP with TLS
 //! - Piped through a docker-in-docker container where the execution occurs, to run on the
-//! underlying docker engine.
+//!   underlying docker engine.
 //!
 //! The main bread-and-butter of this library is the ability to specify which containers are
 //! required for a test, and how one should ensure that the container is properly running prior
@@ -93,8 +93,7 @@
 //!
 //! # Example
 //!
-//! ```rust
-//!
+//! ```no_run
 //! use dockertest::{TestBodySpecification, DockerTest};
 //! use std::sync::{Arc, Mutex};
 //!
