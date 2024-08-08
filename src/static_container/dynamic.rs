@@ -33,7 +33,7 @@ enum DynamicStatus {
     /// The container is in a running state and was not running prior to test invocation
     Running(RunningContainer, PendingContainer),
     Pending(PendingContainer),
-    Failed(DockerTestError, Option<String>),
+    Failed(DockerTestError),
 }
 
 impl DynamicContainers {
@@ -55,7 +55,7 @@ impl DynamicContainers {
                     }?;
                     Ok(CreatedContainer::Pending(p.clone()))
                 }
-                DynamicStatus::Failed(e, _) => Err(e.clone()),
+                DynamicStatus::Failed(e) => Err(e.clone()),
                 DynamicStatus::RunningPrior(c) => {
                     match (network, network_setting) {
                         (Some(n), Network::Isolated) => add_to_network(&c.id, n, client).await,
@@ -167,13 +167,12 @@ impl DynamicContainers {
                             Ok(r)
                         }
                         Err(e) => {
-                            existing.status =
-                                DynamicStatus::Failed(e.clone(), Some(container.id.clone()));
+                            existing.status = DynamicStatus::Failed(e.clone());
                             Err(e)
                         }
                     }
                 }
-                DynamicStatus::Failed(e, _) => Err(e.clone()),
+                DynamicStatus::Failed(e) => Err(e.clone()),
             }
         } else {
             Err(DockerTestError::Startup(
@@ -190,7 +189,7 @@ impl DynamicContainers {
             .filter_map(|d| match &d.status {
                 DynamicStatus::Running(_, _)
                 | DynamicStatus::Pending(_)
-                | DynamicStatus::Failed(_, _) => None,
+                | DynamicStatus::Failed(_) => None,
                 DynamicStatus::RunningPrior(c) => Some(c.clone()),
             })
             .collect()
