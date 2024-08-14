@@ -26,8 +26,8 @@ pub enum CreatedContainer {
 #[cfg(test)]
 mod tests {
     use crate::container::{CreatedContainer, PendingContainer, RunningContainer};
+    use crate::docker::Docker;
     use crate::image::Source;
-    use crate::utils::connect_with_local_or_tls_defaults;
     use crate::waitfor::{async_trait, WaitFor};
     use crate::{composition::Composition, DockerTestError, Network};
 
@@ -60,22 +60,21 @@ mod tests {
 
         let wrapped_wait_for = Box::new(wait_for);
 
-        let client = connect_with_local_or_tls_defaults().unwrap();
+        let client = Docker::new().unwrap();
         let repository = "dockertest-rs/hello".to_string();
         let mut composition =
             Composition::with_repository(repository).with_wait_for(wrapped_wait_for.clone());
         composition.container_name = "dockertest_wait_for_invoked_during_start".to_string();
 
         // Ensure image is present with id populated
-        composition
-            .image()
-            .pull(&client, &Source::Local)
+        client
+            .pull_image(composition.image(), &Source::Local)
             .await
             .expect("failed to pull image");
 
         // Create and start the container
-        let pending = composition
-            .create(&client, None, &Network::Isolated)
+        let pending = client
+            .create_container(composition, None, &Network::Isolated)
             .await
             .expect("failed to create container");
         let container = match pending {

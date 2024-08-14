@@ -2,23 +2,18 @@
 
 use crate::composition::{Composition, LogPolicy};
 use crate::container::{
-    CleanupContainer, CreatedContainer, HostPortMappings, PendingContainer, RunningContainer,
-    StaticExternalContainer,
+    CleanupContainer, CreatedContainer, PendingContainer, RunningContainer, StaticExternalContainer,
 };
+use crate::docker::Docker;
 use crate::static_container::STATIC_CONTAINERS;
 use crate::utils::generate_random_string;
 use crate::{DockerTestError, Network, Source, StartPolicy};
 
-use bollard::{
-    container::{InspectContainerOptions, RemoveContainerOptions, StopContainerOptions},
-    Docker,
-};
 use futures::future::join_all;
 use tokio::task::JoinHandle;
 use tracing::{event, Level};
 
 use std::collections::{hash_map::Entry, HashMap, HashSet};
-use std::convert::TryFrom;
 
 /// The initial phase.
 pub struct Bootstrapping {
@@ -178,7 +173,7 @@ impl Engine<Fueling> {
 
         // QUESTION: Can we not iter().map() this?
         for composition in self.phase.kept.iter() {
-            let fut = composition.image().pull(client, default);
+            let fut = client.pull_image(composition.image(), default);
 
             future_vec.push(fut);
         }
@@ -203,7 +198,7 @@ impl Engine<Fueling> {
             self.phase
                 .kept
                 .into_iter()
-                .map(|c| c.create(client, Some(network), network_settings)),
+                .map(|c| client.create_container(c, Some(network), network_settings)),
         )
         .await;
 
@@ -508,64 +503,19 @@ impl Engine<Orbiting> {
                 container.ip = std::net::Ipv4Addr::new(127, 0, 0, 1);
                 continue;
             }
-            let details = match client
-                .inspect_container(&container.id, None::<InspectContainerOptions>)
+
+            match client
+                .get_container_ip_and_ports(&container.id, network_name)
                 .await
             {
-                Ok(details) => details,
+                Ok(info) => {
+                    container.ip = info.ip;
+                    container.ports = info.ports;
+                }
                 Err(e) => {
-                    let err =
-                        DockerTestError::Daemon(format!("failed to inspect container: {}", e));
-                    errors.push(err);
+                    errors.push(e);
                     continue;
                 }
-            };
-
-            // Get the ip address from the network
-            container.ip = if let Some(inspected_network) = details
-                .network_settings
-                .as_ref()
-                .unwrap()
-                .networks
-                .as_ref()
-                .unwrap()
-                .get(network_name)
-            {
-                event!(
-                    Level::DEBUG,
-                    "container ip from inspect: {}",
-                    inspected_network.ip_address.as_ref().unwrap()
-                );
-                inspected_network
-                    .ip_address
-                    .as_ref()
-                    .unwrap()
-                    .parse::<std::net::Ipv4Addr>()
-                    // Exited containers will not have an IP address
-                    .unwrap_or_else(|e| {
-                        event!(Level::TRACE, "container ip address failed to parse: {}", e);
-                        std::net::Ipv4Addr::UNSPECIFIED
-                    })
-            } else {
-                std::net::Ipv4Addr::UNSPECIFIED
-            };
-
-            container.ports = if let Some(ports) = details.network_settings.unwrap().ports {
-                event!(
-                    Level::DEBUG,
-                    "container ports from inspect: {:?}",
-                    ports.clone()
-                );
-                match HostPortMappings::try_from(ports) {
-                    Ok(h) => h,
-                    Err(e) => {
-                        let err = DockerTestError::HostPort(e.to_string());
-                        errors.push(err);
-                        continue;
-                    }
-                }
-            } else {
-                HostPortMappings::default()
             }
         }
 
@@ -684,48 +634,7 @@ impl Engine<Debris> {
             .await;
     }
 
-    pub async fn stop_containers(self, client: &Docker) {
-        let cleanup: Vec<CleanupContainer> = self
-            .phase
-            .kept
-            .into_iter()
-            .filter(|c| !c.is_static())
-            .collect();
-
-        join_all(
-            cleanup
-                .iter()
-                .map(|c| client.stop_container(&c.id, None::<StopContainerOptions>))
-                .collect::<Vec<_>>(),
-        )
-        .await;
-    }
-
-    /// The container must be removed prior to removing volumes.
-    pub async fn remove_containers(self, client: &Docker) {
-        let cleanup: Vec<CleanupContainer> = self
-            .phase
-            .kept
-            .into_iter()
-            .filter(|c| !c.is_static())
-            .collect();
-
-        let futures = cleanup
-            .iter()
-            .map(|c| {
-                // It's unlikely that anonymous volumes will be used by several containers.
-                // In this case there will be remove errors that it's possible just to ignore
-                // See:
-                // https://github.com/moby/moby/blob/7b9275c0da707b030e62c96b679a976f31f929d3/daemon/mounts.go#L34).
-                let options = Some(RemoveContainerOptions {
-                    force: true,
-                    v: true,
-                    ..Default::default()
-                });
-
-                client.remove_container(&c.id, options)
-            })
-            .collect::<Vec<_>>();
-        join_all(futures).await;
+    pub fn cleanup_containers(&self) -> &[CleanupContainer] {
+        &self.phase.kept
     }
 }

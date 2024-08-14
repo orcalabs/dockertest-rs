@@ -3,12 +3,10 @@
 use crate::{
     composition::{LogOptions, StaticManagementPolicy},
     container::RunningContainer,
-    static_container::STATIC_CONTAINERS,
+    docker::Docker,
     waitfor::WaitFor,
     DockerTestError, StartPolicy,
 };
-
-use bollard::{container::StartContainerOptions, errors::Error, Docker};
 
 /// Represent a docker container object in a pending phase between
 /// it being created on the daemon, but may not be running.
@@ -78,62 +76,31 @@ impl PendingContainer {
     /// Once the PendingContainer is successfully started and the WaitFor condition
     /// has been achived, the RunningContainer is returned.
     pub(crate) async fn start(self) -> Result<RunningContainer, DockerTestError> {
-        if self.is_static {
-            STATIC_CONTAINERS.start(&self).await
-        } else {
-            self.start_internal().await
-        }
+        // TODO: dont clone
+        let client = self.client.clone();
+        client.start_container(self).await
     }
 
-    /// Internal start method should only be invoked from the static mod.
-    pub(crate) async fn start_internal(mut self) -> Result<RunningContainer, DockerTestError> {
-        self.client
-            .start_container(&self.name, None::<StartContainerOptions<String>>)
-            .await
-            .map_err(|e| match e {
-                Error::DockerResponseServerError {
-                    message,
-                    status_code,
-                } => {
-                    if status_code == 404 {
-                        let json: Result<serde_json::Value, serde_json::error::Error> =
-                            serde_json::from_str(message.as_str());
-                        match json {
-                            Ok(json) => DockerTestError::Startup(format!(
-                                "failed to start container due to `{}`",
-                                json["message"].as_str().unwrap()
-                            )),
-                            Err(e) => DockerTestError::Daemon(format!(
-                                "daemon json response decode failure: {}",
-                                e
-                            )),
-                        }
-                    } else {
-                        DockerTestError::Daemon(format!("failed to start container: {}", message))
-                    }
-                }
-                _ => DockerTestError::Daemon(format!("failed to start container: {}", e)),
-            })?;
-
-        let waitfor = self.wait.take().unwrap();
-
-        // Issue WaitFor operation
-        let res = waitfor.wait_for_ready(self);
-        res.await
+    // Internal start method should only be invoked from the static mod.
+    // TODO: isolate to static mod only
+    pub(crate) async fn start_inner(self) -> Result<RunningContainer, DockerTestError> {
+        // TODO: dont clone
+        let client = self.client.clone();
+        client.start_container_inner(self).await
     }
 }
 
 #[cfg(test)]
 mod tests {
     use crate::container::PendingContainer;
-    use crate::utils::connect_with_local_or_tls_defaults;
+    use crate::docker::Docker;
     use crate::waitfor::NoWait;
     use crate::StartPolicy;
 
     /// Tests `PendingContainer::new` with associated struct member field values.
     #[tokio::test]
     async fn test_new_pending_container() {
-        let client = connect_with_local_or_tls_defaults().unwrap();
+        let client = Docker::new().unwrap();
         let id = "this_is_an_id".to_string();
         let name = "this_is_a_container_name".to_string();
         let handle_key = "this_is_a_handle_key";

@@ -1,25 +1,22 @@
 use crate::{
     composition::{Composition, StaticManagementPolicy},
-    container::{CreatedContainer, HostPortMappings},
+    container::CreatedContainer,
+    docker::Docker,
     DockerTestError, Network, PendingContainer, RunningContainer,
 };
 use dynamic::DynamicContainers;
 use external::ExternalContainers;
 use internal::InternalContainers;
 
-use bollard::{
-    container::RemoveContainerOptions, models::ContainerInspectResponse,
-    network::DisconnectNetworkOptions, Docker,
-};
 use lazy_static::lazy_static;
 use std::collections::HashSet;
-use tracing::{event, Level};
 
 mod dynamic;
 mod external;
 mod internal;
 mod network;
 
+pub use dynamic::CreateDynamicContainer;
 pub(crate) use network::SCOPED_NETWORKS;
 
 // Internal static object to keep track of all static containers.
@@ -125,95 +122,5 @@ impl StaticContainers {
         self.external
             .disconnect(client, network, network_mode, &cleanup)
             .await;
-    }
-}
-
-async fn add_to_network(
-    container_id: &str,
-    network: &str,
-    client: &Docker,
-) -> Result<(), DockerTestError> {
-    let opts = bollard::network::ConnectNetworkOptions {
-        container: container_id,
-        endpoint_config: bollard::models::EndpointSettings::default(),
-    };
-
-    event!(
-        Level::DEBUG,
-        "adding to network: {}, container: {}",
-        network,
-        container_id
-    );
-
-    match client.connect_network(network, opts).await {
-        Ok(_) => Ok(()),
-        Err(e) => match e {
-            bollard::errors::Error::DockerResponseServerError {
-                status_code,
-                message: _,
-            } => {
-                // The container was already connected to the network which is what we wanted
-                // anyway
-                if status_code == 403 {
-                    Ok(())
-                } else {
-                    Err(DockerTestError::Startup(format!(
-                        "failed to add static container to dockertest network: {}",
-                        e
-                    )))
-                }
-            }
-            _ => Err(DockerTestError::Startup(format!(
-                "failed to add static container to dockertest network: {}",
-                e
-            ))),
-        },
-    }
-}
-
-async fn remove_container(id: &str, client: &Docker) {
-    let remove_opts = Some(RemoveContainerOptions {
-        force: true,
-        ..Default::default()
-    });
-
-    if let Err(e) = client.remove_container(id, remove_opts).await {
-        event!(Level::ERROR, "failed to remove static container: {}", e);
-    }
-}
-async fn disconnect_container(client: &Docker, container_id: &str, network: &str) {
-    let opts = DisconnectNetworkOptions::<&str> {
-        container: container_id,
-        force: true,
-    };
-    if let Err(e) = client.disconnect_network(network, opts).await {
-        event!(
-            Level::ERROR,
-            "unable to remove dockertest-container from network: {}",
-            e
-        );
-    }
-}
-
-async fn running_container_from_composition(
-    composition: Composition,
-    client: &Docker,
-    container_details: ContainerInspectResponse,
-) -> Result<RunningContainer, DockerTestError> {
-    if let Some(id) = container_details.id {
-        Ok(RunningContainer {
-            client: client.clone(),
-            id,
-            name: composition.container_name.clone(),
-            handle: composition.container_name,
-            ip: std::net::Ipv4Addr::UNSPECIFIED,
-            ports: HostPortMappings::default(),
-            is_static: true,
-            log_options: composition.log_options,
-        })
-    } else {
-        Err(DockerTestError::Daemon(
-            "failed to retrieve container id for external container".to_string(),
-        ))
     }
 }

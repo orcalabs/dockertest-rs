@@ -1,12 +1,8 @@
 use crate::container::{PendingContainer, RunningContainer};
+use crate::docker::{ContainerLogSource, Docker};
 use crate::waitfor::{async_trait, WaitFor};
 use crate::DockerTestError;
-
-use bollard::{
-    container::{LogOutput, LogsOptions},
-    Docker,
-};
-use futures::stream::StreamExt;
+use futures::StreamExt;
 use serde::Serialize;
 use std::sync::atomic::{self, AtomicBool};
 use std::sync::Arc;
@@ -27,7 +23,7 @@ pub struct MessageWait {
 
 /// The various sources to listen for a message on.
 /// Used by `MessageWait`.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MessageSource {
     /// Listen to the container Stdout.
     Stdout,
@@ -57,10 +53,9 @@ async fn pending_container_wait_for_message(
     msg: String,
     timeout: u16,
 ) -> Result<RunningContainer, DockerTestError> {
-    // Must unfortunately clone the client, since the PendingContainer will be consusumed.
-    let client = container.client.clone();
+    let client = &container.client;
     match wait_for_message(
-        &client,
+        client,
         &container.id,
         &container.handle,
         source,
@@ -85,59 +80,37 @@ pub(crate) async fn wait_for_message<T>(
 where
     T: Into<String> + Serialize,
 {
-    // Construct LogOptions
-    let mut log_options = LogsOptions::<String> {
-        follow: true,
-        ..Default::default()
-    };
-    match source {
-        MessageSource::Stdout => log_options.stdout = true,
-        MessageSource::Stderr => log_options.stderr = true,
-    };
-    let log_options = Some(log_options);
-
-    // Construct remaining variables
     let s1 = Arc::new(AtomicBool::new(false));
     let s2 = s1.clone();
     let msg_clone1: String = msg.into();
     let msg_clone2: String = msg_clone1.clone();
 
-    // Construct the stream
-    let stream = client.logs(container_id, log_options);
+    let mut source: ContainerLogSource = source.into();
+    source.follow = true;
 
-    // Work configuration
-    let work_fut = async {
+    let stream = client.container_logs(container_id, source);
+
+    let log_stream_future = async {
         stream
-            .take_while(move |chunk| {
-                match chunk {
-                    Ok(chunk) => {
-                        // Extract the String from LogOutput variants
-                        let content = match chunk {
-                            LogOutput::StdErr { message } => Some(message),
-                            LogOutput::StdOut { message } => Some(message),
-                            LogOutput::StdIn { message: _ } => None,
-                            LogOutput::Console { message: _ } => None,
-                        };
-                        match content {
-                            Some(content)
-                                if String::from_utf8(content.to_vec())
-                                    .unwrap()
-                                    .contains(&msg_clone1) =>
-                            {
-                                s1.store(true, atomic::Ordering::SeqCst);
-                                futures::future::ready(false)
-                            }
-                            _ => futures::future::ready(true),
-                        }
+            .take_while(move |message| match message {
+                Ok(message) => {
+                    if String::from_utf8(message.message.to_vec())
+                        .unwrap()
+                        .contains(&msg_clone1)
+                    {
+                        s1.store(true, atomic::Ordering::SeqCst);
+                        futures::future::ready(false)
+                    } else {
+                        futures::future::ready(true)
                     }
-                    Err(_) => futures::future::ready(false),
                 }
+                Err(_) => futures::future::ready(false),
             })
             .collect::<Vec<_>>()
             .await
     };
 
-    match time::timeout(Duration::from_secs(timeout.into()), work_fut).await {
+    match time::timeout(Duration::from_secs(timeout.into()), log_stream_future).await {
         Ok(_) => {
             if s2.load(atomic::Ordering::SeqCst) {
                 Ok(())

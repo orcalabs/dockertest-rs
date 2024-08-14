@@ -1,11 +1,9 @@
 //! `WaitFor` implementations regarding status changes.
 
 use crate::container::{PendingContainer, RunningContainer};
+use crate::docker::ContainerState;
 use crate::waitfor::{async_trait, WaitFor};
 use crate::DockerTestError;
-
-use bollard::container::InspectContainerOptions;
-use bollard::models::ContainerState;
 use tokio::time::{interval, Duration};
 
 /// The RunningWait `WaitFor` implementation for containers.
@@ -35,7 +33,7 @@ impl WaitFor for RunningWait {
         container: PendingContainer,
     ) -> Result<RunningContainer, DockerTestError> {
         wait_for_container_state(container, self.check_interval, self.max_checks, |state| {
-            state.running.unwrap()
+            state == ContainerState::Running
         })
         .await
     }
@@ -48,7 +46,7 @@ impl WaitFor for ExitedWait {
         container: PendingContainer,
     ) -> Result<RunningContainer, DockerTestError> {
         wait_for_container_state(container, self.check_interval, self.max_checks, |state| {
-            !state.running.unwrap()
+            state == ContainerState::Exited
         })
         .await
     }
@@ -58,7 +56,7 @@ async fn wait_for_container_state(
     container: PendingContainer,
     check_interval: u64,
     max_checks: u64,
-    container_state_compare: fn(&ContainerState) -> bool,
+    container_state_compare: fn(ContainerState) -> bool,
 ) -> Result<RunningContainer, DockerTestError> {
     let client = &container.client;
 
@@ -76,11 +74,8 @@ async fn wait_for_container_state(
             break;
         }
 
-        started = if let Ok(c) = client
-            .inspect_container(&container.name, None::<InspectContainerOptions>)
-            .await
-        {
-            container_state_compare(&c.clone().state.unwrap())
+        started = if let Ok(c) = client.container_state(&container.name).await {
+            container_state_compare(c.unwrap())
         } else {
             false
         };

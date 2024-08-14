@@ -1,24 +1,18 @@
 //! The main library structures.
 
 use crate::container::RunningContainer;
+use crate::docker::Docker;
 use crate::dockertest::Network;
 use crate::engine::{bootstrap, Debris, Engine, Orbiting};
 use crate::static_container::SCOPED_NETWORKS;
-use crate::utils::{connect_with_local_or_tls_defaults, generate_random_string};
+use crate::utils::generate_random_string;
 use crate::{DockerTest, DockerTestError};
-
-use bollard::{
-    network::{CreateNetworkOptions, DisconnectNetworkOptions},
-    volume::RemoveVolumeOptions,
-    Docker,
-};
-use futures::future::{join_all, Future};
-use tracing::{error, event, trace, Level};
-
+use futures::future::Future;
 use std::any::Any;
 use std::clone::Clone;
 use std::collections::HashMap;
 use std::panic;
+use tracing::{error, event, trace, Level};
 
 /// Represents a single docker test body execution environment.
 ///
@@ -139,7 +133,7 @@ impl Runner {
 
     /// Creates a new DockerTest [Runner]. Returns error on Docker daemon connection failure.
     pub async fn try_new(config: DockerTest) -> Result<Runner, DockerTestError> {
-        let client = connect_with_local_or_tls_defaults()?;
+        let client = Docker::new()?;
         let id = generate_random_string(20);
 
         let network = match &config.network {
@@ -333,12 +327,9 @@ impl Runner {
             // External network is created externally.
             Network::Singular | Network::External(_) => Ok(()),
             Network::Isolated => {
-                create_network(
-                    &self.client,
-                    &self.network,
-                    self.config.container_id.as_deref(),
-                )
-                .await
+                self.client
+                    .create_network(&self.network, self.config.container_id.as_deref())
+                    .await
             }
         }
     }
@@ -368,7 +359,9 @@ impl Runner {
             // We only stop, and do not remove, if test failed and our strategy
             // tells us to do so.
             PruneStrategy::StopOnFailure if test_failed => {
-                engine.stop_containers(&self.client).await;
+                self.client
+                    .stop_containers(engine.cleanup_containers())
+                    .await;
                 self.teardown_network().await;
             }
 
@@ -383,26 +376,14 @@ impl Runner {
                 // We therefore run the container remove futures to completion before trying to remove
                 // volumes. We will not be able to remove volumes if the associated container was not
                 // removed successfully.
-                engine.remove_containers(&self.client).await;
+                self.client
+                    .remove_containers(engine.cleanup_containers())
+                    .await;
                 self.teardown_network().await;
 
-                self.remove_volumes().await;
+                self.client.remove_volumes(&self.named_volumes).await;
             }
         }
-    }
-
-    async fn remove_volumes(&self) {
-        join_all(
-            self.named_volumes
-                .iter()
-                .map(|v| {
-                    event!(Level::INFO, "removing named volume: {:?}", &v);
-                    let options = Some(RemoveVolumeOptions { force: true });
-                    self.client.remove_volume(v, options)
-                })
-                .collect::<Vec<_>>(),
-        )
-        .await;
     }
 
     // Determines the final name for all named volumes, and modifies the Compositions accordingly.
@@ -453,12 +434,9 @@ impl Runner {
             Network::Singular => (),
             Network::External(_) => (),
             Network::Isolated => {
-                delete_network(
-                    &self.client,
-                    &self.network,
-                    self.config.container_id.as_deref(),
-                )
-                .await
+                self.client
+                    .delete_network(&self.network, self.config.container_id.as_deref())
+                    .await
             }
         }
     }
@@ -485,101 +463,4 @@ fn env_prune_strategy() -> PruneStrategy {
         // Default strategy
         None => PruneStrategy::RemoveRegardless,
     }
-}
-
-/// Make sure we remove the network we have previously created.
-pub(crate) async fn delete_network(
-    client: &Docker,
-    network_name: &str,
-    self_container: Option<&str>,
-) {
-    if let Some(id) = self_container {
-        let opts = DisconnectNetworkOptions::<&str> {
-            container: id,
-            force: true,
-        };
-        if let Err(e) = client.disconnect_network(network_name, opts).await {
-            event!(
-                Level::ERROR,
-                "unable to remove dockertest-container from network: {}",
-                e
-            );
-        }
-    }
-
-    if let Err(e) = client.remove_network(network_name).await {
-        event!(
-            Level::ERROR,
-            "unable to remove docker network `{}`: {}",
-            network_name,
-            e
-        );
-    }
-}
-
-pub(crate) async fn create_network(
-    client: &Docker,
-    network_name: &str,
-    self_container: Option<&str>,
-) -> Result<(), DockerTestError> {
-    let config = CreateNetworkOptions {
-        name: network_name,
-        ..Default::default()
-    };
-
-    event!(Level::TRACE, "creating network {}", network_name);
-    let res = client
-        .create_network(config)
-        .await
-        .map(|_| ())
-        .map_err(|e| DockerTestError::Startup(format!("creating docker network failed: {}", e)));
-
-    event!(
-        Level::TRACE,
-        "finished created network with result: {}",
-        res.is_ok()
-    );
-
-    if let Some(id) = self_container {
-        if let Err(e) = add_self_to_network(client, id, network_name).await {
-            if let Err(e) = client.remove_network(network_name).await {
-                event!(
-                    Level::ERROR,
-                    "unable to remove docker network `{}`: {}",
-                    network_name,
-                    e
-                );
-            }
-            return Err(e);
-        }
-    }
-
-    res
-}
-
-pub(crate) async fn add_self_to_network(
-    client: &Docker,
-    container_id: &str,
-    network_name: &str,
-) -> Result<(), DockerTestError> {
-    event!(
-        Level::TRACE,
-        "adding dockertest container to created network, container_id: {}, network_id: {}",
-        container_id,
-        network_name,
-    );
-    let opts = bollard::network::ConnectNetworkOptions {
-        container: container_id,
-        endpoint_config: bollard::models::EndpointSettings::default(),
-    };
-
-    client
-        .connect_network(network_name, opts)
-        .await
-        .map_err(|e| {
-            DockerTestError::Startup(format!(
-                "failed to add internal container to dockertest network: {}",
-                e
-            ))
-        })
 }

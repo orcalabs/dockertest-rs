@@ -3,14 +3,13 @@
 use crate::{
     composition::{LogAction, LogOptions},
     container::{PendingContainer, RunningContainer},
+    docker::{ContainerLogSource, Docker, LogEntry},
+    waitfor::MessageSource,
     DockerTestError, LogSource,
 };
-
-use bollard::{container::LogOutput, Docker};
 use futures::StreamExt;
-use tracing::info;
-
 use std::io::{self, Write};
+use tracing::info;
 
 /// A container representation of a pending or running container, that requires us to
 /// perform cleanup on it.
@@ -39,7 +38,7 @@ impl CleanupContainer {
     async fn handle_log_line(
         &self,
         action: &LogAction,
-        output: LogOutput,
+        entry: LogEntry,
         file: &mut Option<tokio::fs::File>,
     ) -> Result<(), DockerTestError> {
         let write_to_stdout = |message| {
@@ -58,48 +57,34 @@ impl CleanupContainer {
 
         match action {
             // forward-only, print stdout/stderr output to current process stdout/stderr
-            LogAction::Forward => match output {
-                LogOutput::StdOut { message } => write_to_stdout(&message[..]),
-                LogOutput::StdErr { message } => write_to_stderr(&message[..]),
-                LogOutput::StdIn { .. } | LogOutput::Console { .. } => Ok(()),
+            LogAction::Forward => match entry.source {
+                MessageSource::Stdout => write_to_stdout(&entry.message[..]),
+                MessageSource::Stderr => write_to_stderr(&entry.message[..]),
             },
             // forward everything to stderr
-            LogAction::ForwardToStdErr => match output {
-                LogOutput::StdOut { message } | LogOutput::StdErr { message } => {
-                    write_to_stderr(&message[..])
-                }
-                LogOutput::StdIn { .. } | LogOutput::Console { .. } => Ok(()),
-            },
+            LogAction::ForwardToStdErr => write_to_stderr(&entry.message[..]),
             // forward everything to stdout
-            LogAction::ForwardToStdOut => match output {
-                LogOutput::StdOut { message } | LogOutput::StdErr { message } => {
-                    write_to_stdout(&message[..])
-                }
-                LogOutput::StdIn { .. } | LogOutput::Console { .. } => Ok(()),
-            },
+            LogAction::ForwardToStdOut => write_to_stdout(&entry.message[..]),
             // forward everything to a file, file should be already opened
-            LogAction::ForwardToFile { .. } => match output {
-                LogOutput::StdOut { message } | LogOutput::StdErr { message } => {
-                    use tokio::io::AsyncWriteExt;
+            LogAction::ForwardToFile { .. } => {
+                use tokio::io::AsyncWriteExt;
 
-                    if let Some(ref mut file) = file {
-                        file.write(&message[..])
-                            .await
-                            .map_err(|error| {
-                                DockerTestError::LogWriteError(format!(
-                                    "unable to write to log file: {}",
-                                    error
-                                ))
-                            })
-                            .map(|_| ())
-                    } else {
-                        Err(DockerTestError::LogWriteError(
-                            "log file should not be None".to_string(),
-                        ))
-                    }
+                if let Some(ref mut file) = file {
+                    file.write(&entry.message[..])
+                        .await
+                        .map_err(|error| {
+                            DockerTestError::LogWriteError(format!(
+                                "unable to write to log file: {}",
+                                error
+                            ))
+                        })
+                        .map(|_| ())
+                } else {
+                    Err(DockerTestError::LogWriteError(
+                        "log file should not be None".to_string(),
+                    ))
                 }
-                LogOutput::StdIn { .. } | LogOutput::Console { .. } => Ok(()),
-            },
+            }
         }
     }
 
@@ -109,8 +94,6 @@ impl CleanupContainer {
         action: &LogAction,
         source: &LogSource,
     ) -> Result<(), DockerTestError> {
-        use bollard::container::LogsOptions;
-
         // check if we need to capture stderr and/or stdout
         let should_log_stderr = match source {
             LogSource::StdErr => true,
@@ -124,14 +107,14 @@ impl CleanupContainer {
             LogSource::Both => true,
         };
 
-        let options = Some(LogsOptions::<String> {
-            stdout: should_log_stdout,
-            stderr: should_log_stderr,
+        let source = ContainerLogSource {
+            log_stderr: should_log_stderr,
+            log_stdout: should_log_stdout,
             ..Default::default()
-        });
+        };
 
         info!("Trying to get logs from container: id={}", self.id);
-        let mut stream = self.client.logs(&self.name, options);
+        let mut stream = self.client.container_logs(&self.name, source);
 
         // let's open file if need it, we are doing this because we dont want to open
         // file in every log reading iteration

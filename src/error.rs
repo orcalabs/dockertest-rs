@@ -28,4 +28,6 @@ pub enum DockerTestError {
     LogWriteError(String),
     #[error("host port error `{0}`")]
     HostPort(String),
+    #[error("failed to follow container log stream `{0}'")]
+    ContainerLogStream(String),
 }

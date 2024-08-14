@@ -3,13 +3,11 @@
 use crate::{
     composition::LogOptions,
     container::PendingContainer,
+    docker::Docker,
     waitfor::{wait_for_message, MessageSource},
 };
 
-use bollard::{
-    models::{PortBinding, PortMap},
-    Docker,
-};
+use bollard::models::{PortBinding, PortMap};
 use serde::Serialize;
 
 use std::{
