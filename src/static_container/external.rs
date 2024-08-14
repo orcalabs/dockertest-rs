@@ -1,16 +1,12 @@
+use crate::{
+    composition::Composition, container::StaticExternalContainer, docker::Docker, DockerTestError,
+    Network, RunningContainer,
+};
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
 };
 use tokio::sync::RwLock;
-
-use bollard::{container::InspectContainerOptions, Docker};
-
-use super::{add_to_network, disconnect_container, running_container_from_composition};
-use crate::{
-    composition::Composition, container::StaticExternalContainer, DockerTestError, Network,
-    RunningContainer,
-};
 
 #[derive(Default)]
 pub struct ExternalContainers {
@@ -32,7 +28,7 @@ impl ExternalContainers {
                 Network::Singular | Network::External(_) => (),
                 Network::Isolated => {
                     if let Some(n) = network {
-                        add_to_network(running.id(), n, client).await?;
+                        client.add_container_to_network(running.id(), n).await?;
                     }
                 }
             }
@@ -42,30 +38,15 @@ impl ExternalContainers {
             };
             Ok(external)
         } else {
-            let details = client
-                .inspect_container(&composition.container_name, None::<InspectContainerOptions>)
-                .await
-                .map_err(|e| {
-                    DockerTestError::Daemon(format!("failed to inspect external container: {}", e))
-                })?;
-
-            let running = running_container_from_composition(composition, client, details).await?;
-
-            match network_mode {
-                Network::External(_) => (),
-                // The first to include external containers are responsible for including them in
-                // the singular/isolated network
-                Network::Isolated | Network::Singular => {
-                    if let Some(n) = network {
-                        add_to_network(running.id(), n, client).await?;
-                    }
-                }
-            }
+            let running = client
+                .include_static_external_container(composition, network, network_mode)
+                .await?;
 
             let external = StaticExternalContainer {
                 handle: running.handle.clone(),
                 id: running.id().to_string(),
             };
+
             map.insert(running.name.clone(), running);
 
             Ok(external)
@@ -98,7 +79,7 @@ impl ExternalContainers {
         let map = self.inner.read().await;
         for (_, container) in map.iter() {
             if to_cleanup.contains(container.id()) {
-                disconnect_container(client, container.id(), network).await;
+                client.disconnect_container(container.id(), network).await;
             }
         }
     }

@@ -1,24 +1,10 @@
 //! Represent a concrete instance of an Image, before it is ran as a Container.
 
-use crate::container::{CreatedContainer, PendingContainer};
 use crate::image::Image;
-use crate::static_container::STATIC_CONTAINERS;
 use crate::waitfor::{NoWait, WaitFor};
-use crate::{DockerTestError, Network};
 
-use bollard::{
-    container::{
-        Config, CreateContainerOptions, InspectContainerOptions, NetworkingConfig,
-        RemoveContainerOptions,
-    },
-    models::HostConfig,
-    service::{EndpointSettings, PortBinding},
-    Docker,
-};
-
-use futures::future::TryFutureExt;
 use std::collections::HashMap;
-use tracing::{event, trace, Level};
+use tracing::{event, Level};
 
 /// Specifies the starting policy of a container specification.
 ///
@@ -148,7 +134,7 @@ pub struct Composition {
     user_provided_container_name: Option<String>,
 
     /// Network aliases for the container.
-    network_aliases: Option<Vec<String>>,
+    pub(crate) network_aliases: Option<Vec<String>>,
 
     /// The name of the container to be created by this Composition.
     ///
@@ -164,16 +150,16 @@ pub struct Composition {
     pub(crate) container_name: String,
 
     /// A trait object holding the implementation that indicate container readiness.
-    wait: Box<dyn WaitFor>,
+    pub(crate) wait: Box<dyn WaitFor>,
 
     /// The environmentable variables that will be passed to the container.
     pub(crate) env: HashMap<String, String>,
 
     /// The command to pass to the container.
-    cmd: Vec<String>,
+    pub(crate) cmd: Vec<String>,
 
     /// The start policy of this container, codifing the inter-depdencies between containers.
-    start_policy: StartPolicy,
+    pub(crate) start_policy: StartPolicy,
 
     /// The base image that will be the container we will be starting.
     image: Image,
@@ -193,14 +179,14 @@ pub struct Composition {
     ///
     /// NOTE: As bind mounts do not outlive the container they are mounted in they do not need to
     /// be cleaned up.
-    bind_mounts: Vec<String>,
+    pub(crate) bind_mounts: Vec<String>,
 
     /// All user specified container name injections as environment variables.
     /// Tuple contains (handle, env).
     pub(crate) inject_container_name_env: Vec<(String, String)>,
 
     /// Port mapping (used for Windows-compatibility)
-    port: Vec<(String, String)>,
+    pub(crate) port: Vec<(String, String)>,
 
     /// Allocates an ephemeral host port for all of a container’s exposed ports.
     ///
@@ -524,7 +510,7 @@ impl Composition {
     }
 
     /// Query whether this Composition should be handled through static container checks.
-    fn is_static(&self) -> bool {
+    pub(crate) fn is_static(&self) -> bool {
         self.management.is_some()
     }
 
@@ -548,168 +534,6 @@ impl Composition {
         }
     }
 
-    /// TODO: Refactor what is returned when creating the static container.
-    pub(crate) async fn create(
-        self,
-        client: &Docker,
-        network: Option<&str>,
-        network_settings: &Network,
-    ) -> Result<CreatedContainer, DockerTestError> {
-        trace!("evaluating composition: {self:#?}");
-        if self.is_static() {
-            STATIC_CONTAINERS
-                .create(self, client, network, network_settings)
-                .await
-        } else {
-            self.create_inner(client, network)
-                .await
-                .map(CreatedContainer::Pending)
-        }
-    }
-
-    // Performs container creation, should NOT be called outside of this module or the static
-    // module.
-    // This is only exposed such that the static module can reach it.
-    pub(crate) async fn create_inner(
-        self,
-        client: &Docker,
-        network: Option<&str>,
-    ) -> Result<PendingContainer, DockerTestError> {
-        event!(Level::DEBUG, "creating container: {}", self.container_name);
-
-        let start_policy_clone = self.start_policy.clone();
-        let container_name_clone = self.container_name.clone();
-
-        if !self.is_static() {
-            // Ensure we can remove the previous container instance, if it somehow still exists.
-            // Only bail on non-recoverable failure.
-            match remove_container_if_exists(client, &self.container_name).await {
-                Ok(_) => {}
-                Err(e) => match e {
-                    DockerTestError::Recoverable(_) => {}
-                    _ => return Err(e),
-                },
-            }
-        }
-
-        let image_id = self.image.retrieved_id();
-        // Additional programming guard.
-        // This Composition cannot be created without an image id, which
-        // is set through `Image::pull`
-        if image_id.is_empty() {
-            return Err(DockerTestError::Processing("`Composition::create()` invoked without populating its image through `Image::pull()`".to_string()));
-        }
-
-        // As we can't return temporary values owned by this closure
-        // we have to first convert our map into a vector of owned strings,
-        // then convert it to a vector of borrowed strings (&str).
-        // There is probably a better way to do this...
-        let envs: Vec<String> = self
-            .env
-            .iter()
-            .map(|(key, value)| format!("{}={}", key, value))
-            .collect();
-        let envs = envs.iter().map(|s| s.as_ref()).collect();
-        let cmds = self.cmd.iter().map(|s| s.as_ref()).collect();
-
-        let mut volumes: Vec<String> = Vec::new();
-        for v in self.bind_mounts.iter() {
-            event!(
-                Level::DEBUG,
-                "creating host_mounted_volume: {} for container {}",
-                v.as_str(),
-                self.container_name
-            );
-            volumes.push(v.to_string());
-        }
-
-        for v in self.final_named_volume_names.iter() {
-            event!(
-                Level::DEBUG,
-                "creating named_volume: {} for container {}",
-                &v,
-                self.container_name
-            );
-            volumes.push(v.to_string());
-        }
-
-        let mut port_map: HashMap<String, Option<Vec<PortBinding>>> = HashMap::new();
-        let mut exposed_ports: HashMap<&str, HashMap<(), ()>> = HashMap::new();
-
-        for (exposed, host) in &self.port {
-            let dest_port: Vec<PortBinding> = vec![PortBinding {
-                host_ip: Some("127.0.0.1".to_string()),
-                host_port: Some(host.clone()),
-            }];
-            port_map.insert(exposed.to_string(), Some(dest_port));
-            exposed_ports.insert(exposed, HashMap::new());
-        }
-
-        let network_aliases = self.network_aliases.as_ref();
-        let mut net_config = None;
-
-        // Construct host config
-        let host_config = network.map(|n| HostConfig {
-            network_mode: Some(n.to_string()),
-            binds: Some(volumes),
-            port_bindings: Some(port_map),
-            publish_all_ports: Some(self.publish_all_ports),
-            privileged: Some(self.privileged),
-            ..Default::default()
-        });
-
-        if let Some(n) = network {
-            net_config = network_aliases.map(|a| {
-                let mut endpoints = HashMap::new();
-                let settings = EndpointSettings {
-                    aliases: Some(a.to_vec()),
-                    ..Default::default()
-                };
-                endpoints.insert(n, settings);
-                NetworkingConfig {
-                    endpoints_config: endpoints,
-                }
-            });
-        }
-
-        // Construct options for create container
-        let options = Some(CreateContainerOptions {
-            name: &self.container_name,
-            // Sets the platform of the server if its multi-platform capable, we might support user
-            // provided values here at a later time.
-            platform: None,
-        });
-
-        let config = Config::<&str> {
-            image: Some(&image_id),
-            cmd: Some(cmds),
-            env: Some(envs),
-            networking_config: net_config,
-            host_config,
-            exposed_ports: Some(exposed_ports),
-            ..Default::default()
-        };
-
-        trace!("creating container from options: {options:#?}, config: {config:#?}");
-
-        let container_info = client
-            .create_container(options, config)
-            .map_err(|e| DockerTestError::Daemon(format!("failed to create container: {}", e)))
-            .await?;
-
-        let static_management_policy = self.static_management_policy().clone();
-        Ok(PendingContainer::new(
-            &container_name_clone,
-            container_info.id,
-            self.handle(),
-            start_policy_clone,
-            self.wait,
-            client.clone(),
-            static_management_policy,
-            self.log_options.clone(),
-        ))
-    }
-
     // Returns the Image associated with this Composition.
     pub(crate) fn image(&self) -> &Image {
         &self.image
@@ -725,23 +549,4 @@ impl Composition {
             Some(n) => n.clone(),
         }
     }
-}
-
-// Forcefully removes the given container if it exists.
-async fn remove_container_if_exists(client: &Docker, name: &str) -> Result<(), DockerTestError> {
-    client
-        .inspect_container(name, None::<InspectContainerOptions>)
-        .map_err(|e| DockerTestError::Recoverable(format!("container did not exist: {}", e)))
-        .await?;
-
-    // We were able to inspect it successfully, it exists.
-    // Therefore, we can simply force remove it.
-    let options = Some(RemoveContainerOptions {
-        force: true,
-        ..Default::default()
-    });
-    client
-        .remove_container(name, options)
-        .map_err(|e| DockerTestError::Daemon(format!("failed to remove existing container: {}", e)))
-        .await
 }

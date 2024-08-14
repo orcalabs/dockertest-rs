@@ -1,13 +1,8 @@
 use std::{collections::HashMap, sync::Arc};
 
-use crate::{runner::add_self_to_network, DockerTestError};
-use bollard::{
-    network::{CreateNetworkOptions, ListNetworksOptions},
-    Docker,
-};
+use crate::{docker::Docker, DockerTestError};
 use lazy_static::lazy_static;
 use tokio::sync::RwLock;
-use tracing::{event, Level};
 
 static SINGULAR_NETWORK_NAME: &str = "dockertest";
 
@@ -58,7 +53,7 @@ impl ScopedNetworks {
                 NetworkCreation::Complete(id) => Ok(id.clone()),
             }
         } else {
-            let id = if let Some(id) = existing_dockertest_network(client, &network_name).await? {
+            let id = if let Some(id) = client.existing_dockertest_network(&network_name).await? {
                 networks.insert(
                     namespace.to_string(),
                     SingularNetwork {
@@ -67,7 +62,7 @@ impl ScopedNetworks {
                 );
                 return Ok(id);
             } else {
-                match create_singular_network_impl(client, network_name).await {
+                match client.create_singular_network_impl(network_name).await {
                     Ok(id) => Ok(id),
                     Err(e) => {
                         networks.insert(
@@ -81,7 +76,7 @@ impl ScopedNetworks {
                 }
             }?;
             if let Some(container_id) = self_container {
-                if let Err(e) = add_self_to_network(client, container_id, &id).await {
+                if let Err(e) = client.add_self_to_network(container_id, &id).await {
                     networks.insert(
                         namespace.to_string(),
                         SingularNetwork {
@@ -100,87 +95,4 @@ impl ScopedNetworks {
             Ok(id)
         }
     }
-}
-
-async fn create_singular_network_impl(
-    client: &Docker,
-    network_name: String,
-) -> Result<String, DockerTestError> {
-    let config = CreateNetworkOptions {
-        name: network_name.as_str(),
-        ..Default::default()
-    };
-
-    event!(Level::TRACE, "creating singular network");
-
-    match client.create_network(config).await {
-        Ok(resp) => match resp.id {
-            Some(id) => Ok(id),
-            None => Err(DockerTestError::Startup(
-                "failed to get id of singular network".to_string(),
-            )),
-        },
-        Err(e) => {
-            match e {
-                bollard::errors::Error::DockerResponseServerError {
-                    status_code,
-                    message,
-                } => {
-                    if status_code == 409 {
-                        // We assume that we got a conflict due to multiple networks with the name
-                        // `dockertest`, and therefore assume that 'existing_dockertest_network' will
-                        // return the conflicting network.
-                        Ok(existing_dockertest_network(client, &network_name)
-                            .await?
-                            .unwrap())
-                    } else {
-                        Err(DockerTestError::Startup(format!(
-                            "failed to create singular network: {message}",
-                        )))
-                    }
-                }
-                _ => Err(DockerTestError::Startup(format!(
-                    "failed to create singular network: {e}"
-                ))),
-            }
-        }
-    }
-}
-
-async fn existing_dockertest_network(
-    client: &Docker,
-    network_name: &str,
-) -> Result<Option<String>, DockerTestError> {
-    let mut filter = HashMap::with_capacity(1);
-    filter.insert("name", vec![network_name]);
-
-    let opts = ListNetworksOptions { filters: filter };
-    let networks = client
-        .list_networks(Some(opts))
-        .await
-        .map_err(|e| DockerTestError::Startup(format!("failed to list networks: {e}")))?;
-
-    let mut highest_timestamp: Option<String> = None;
-    let mut highest_timestamp_id: Option<String> = None;
-
-    // We assume id is present on the returned networks
-    for n in networks {
-        if let Some(name) = n.name {
-            if name == network_name {
-                if let Some(timestamp) = n.created {
-                    if let Some(compare_timestamp) = &highest_timestamp {
-                        if timestamp.as_str() > compare_timestamp.as_str() {
-                            highest_timestamp = Some(timestamp);
-                            highest_timestamp_id = Some(n.id.unwrap());
-                        }
-                    } else {
-                        highest_timestamp = Some(timestamp);
-                        highest_timestamp_id = Some(n.id.unwrap());
-                    }
-                }
-            }
-        }
-    }
-
-    Ok(highest_timestamp_id)
 }

@@ -1,28 +1,21 @@
 //! An Image persisted in Docker.
 
 use crate::DockerTestError;
-
-use bollard::{
-    auth::DockerCredentials, errors::Error, image::CreateImageOptions, models::CreateImageInfo,
-    Docker,
-};
-
 use base64::{engine::general_purpose, Engine};
-use futures::stream::StreamExt;
+use bollard::auth::DockerCredentials;
 use secrecy::{ExposeSecret, Secret};
 use serde::Deserialize;
-use tracing::{debug, event, trace, Level};
-
 use std::sync::{Arc, RwLock};
+use tracing::{debug, trace};
 
 /// Represents a docker `Image`.
 ///
 /// This structure embeds the information related to its naming, tag and `Source` location.
 #[derive(Clone, Debug)]
 pub struct Image {
-    repository: String,
-    tag: String,
-    source: Option<Source>,
+    pub(crate) repository: String,
+    pub(crate) tag: String,
+    pub(crate) source: Option<Source>,
     pull_policy: PullPolicy,
     id: Arc<RwLock<String>>,
 }
@@ -128,173 +121,20 @@ impl Image {
         id.clone()
     }
 
-    // Pulls the image from its source with the given docker client.
-    // NOTE(lint): uncertain how to structure this otherwise
-    #[allow(clippy::match_single_binding)]
-    async fn do_pull(
-        &self,
-        client: &Docker,
-        auth: Option<DockerCredentials>,
-    ) -> Result<(), DockerTestError> {
-        debug!("pulling image: {}:{}", self.repository, self.tag);
-        let options = Some(CreateImageOptions::<&str> {
-            from_image: &self.repository,
-            tag: &self.tag,
-            ..Default::default()
-        });
-
-        let mut stream = client.create_image(options, None, auth);
-        // This stream will intermittently yield a progress update.
-        while let Some(result) = stream.next().await {
-            match result {
-                Ok(intermitten_result) => match intermitten_result {
-                    CreateImageInfo {
-                        id,
-                        error,
-                        error_detail,
-                        status,
-                        progress,
-                        progress_detail,
-                    } => {
-                        if error.is_some() {
-                            event!(
-                                Level::ERROR,
-                                "pull error {} {:?}",
-                                error.clone().unwrap(),
-                                error_detail.unwrap_or_default()
-                            );
-                        } else {
-                            event!(
-                                Level::TRACE,
-                                "pull progress {} {:?} {:?} {:?}",
-                                status.clone().unwrap_or_default(),
-                                id.clone().unwrap_or_default(),
-                                progress.clone().unwrap_or_default(),
-                                progress_detail.clone().unwrap_or_default()
-                            );
-                        }
-                    }
-                },
-                Err(e) => {
-                    let msg = match e {
-                        Error::DockerResponseServerError {
-                            message: _,
-                            status_code,
-                        } => {
-                            if status_code == 404 {
-                                "unknown registry or image".to_string()
-                            } else {
-                                e.to_string()
-                            }
-                        }
-                        _ => e.to_string(),
-                    };
-                    return Err(DockerTestError::Pull {
-                        repository: self.repository.to_string(),
-                        tag: self.tag.to_string(),
-                        error: msg,
-                    });
-                }
-            }
-        }
-
-        // TODO: Verify that we have actually pulled the image.
-        // NOTE: The engine may return a 500 when we unauthorized, but bollard does not give us
-        // this failure. Rather, it just does not provide anthing in the stream.
-        // If a repo is submitted that we do not have access to, and no auth is supplied,
-        // we will no error.
-
-        event!(Level::DEBUG, "successfully pulled image");
-        Ok(())
-    }
-
-    // Retrieves the id of the image from the local docker daemon and
-    // sets that id field in image to that value.
-    // If this method is invoked and the image does not exist locally,
-    // it will return an error.
-    async fn retrieve_and_set_id(&self, client: &Docker) -> Result<(), DockerTestError> {
-        match client
-            .inspect_image(&format!("{}:{}", self.repository, self.tag))
-            .await
-        {
-            Ok(details) => {
-                let mut id = self.id.write().expect("failed to get id lock");
-                *id = details.id.expect("image did not have an id");
-                Ok(())
-            }
-            Err(e) => {
-                event!(
-                    Level::TRACE,
-                    "failed to retrieve ID of image: {}, tag: {}, source: {:?} ",
-                    self.repository,
-                    self.tag,
-                    self.source
-                );
-                Err(DockerTestError::Pull {
-                    repository: self.repository.to_string(),
-                    tag: self.tag.to_string(),
-                    error: e.to_string(),
-                })
-            }
-        }
-    }
-
-    /// Checks whether the image exists locally through attempting to inspect it.
-    ///
-    /// If docker daemon communication failed, we will also implicitly return false.
-    async fn does_image_exist(&self, client: &Docker) -> Result<bool, DockerTestError> {
-        match client
-            .inspect_image(&format!("{}:{}", self.repository, self.tag))
-            .await
-        {
-            Ok(_) => Ok(true),
-            Err(e) => match e {
-                Error::DockerResponseServerError {
-                    message: _,
-                    status_code,
-                } => {
-                    if status_code == 404 {
-                        Ok(false)
-                    } else {
-                        Err(DockerTestError::Daemon(e.to_string()))
-                    }
-                }
-                _ => Err(DockerTestError::Daemon(e.to_string())),
-            },
-        }
-    }
-
-    /// Pulls the `Image` if neccessary.
-    ///
-    /// This function respects the `Image` Source and PullPolicy settings.
-    pub(crate) async fn pull(
-        &self,
-        client: &Docker,
-        default_source: &Source,
-    ) -> Result<(), DockerTestError> {
-        let pull_source = match &self.source {
-            None => default_source,
-            Some(r) => r,
-        };
-
-        let exists = self.does_image_exist(client).await?;
-
-        if self.should_pull(exists, pull_source)? {
-            let auth = self.resolve_auth(pull_source)?;
-            self.do_pull(client, auth).await?;
-        }
-
-        // FIXME: If we encounter a scenario where the image should not be pulled, we need to err
-        // with appropriate information. Currently, it fails with the same error message as
-        // other scenarios.
-        self.retrieve_and_set_id(client).await
+    pub(crate) async fn set_id(&self, image_id: String) {
+        let mut id = self.id.write().expect("failed to get id lock");
+        *id = image_id;
     }
 
     /// Determine whether or not the `Image` should be pulled from `Source`.
     ///
     /// This function will consult the `Source`, `PullPolicy` and whether it already
     /// exists on the local docker daemon.
-    fn should_pull(&self, exists: bool, source: &Source) -> Result<bool, DockerTestError> {
+    pub(crate) fn should_pull(
+        &self,
+        exists: bool,
+        source: &Source,
+    ) -> Result<bool, DockerTestError> {
         match source {
             Source::RegistryWithCredentials(_) => {
                 let valid = is_valid_pull_policy(exists, &self.pull_policy).map_err(|e| {
@@ -342,7 +182,10 @@ impl Image {
     }
 
     /// Resolve the auth credentials based on the provided [Source].
-    fn resolve_auth(&self, source: &Source) -> Result<Option<DockerCredentials>, DockerTestError> {
+    pub(crate) fn resolve_auth(
+        &self,
+        source: &Source,
+    ) -> Result<Option<DockerCredentials>, DockerTestError> {
         let potential = match source {
             Source::RegistryWithDockerLogin(address) => {
                 let credentials =

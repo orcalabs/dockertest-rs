@@ -1,15 +1,12 @@
+use crate::docker::Docker;
+use crate::{
+    composition::Composition, DockerTestError, Network, PendingContainer, RunningContainer,
+};
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
 };
 use tokio::sync::RwLock;
-
-use bollard::Docker;
-
-use super::{add_to_network, disconnect_container, remove_container};
-use crate::{
-    composition::Composition, DockerTestError, Network, PendingContainer, RunningContainer,
-};
 
 #[derive(Default)]
 pub struct InternalContainers {
@@ -88,7 +85,7 @@ impl InternalContainers {
                 InternalStatus::Running(r, _) => Ok(r.clone()),
                 InternalStatus::Pending(p) => {
                     let cloned = p.clone();
-                    let running = cloned.start_internal().await;
+                    let running = cloned.start_inner().await;
                     match running {
                         Ok(r) => {
                             c.status = InternalStatus::Running(r.clone(), p.clone());
@@ -120,7 +117,7 @@ impl InternalContainers {
         self.disconnect(client, network, to_cleanup).await;
         let to_remove = self.decrement_completion_counters(to_cleanup).await;
         for to_cleanup in to_remove {
-            remove_container(&to_cleanup, client).await;
+            client.remove_container(&to_cleanup).await;
         }
     }
 
@@ -147,7 +144,9 @@ impl InternalContainers {
                     // Only when the Isolated network mode is set do we need to add it to the
                     // network, as for External/Singular it will be added upon creation.
                     match (network, network_setting) {
-                        (Some(n), Network::Isolated) => add_to_network(&p.id, n, client).await,
+                        (Some(n), Network::Isolated) => {
+                            client.add_container_to_network(&p.id, n).await
+                        }
                         _ => Ok(()),
                     }?;
 
@@ -166,7 +165,7 @@ impl InternalContainers {
 
                     // This is the same case as upon first container creation
                     if let Some(n) = network {
-                        add_to_network(&container.id, n, client).await?;
+                        client.add_container_to_network(&container.id, n).await?;
                     }
 
                     Ok(container)
@@ -180,7 +179,7 @@ impl InternalContainers {
             // First to create the container adds it to the network regardless of which network
             // mode is set
             if let Some(n) = network {
-                add_to_network(&container.id, n, client).await?;
+                client.add_container_to_network(&container.id, n).await?;
             }
 
             Ok(container)
@@ -195,7 +194,7 @@ impl InternalContainers {
         network: Option<&str>,
     ) -> Result<PendingContainer, DockerTestError> {
         let container_name = composition.container_name.clone();
-        let pending = composition.create_inner(client, network).await;
+        let pending = client.create_container_inner(composition, network).await;
         match pending {
             Ok(p) => {
                 let c = InternalContainer {
@@ -221,7 +220,7 @@ impl InternalContainers {
         for (_, container) in map.iter() {
             if let InternalStatus::Running(r, _) = &container.status {
                 if to_cleanup.contains(r.id()) {
-                    disconnect_container(client, r.id(), network).await;
+                    client.disconnect_container(r.id(), network).await;
                 }
             }
         }
