@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- Make `Image` `Send` + `Sync`.
+- Upgrade all dependencies, notable:
+  - bollard from 0.15 to 0.17
+
+## [0.4.0]
+
 ### Added
 
 - Added new mechanism to construct Compositions, which are now private. The
