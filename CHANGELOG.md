@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- Make `Image` `Send` + `Sync`.
+
+## [0.4.0]
+
 ### Added
 
 - Added new mechanism to construct Compositions, which are now private. The
