@@ -8,8 +8,7 @@ use dynamic::DynamicContainers;
 use external::ExternalContainers;
 use internal::InternalContainers;
 
-use lazy_static::lazy_static;
-use std::collections::HashSet;
+use std::{collections::HashSet, sync::LazyLock};
 
 mod dynamic;
 mod external;
@@ -26,9 +25,8 @@ pub(crate) use network::SCOPED_NETWORKS;
 // Within a test binary multiple might execute in parallel, but only a single test binary is
 // executed at a time (https://github.com/rust-lang/cargo/issues/5609).
 // If the issue is resolved in the future we can change our implementation accordingly.
-lazy_static! {
-    pub(crate) static ref STATIC_CONTAINERS: StaticContainers = StaticContainers::default();
-}
+pub(crate) static STATIC_CONTAINERS: LazyLock<StaticContainers> =
+    LazyLock::new(StaticContainers::default);
 
 /// Encapsulates all static container related logic.
 ///

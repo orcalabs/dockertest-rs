@@ -1,15 +1,16 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::HashMap,
+    sync::{Arc, LazyLock},
+};
 
 use crate::{docker::Docker, DockerTestError};
-use lazy_static::lazy_static;
 use tokio::sync::RwLock;
 
 static SINGULAR_NETWORK_NAME: &str = "dockertest";
 
 // Controls all interaction with scoped networks within a single test binary
-lazy_static! {
-    pub(crate) static ref SCOPED_NETWORKS: ScopedNetworks = ScopedNetworks::default();
-}
+pub(crate) static SCOPED_NETWORKS: LazyLock<ScopedNetworks> =
+    LazyLock::new(ScopedNetworks::default);
 
 #[derive(Default)]
 pub struct ScopedNetworks {
