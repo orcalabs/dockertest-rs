@@ -7,16 +7,13 @@ use dockertest::{
 };
 
 use bollard::container::{Config, CreateContainerOptions, StartContainerOptions};
-use lazy_static::lazy_static;
 
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, LazyLock, Mutex};
 
-lazy_static! {
-    // As the container might re-created due to one of the tests completing before the next one
-    // starts we cannot rely on container id as they will differ after creating the container
-    // again.
-    static ref STATIC_CONTAINER_NAME: ContainerName = ContainerName::default();
-}
+// As the container might re-created due to one of the tests completing before the next one
+// starts we cannot rely on container id as they will differ after creating the container
+// again.
+static STATIC_CONTAINER_NAME: LazyLock<ContainerName> = LazyLock::new(ContainerName::default);
 
 #[test]
 fn test_static_containers_runs() {
