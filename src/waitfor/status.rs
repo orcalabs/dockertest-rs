@@ -50,6 +50,10 @@ impl WaitFor for ExitedWait {
         })
         .await
     }
+
+    fn expected_state(&self) -> ContainerState {
+        ContainerState::Exited
+    }
 }
 
 async fn wait_for_container_state(
@@ -75,7 +79,7 @@ async fn wait_for_container_state(
         }
 
         started = if let Ok(c) = client.container_state(&container.name).await {
-            container_state_compare(c.unwrap())
+            container_state_compare(c)
         } else {
             false
         };

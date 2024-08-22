@@ -154,6 +154,7 @@ pub mod waitfor;
 
 pub use crate::composition::{LogAction, LogOptions, LogPolicy, LogSource, StartPolicy};
 pub use crate::container::{OperationalContainer, PendingContainer};
+pub use crate::docker::ContainerState;
 pub use crate::dockertest::DockerTest;
 pub use crate::dockertest::Network;
 pub use crate::error::DockerTestError;

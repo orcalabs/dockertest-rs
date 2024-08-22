@@ -294,6 +294,7 @@ impl Runner {
                 error!("{err}");
             }
         }
+
         self.teardown(engine, result.is_err()).await;
 
         if let Err(option) = result {

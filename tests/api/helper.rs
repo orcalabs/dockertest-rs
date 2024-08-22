@@ -1,5 +1,5 @@
-use bollard::{secret::ContainerStateStatusEnum, Docker};
-use dockertest::{utils::connect_with_local_or_tls_defaults, OperationalContainer};
+use bollard::{container::InspectContainerOptions, secret::ContainerStateStatusEnum, Docker};
+use dockertest::{utils::connect_with_local_or_tls_defaults, ContainerState, OperationalContainer};
 
 pub struct TestHelper {
     client: Docker,
@@ -11,6 +11,19 @@ impl TestHelper {
             client: connect_with_local_or_tls_defaults().unwrap(),
         }
     }
+
+    pub async fn container_state(&self, name: &str) -> ContainerState {
+        self.client
+            .inspect_container(name, None::<InspectContainerOptions>)
+            .await
+            .unwrap()
+            .state
+            .unwrap()
+            .status
+            .unwrap()
+            .into()
+    }
+
     pub async fn env_value(&self, handle: &OperationalContainer, env: &str) -> Option<String> {
         self.client
             .inspect_container(handle.name(), None)

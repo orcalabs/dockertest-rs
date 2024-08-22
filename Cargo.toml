@@ -30,6 +30,7 @@ tokio = { version = "1.39.3", features = ["full"] }
 tracing = "0.1.40"
 rand = "0.8.5"
 bytes = "1.7.1"
+strum = { version = "0.26.3", features = ["derive"] }
 
 [dev-dependencies]
 access-queue = "1.1.0"

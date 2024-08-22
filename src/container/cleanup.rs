@@ -8,7 +8,10 @@ use crate::{
     DockerTestError, LogSource,
 };
 use futures::StreamExt;
-use std::io::{self, Write};
+use std::{
+    io::{self, Write},
+    time::Duration,
+};
 use tracing::info;
 
 /// A container representation of a pending or running container, that requires us to
@@ -135,15 +138,29 @@ impl CleanupContainer {
             _ => Ok(None),
         }?;
 
-        while let Some(data) = stream.next().await {
-            match data {
-                Ok(line) => self.handle_log_line(action, line, &mut file).await?,
-                Err(error) => {
-                    return Err(DockerTestError::LogWriteError(format!(
-                        "unable to read docker log: {}",
-                        error
-                    )))
+        // If the container has not exited the log stream will hang forever, we therefore exit
+        // if we have not gotten a message within 5 seconds of the last received log entry.
+        let mut interval = tokio::time::interval(Duration::from_secs(5));
+        interval.tick().await;
+        tokio::select! {
+            data = stream.next() => {
+                interval.reset();
+                if let Some(data) = data {
+                    match data {
+                        Ok(line) => self.handle_log_line(action, line, &mut file).await?,
+                        Err(error) => {
+                            return Err(DockerTestError::LogWriteError(format!(
+                                "unable to read docker log: {}",
+                                error
+                            )))
+                        }
+                    }
+                } else {
+                    return Ok(());
                 }
+            }
+            _ = interval.tick() => {
+                return Ok(());
             }
         }
 
