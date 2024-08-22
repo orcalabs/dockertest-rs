@@ -1,6 +1,6 @@
 //! `WaitFor` implementations regarding status changes.
 
-use crate::container::{PendingContainer, RunningContainer};
+use crate::container::{OperationalContainer, PendingContainer};
 use crate::docker::ContainerState;
 use crate::waitfor::{async_trait, WaitFor};
 use crate::DockerTestError;
@@ -31,7 +31,7 @@ impl WaitFor for RunningWait {
     async fn wait_for_ready(
         &self,
         container: PendingContainer,
-    ) -> Result<RunningContainer, DockerTestError> {
+    ) -> Result<OperationalContainer, DockerTestError> {
         wait_for_container_state(container, self.check_interval, self.max_checks, |state| {
             state == ContainerState::Running
         })
@@ -44,7 +44,7 @@ impl WaitFor for ExitedWait {
     async fn wait_for_ready(
         &self,
         container: PendingContainer,
-    ) -> Result<RunningContainer, DockerTestError> {
+    ) -> Result<OperationalContainer, DockerTestError> {
         wait_for_container_state(container, self.check_interval, self.max_checks, |state| {
             state == ContainerState::Exited
         })
@@ -57,7 +57,7 @@ async fn wait_for_container_state(
     check_interval: u64,
     max_checks: u64,
     container_state_compare: fn(ContainerState) -> bool,
-) -> Result<RunningContainer, DockerTestError> {
+) -> Result<OperationalContainer, DockerTestError> {
     let client = &container.client;
 
     let mut started = false;

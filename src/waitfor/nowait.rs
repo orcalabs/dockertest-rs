@@ -1,6 +1,6 @@
 //! `WaitFor` implementation: `NoWait`.
 
-use crate::container::{PendingContainer, RunningContainer};
+use crate::container::{OperationalContainer, PendingContainer};
 use crate::waitfor::{async_trait, WaitFor};
 use crate::DockerTestError;
 
@@ -14,7 +14,7 @@ impl WaitFor for NoWait {
     async fn wait_for_ready(
         &self,
         container: PendingContainer,
-    ) -> Result<RunningContainer, DockerTestError> {
+    ) -> Result<OperationalContainer, DockerTestError> {
         Ok(container.into())
     }
 }

@@ -2,7 +2,7 @@ use crate::{
     composition::{Composition, StaticManagementPolicy},
     container::CreatedContainer,
     docker::Docker,
-    DockerTestError, Network, PendingContainer, RunningContainer,
+    DockerTestError, Network, OperationalContainer, PendingContainer,
 };
 use dynamic::DynamicContainers;
 use external::ExternalContainers;
@@ -75,7 +75,7 @@ impl StaticContainers {
         }
     }
 
-    pub async fn external_containers(&self) -> Vec<RunningContainer> {
+    pub async fn external_containers(&self) -> Vec<OperationalContainer> {
         let mut external = self.external.containers().await;
         // Dynamic containers that were running prior to test invocation are managed the same way
         // as external containers
@@ -89,7 +89,7 @@ impl StaticContainers {
     pub async fn start(
         &self,
         container: &PendingContainer,
-    ) -> Result<RunningContainer, DockerTestError> {
+    ) -> Result<OperationalContainer, DockerTestError> {
         if let Some(policy) = &container.static_management_policy {
             match policy {
                 StaticManagementPolicy::External => Err(DockerTestError::Startup(

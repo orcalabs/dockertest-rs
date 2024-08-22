@@ -1,5 +1,5 @@
 use bollard::Docker;
-use dockertest::{utils::connect_with_local_or_tls_defaults, RunningContainer};
+use dockertest::{utils::connect_with_local_or_tls_defaults, OperationalContainer};
 
 pub struct TestHelper {
     client: Docker,
@@ -11,7 +11,7 @@ impl TestHelper {
             client: connect_with_local_or_tls_defaults().unwrap(),
         }
     }
-    pub async fn env_value(&self, handle: &RunningContainer, env: &str) -> Option<String> {
+    pub async fn env_value(&self, handle: &OperationalContainer, env: &str) -> Option<String> {
         self.client
             .inspect_container(handle.name(), None)
             .await
@@ -25,7 +25,7 @@ impl TestHelper {
             .map(|v| v.split('=').collect::<Vec<_>>()[1].to_string())
     }
 
-    pub async fn cmd(&self, handle: &RunningContainer) -> Option<Vec<String>> {
+    pub async fn cmd(&self, handle: &OperationalContainer) -> Option<Vec<String>> {
         self.client
             .inspect_container(handle.name(), None)
             .await

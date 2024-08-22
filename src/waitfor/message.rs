@@ -1,4 +1,4 @@
-use crate::container::{PendingContainer, RunningContainer};
+use crate::container::{OperationalContainer, PendingContainer};
 use crate::docker::{ContainerLogSource, Docker};
 use crate::waitfor::{async_trait, WaitFor};
 use crate::DockerTestError;
@@ -36,7 +36,7 @@ impl WaitFor for MessageWait {
     async fn wait_for_ready(
         &self,
         container: PendingContainer,
-    ) -> Result<RunningContainer, DockerTestError> {
+    ) -> Result<OperationalContainer, DockerTestError> {
         pending_container_wait_for_message(
             container,
             self.source,
@@ -52,7 +52,7 @@ async fn pending_container_wait_for_message(
     source: MessageSource,
     msg: String,
     timeout: u16,
-) -> Result<RunningContainer, DockerTestError> {
+) -> Result<OperationalContainer, DockerTestError> {
     let client = &container.client;
     match wait_for_message(
         client,

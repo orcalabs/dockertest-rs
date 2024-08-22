@@ -2,7 +2,8 @@
 
 use crate::composition::{Composition, LogPolicy};
 use crate::container::{
-    CleanupContainer, CreatedContainer, PendingContainer, RunningContainer, StaticExternalContainer,
+    CleanupContainer, CreatedContainer, OperationalContainer, PendingContainer,
+    StaticExternalContainer,
 };
 use crate::docker::Docker;
 use crate::static_container::STATIC_CONTAINERS;
@@ -43,7 +44,7 @@ pub struct Debris {
 #[derive(Clone)]
 enum Transitional {
     Pending(PendingContainer),
-    Running(RunningContainer),
+    Running(OperationalContainer),
     CreationFailure(DockerTestError),
     StaticExternal(StaticExternalContainer),
     Sentinel,
@@ -279,7 +280,7 @@ impl Engine<Igniting> {
         // An important consideration herein is to maintain the same insertion order
         // of the original vector, when updating our Transitional::* variants.
         // This is due to the [Keeper] holding the handle -> indices lookup table,
-        // which we must use to resolve the correct [RunningContainer]
+        // which we must use to resolve the correct [OperationalContainer]
         for started in containers.into_iter() {
             // Locate the entry into kept of the started container
             let position = match self.phase.kept.iter().position(|x| match x {
@@ -291,7 +292,7 @@ impl Engine<Igniting> {
                 None => continue,
             };
 
-            // Create the [RunningContainer] variant out of the pending
+            // Create the [OperationalContainer] variant out of the pending
             let current = std::mem::replace(&mut self.phase.kept[position], Transitional::Sentinel);
             let running = match current {
                 Transitional::Pending(_) | Transitional::StaticExternal(_) => {
@@ -309,7 +310,7 @@ impl Engine<Igniting> {
     // Implementation detail
     fn start_relaxed_containers(
         containers: Vec<PendingContainer>,
-    ) -> Vec<JoinHandle<Result<RunningContainer, DockerTestError>>> {
+    ) -> Vec<JoinHandle<Result<OperationalContainer, DockerTestError>>> {
         event!(Level::TRACE, "starting relaxed containers");
         containers
             .into_iter()
@@ -321,7 +322,7 @@ impl Engine<Igniting> {
     // We currently only report the first error
     async fn start_strict_containers(
         pending: Vec<PendingContainer>,
-    ) -> Result<Vec<RunningContainer>, DockerTestError> {
+    ) -> Result<Vec<OperationalContainer>, DockerTestError> {
         let mut running = vec![];
         let mut first_error = None;
 
@@ -351,9 +352,9 @@ impl Engine<Igniting> {
 
     // Implementation detail
     async fn wait_for_relaxed_containers(
-        starting_relaxed: Vec<JoinHandle<Result<RunningContainer, DockerTestError>>>,
-    ) -> Result<Vec<RunningContainer>, DockerTestError> {
-        let mut running_relaxed: Vec<RunningContainer> = Vec::new();
+        starting_relaxed: Vec<JoinHandle<Result<OperationalContainer, DockerTestError>>>,
+    ) -> Result<Vec<OperationalContainer>, DockerTestError> {
+        let mut running_relaxed: Vec<OperationalContainer> = Vec::new();
         let mut first_error = None;
 
         for join_handle in join_all(starting_relaxed).await {
@@ -462,7 +463,7 @@ impl Engine<Orbiting> {
         self.keeper.lookup_collisions.contains(handle)
     }
 
-    pub fn resolve_handle(&self, handle: &str) -> Option<&RunningContainer> {
+    pub fn resolve_handle(&self, handle: &str) -> Option<&OperationalContainer> {
         let index = match self.keeper.lookup_handlers.get(handle) {
             None => return None,
             Some(i) => i,
@@ -485,7 +486,7 @@ impl Engine<Orbiting> {
 
         let mut errors = Vec::new();
         for transitional in self.phase.kept.iter_mut() {
-            // Ensure that we have a RunningContainer
+            // Ensure that we have a OperationalContainer
             let container = match transitional {
                 Transitional::Running(r) => r,
                 // FIXME: We might have to report/handle each arm here

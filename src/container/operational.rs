@@ -17,11 +17,13 @@ use std::{
     str::FromStr,
 };
 
-/// Represent a docker container in running state and available to the test body.
+/// Represent a docker container that has passed its `WaitFor` implementation and available is to the test body.
+/// The state of the container will depend on what `WaitFor` implementation was used, e.g.
+/// using the `ExitedWait` will result in a container in an exited state.
 // NOTE: Fields within this structure are pub(crate) only for testability.
 // None of these fields should be externally public.
 #[derive(Clone, Debug)]
-pub struct RunningContainer {
+pub struct OperationalContainer {
     pub(crate) client: Docker,
     pub(crate) handle: String,
     /// The unique docker container identifier assigned at creation.
@@ -102,28 +104,28 @@ fn from_port_binding(ports: PortBinding) -> Result<Option<(Ipv4Addr, u32)>, Host
     }
 }
 
-impl RunningContainer {
-    /// Return the generated name on the docker container object for this `RunningContainer`.
+impl OperationalContainer {
+    /// Return the generated name on the docker container object for this `OperationalContainer`.
     pub fn name(&self) -> &str {
         &self.name
     }
 
-    /// Return the docker assigned identifier for this `RunningContainer`.
+    /// Return the docker assigned identifier for this `OperationalContainer`.
     pub fn id(&self) -> &str {
         &self.id
     }
 
     /// Return the IPv4 address for this container on the local docker network adapter.
-    /// Use this address to contact the `RunningContainer` in the test body.
+    /// Use this address to contact the `OperationalContainer` in the test body.
     ///
     /// This property is retrieved from the docker daemon prior to entering the test body.
     /// It is cached internally and not updated between invocations. This means that
     /// if the docker container enters an exited state, this function will still return
     /// the original ip assigned to the container.
     ///
-    /// If the [ExitedWait] for strategy is employed, the `RunningContainer` will, somewhat
-    /// contradictory to its name, be in an exited status when the test body
-    /// is entered. For this scenarion, this function will return [Ipv4Addr::UNSPECIFIED].
+    /// If the [ExitedWait] for strategy is employed, the `OperationalContainer` will
+    /// be in an exited status when the test body is entered.
+    /// For this scenarion, this function will return [Ipv4Addr::UNSPECIFIED].
     ///
     /// On Windows this method always returns `127.0.0.1` due to Windows not supporting using
     /// container IPs outside a container-context.
@@ -169,9 +171,9 @@ impl RunningContainer {
     }
 }
 
-impl From<PendingContainer> for RunningContainer {
-    fn from(container: PendingContainer) -> RunningContainer {
-        RunningContainer {
+impl From<PendingContainer> for OperationalContainer {
+    fn from(container: PendingContainer) -> OperationalContainer {
+        OperationalContainer {
             client: container.client,
             handle: container.handle,
             id: container.id,

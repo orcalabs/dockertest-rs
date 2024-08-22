@@ -118,11 +118,11 @@ impl Default for LogOptions {
 /// Represents an instance of an [Image].
 ///
 /// The Composition is used to specialize an image whose name, version, tag and source is known,
-/// but before one can create a [crate::container:: RunningContainer] from an image,
+/// but before one can create a [crate::container:: OperationalContainer] from an image,
 /// it must be augmented with information about how to start it, how to ensure it has been
 /// started, environment variables and runtime commands.
 /// Thus, this structure represents the concrete instance of an [Image] that will be started
-/// and become a [crate::container::RunningContainer].
+/// and become a [crate::container::OperationalContainer].
 ///
 /// NOTE: This is an internal implementation detail. This used to be a public interface.
 #[derive(Clone, Debug)]
@@ -282,14 +282,14 @@ impl Composition {
         }
     }
 
-    /// Assigns the full set of environmental variables available for the [RunningContainer].
+    /// Assigns the full set of environmental variables available for the [OperationalContainer].
     ///
     /// Each key in the map should be the environmental variable name
     /// and its corresponding value will be set as its value.
     ///
     /// This method replaces the entire existing env map provided.
     ///
-    /// [RunningContainer]: crate::container::RunningContainer
+    /// [OperationalContainer]: crate::container::OperationalContainer
     pub fn with_env(self, env: HashMap<String, String>) -> Composition {
         Composition { env, ..self }
     }
@@ -321,7 +321,7 @@ impl Composition {
 
     /// Allocates an ephemeral host port for all of the container's exposed ports.
     ///
-    /// Mapped host ports can be found via [crate::container::RunningContainer::host_port] method.
+    /// Mapped host ports can be found via [crate::container::OperationalContainer::host_port] method.
     pub fn publish_all_ports(&mut self, publish: bool) -> &mut Composition {
         self.publish_all_ports = publish;
         self

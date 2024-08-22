@@ -1,6 +1,6 @@
 use crate::docker::Docker;
 use crate::{
-    composition::Composition, DockerTestError, Network, PendingContainer, RunningContainer,
+    composition::Composition, DockerTestError, Network, OperationalContainer, PendingContainer,
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -31,11 +31,11 @@ struct InternalContainer {
 #[allow(clippy::large_enum_variant)]
 enum InternalStatus {
     /// As tests execute concurrently other tests might have already executed the WaitFor
-    /// implementation and created a running container. However, as we do not want to alter our
-    /// pipeline of Composition -> PendingContainer -> RunningContainer and start order logistics.
+    /// implementation and created a Operational container. However, as we do not want to alter our
+    /// pipeline of Composition -> PendingContainer -> OperationalContainer and start order logistics.
     /// We store a clone of the pending container here such that tests can return a
     /// clone of it if they are "behind" in the pipeline.
-    Running(RunningContainer, PendingContainer),
+    Operational(OperationalContainer, PendingContainer),
     Pending(PendingContainer),
     /// If a test utilizes the same managed internal container with other tests, and completes
     /// the entire test including cleanup prior to other tests even registering their need for
@@ -72,23 +72,23 @@ impl InternalContainers {
     pub async fn start(
         &self,
         container: &PendingContainer,
-    ) -> Result<RunningContainer, DockerTestError> {
+    ) -> Result<OperationalContainer, DockerTestError> {
         let mut map = self.inner.write().await;
 
         // If we are the first test to try to start the container we are responsible for starting
-        // it and adding the RunningContainer instance to the global map.
+        // it and adding the OperationalContainer instance to the global map.
         // We also keep the PendingContainer instance as other tests might not have reached this
         // far in their pipeline and need a PendingContainer instance.
         if let Some(c) = map.get_mut(&container.name) {
             match &c.status {
                 InternalStatus::Failed(e, _) => Err(e.clone()),
-                InternalStatus::Running(r, _) => Ok(r.clone()),
+                InternalStatus::Operational(r, _) => Ok(r.clone()),
                 InternalStatus::Pending(p) => {
                     let cloned = p.clone();
                     let running = cloned.start_inner().await;
                     match running {
                         Ok(r) => {
-                            c.status = InternalStatus::Running(r.clone(), p.clone());
+                            c.status = InternalStatus::Operational(r.clone(), p.clone());
                             Ok(r)
                         }
                         Err(e) => {
@@ -140,7 +140,7 @@ impl InternalContainers {
         // network.
         if let Some(c) = map.get_mut(&composition.container_name) {
             match &c.status {
-                InternalStatus::Pending(p) | InternalStatus::Running(_, p) => {
+                InternalStatus::Pending(p) | InternalStatus::Operational(_, p) => {
                     // Only when the Isolated network mode is set do we need to add it to the
                     // network, as for External/Singular it will be added upon creation.
                     match (network, network_setting) {
@@ -218,7 +218,7 @@ impl InternalContainers {
     async fn disconnect(&self, client: &Docker, network: &str, to_cleanup: &HashSet<&str>) {
         let map = self.inner.read().await;
         for (_, container) in map.iter() {
-            if let InternalStatus::Running(r, _) = &container.status {
+            if let InternalStatus::Operational(r, _) = &container.status {
                 if to_cleanup.contains(r.id()) {
                     client.disconnect_container(r.id(), network).await;
                 }
@@ -252,7 +252,7 @@ impl InternalContainers {
 impl InternalStatus {
     fn container_id(&self) -> Option<&str> {
         match &self {
-            InternalStatus::Running(_, r) => Some(r.id.as_str()),
+            InternalStatus::Operational(_, r) => Some(r.id.as_str()),
             InternalStatus::Pending(p) => Some(p.id.as_str()),
             InternalStatus::Failed(_, container_id) => container_id.as_ref().map(|id| id.as_str()),
             InternalStatus::Cleaned => None,

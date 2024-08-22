@@ -1,6 +1,6 @@
 use crate::{
     composition::Composition, container::StaticExternalContainer, docker::Docker, DockerTestError,
-    Network, RunningContainer,
+    Network, OperationalContainer,
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -10,7 +10,7 @@ use tokio::sync::RwLock;
 
 #[derive(Default)]
 pub struct ExternalContainers {
-    inner: Arc<RwLock<HashMap<String, RunningContainer>>>,
+    inner: Arc<RwLock<HashMap<String, OperationalContainer>>>,
 }
 
 impl ExternalContainers {
@@ -53,7 +53,7 @@ impl ExternalContainers {
         }
     }
 
-    pub async fn containers(&self) -> Vec<RunningContainer> {
+    pub async fn containers(&self) -> Vec<OperationalContainer> {
         self.inner.read().await.values().cloned().collect()
     }
 

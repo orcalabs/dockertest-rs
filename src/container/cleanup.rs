@@ -2,7 +2,7 @@
 
 use crate::{
     composition::{LogAction, LogOptions},
-    container::{PendingContainer, RunningContainer},
+    container::{OperationalContainer, PendingContainer},
     docker::{ContainerLogSource, Docker, LogEntry},
     waitfor::MessageSource,
     DockerTestError, LogSource,
@@ -22,7 +22,7 @@ pub(crate) struct CleanupContainer {
     is_static: bool,
     /// The generated docker name for this container.
     pub(crate) name: String,
-    /// Client obtained from `PendingContainer` or `RunningContainer`, we need it because
+    /// Client obtained from `PendingContainer` or `OperationalContainer`, we need it because
     /// we want to call `client.logs` to get container logs.
     pub(crate) client: Docker,
     /// Container log options.
@@ -175,8 +175,8 @@ impl From<&PendingContainer> for CleanupContainer {
     }
 }
 
-impl From<RunningContainer> for CleanupContainer {
-    fn from(container: RunningContainer) -> CleanupContainer {
+impl From<OperationalContainer> for CleanupContainer {
+    fn from(container: OperationalContainer) -> CleanupContainer {
         CleanupContainer {
             id: container.id,
             is_static: container.is_static,
@@ -187,8 +187,8 @@ impl From<RunningContainer> for CleanupContainer {
     }
 }
 
-impl From<&RunningContainer> for CleanupContainer {
-    fn from(container: &RunningContainer) -> CleanupContainer {
+impl From<&OperationalContainer> for CleanupContainer {
+    fn from(container: &OperationalContainer) -> CleanupContainer {
         CleanupContainer {
             id: container.id.clone(),
             is_static: container.is_static,

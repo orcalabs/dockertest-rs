@@ -1,8 +1,8 @@
-//! Represents a created container, in transit to become a RunningContainer.
+//! Represents a created container, in transit to become a OperationalContainer.
 
 use crate::{
     composition::{LogOptions, StaticManagementPolicy},
-    container::RunningContainer,
+    container::OperationalContainer,
     docker::Docker,
     waitfor::WaitFor,
     DockerTestError, StartPolicy,
@@ -13,7 +13,7 @@ use crate::{
 ///
 /// This object is an implementation detail of `dockertest-rs` and is only
 /// publicly exposed due to the public `WaitFor` trait which is responsible
-/// of performing the into conversion from `PendingContainer` to `RunningContainer`.
+/// of performing the into conversion from `PendingContainer` to `OperationalContainer`.
 // NOTE: No methods on this structure, nor fields, shall be publicly exposed.
 #[derive(Clone)]
 pub struct PendingContainer {
@@ -74,8 +74,8 @@ impl PendingContainer {
 
     /// Run the start command and initiate the WaitFor condition.
     /// Once the PendingContainer is successfully started and the WaitFor condition
-    /// has been achived, the RunningContainer is returned.
-    pub(crate) async fn start(self) -> Result<RunningContainer, DockerTestError> {
+    /// has been achived, the OperationalContainer is returned.
+    pub(crate) async fn start(self) -> Result<OperationalContainer, DockerTestError> {
         // TODO: dont clone
         let client = self.client.clone();
         client.start_container(self).await
@@ -83,7 +83,7 @@ impl PendingContainer {
 
     // Internal start method should only be invoked from the static mod.
     // TODO: isolate to static mod only
-    pub(crate) async fn start_inner(self) -> Result<RunningContainer, DockerTestError> {
+    pub(crate) async fn start_inner(self) -> Result<OperationalContainer, DockerTestError> {
         // TODO: dont clone
         let client = self.client.clone();
         client.start_container_inner(self).await

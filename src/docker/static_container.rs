@@ -1,6 +1,6 @@
 use crate::{
     composition::Composition, static_container::CreateDynamicContainer, DockerTestError, Network,
-    RunningContainer,
+    OperationalContainer,
 };
 use bollard::{
     container::{InspectContainerOptions, RemoveContainerOptions},
@@ -15,7 +15,7 @@ impl Docker {
         composition: Composition,
         network: Option<&str>,
         network_mode: &Network,
-    ) -> Result<RunningContainer, DockerTestError> {
+    ) -> Result<OperationalContainer, DockerTestError> {
         let details = self
             .client
             .inspect_container(&composition.container_name, None::<InspectContainerOptions>)
