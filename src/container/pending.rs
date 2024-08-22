@@ -3,7 +3,7 @@
 use crate::{
     composition::{LogOptions, StaticManagementPolicy},
     container::OperationalContainer,
-    docker::Docker,
+    docker::{ContainerState, Docker},
     waitfor::WaitFor,
     DockerTestError, StartPolicy,
 };
@@ -43,6 +43,9 @@ pub struct PendingContainer {
 
     /// Container log options, they are provided by `Composition`.
     pub(crate) log_options: Option<LogOptions>,
+
+    /// The containers' expected state after executing its `WaitFor` implementation.
+    pub(crate) expected_state: ContainerState,
 }
 
 impl PendingContainer {
@@ -64,11 +67,12 @@ impl PendingContainer {
             name: name.to_string(),
             id: id.to_string(),
             handle: handle.to_string(),
-            wait: Some(wait),
             start_policy,
             is_static: static_management_policy.is_some(),
             static_management_policy,
             log_options,
+            expected_state: wait.expected_state(),
+            wait: Some(wait),
         }
     }
 

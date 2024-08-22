@@ -8,8 +8,8 @@ use crate::{
 };
 use bollard::{
     container::{
-        InspectContainerOptions, LogOutput, RemoveContainerOptions, StartContainerOptions,
-        StopContainerOptions,
+        InspectContainerOptions, KillContainerOptions, LogOutput, RemoveContainerOptions,
+        StartContainerOptions, StopContainerOptions,
     },
     errors::Error,
     network::DisconnectNetworkOptions,
@@ -18,7 +18,10 @@ use bollard::{
 use bytes::Bytes;
 use futures::StreamExt;
 use futures::{future::join_all, Stream};
-use std::convert::TryFrom;
+use std::{
+    convert::TryFrom,
+    sync::{Arc, Mutex},
+};
 use tracing::{event, Level};
 
 pub struct ContainerInfo {
@@ -26,7 +29,9 @@ pub struct ContainerInfo {
     pub ports: HostPortMappings,
 }
 
-#[derive(PartialEq, Eq, Clone, Copy)]
+/// All possible states a container can be in
+#[derive(Debug, PartialEq, Eq, Clone, Copy, strum::Display)]
+#[allow(missing_docs)]
 pub enum ContainerState {
     Empty,
     Created,
@@ -81,19 +86,46 @@ pub struct LogEntry {
 }
 
 impl Docker {
+    pub async fn unpause(&self, container_name: &str) -> Result<(), DockerTestError> {
+        self.client
+            .unpause_container(container_name)
+            .await
+            .map_err(|e| DockerTestError::Daemon(format!("failed to unpause container: {e:?}")))
+    }
+    pub async fn kill(&self, container_name: &str) -> Result<(), DockerTestError> {
+        self.client
+            .kill_container(
+                container_name,
+                Some(KillContainerOptions { signal: "SIGKILL" }),
+            )
+            .await
+            .map_err(|e| DockerTestError::Daemon(format!("failed to kill container: {e:?}")))
+    }
+    pub async fn pause(&self, container_name: &str) -> Result<(), DockerTestError> {
+        self.client
+            .pause_container(container_name)
+            .await
+            .map_err(|e| DockerTestError::Daemon(format!("failed to pause container: {e:?}")))
+    }
     pub async fn container_state(
         &self,
         container_name: &str,
-    ) -> Result<Option<ContainerState>, DockerTestError> {
-        Ok(self
-            .client
+    ) -> Result<ContainerState, DockerTestError> {
+        self.client
             .inspect_container(container_name, None::<InspectContainerOptions>)
             .await
             .map_err(|e| {
                 DockerTestError::Daemon(format!("failed to check container state: {e:?}"))
             })?
             .state
-            .and_then(|v| v.status.map(|v| v.into())))
+            .ok_or(DockerTestError::Daemon(
+                "container state was 'None'".to_string(),
+            ))?
+            .status
+            .ok_or(DockerTestError::Daemon(
+                "container status was 'None'".to_string(),
+            ))
+            .map(|v| v.into())
     }
 
     pub fn container_logs(
@@ -239,11 +271,7 @@ impl Docker {
                 _ => DockerTestError::Daemon(format!("failed to start container: {}", e)),
             })?;
 
-        let waitfor = pending.wait.take().unwrap();
-
-        // Issue WaitFor operation
-        let res = waitfor.wait_for_ready(pending);
-        res.await
+        pending.wait.take().unwrap().wait_for_ready(pending).await
     }
 
     pub async fn stop_containers(&self, containers: &[CleanupContainer]) {
@@ -324,6 +352,7 @@ impl Docker {
                 ports: HostPortMappings::default(),
                 is_static: true,
                 log_options: composition.log_options,
+                assumed_state: Arc::new(Mutex::new(composition.wait.expected_state())),
             })
         } else {
             Err(DockerTestError::Daemon(

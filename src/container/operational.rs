@@ -3,8 +3,9 @@
 use crate::{
     composition::LogOptions,
     container::PendingContainer,
-    docker::Docker,
+    docker::{ContainerState, Docker},
     waitfor::{wait_for_message, MessageSource},
+    DockerTestError,
 };
 
 use bollard::models::{PortBinding, PortMap};
@@ -15,6 +16,7 @@ use std::{
     convert::TryFrom,
     net::{IpAddr, Ipv4Addr},
     str::FromStr,
+    sync::{Arc, Mutex},
 };
 
 /// Represent a docker container that has passed its `WaitFor` implementation and available is to the test body.
@@ -36,6 +38,7 @@ pub struct OperationalContainer {
     pub(crate) ports: HostPortMappings,
     pub(crate) is_static: bool,
     pub(crate) log_options: Option<LogOptions>,
+    pub(crate) assumed_state: Arc<Mutex<ContainerState>>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -147,6 +150,42 @@ impl OperationalContainer {
         self.ports.mappings.get(&exposed_port).unwrap()
     }
 
+    /// Pauses the container
+    ///
+    /// # Panics
+    /// Will panic if the container was in any state but `Runnning` prior to calling this
+    /// method or if we fail the docker operation.
+    pub async fn pause(&self) {
+        self.goto_state(ContainerState::Paused, &[ContainerState::Running])
+            .unwrap();
+        self.client.pause(&self.name).await.unwrap();
+    }
+
+    /// Kills the container
+    ///
+    /// # Panics
+    /// Will panic if the container was in any state but `Runnning` or `Paused` prior to calling this
+    /// method or if we fail the docker operation.
+    pub async fn kill(&self) {
+        self.goto_state(
+            ContainerState::Exited,
+            &[ContainerState::Running, ContainerState::Paused],
+        )
+        .unwrap();
+        self.client.kill(&self.name).await.unwrap();
+    }
+
+    /// Unpauses the container
+    ///
+    /// # Panics
+    /// Will panic if the container was in any state but `Paused` prior to calling this
+    /// method or if we fail the docker operation.
+    pub async fn unpause(&self) {
+        self.goto_state(ContainerState::Running, &[ContainerState::Paused])
+            .unwrap();
+        self.client.unpause(&self.name).await.unwrap();
+    }
+
     /// Inspect the output of this container and await the presence of a log line.
     ///
     /// # Panics
@@ -169,6 +208,24 @@ impl OperationalContainer {
             panic!("{}", e)
         }
     }
+
+    fn goto_state(
+        &self,
+        dest: ContainerState,
+        allowed: &[ContainerState],
+    ) -> Result<(), DockerTestError> {
+        let mut state = self.assumed_state.lock().unwrap();
+        println!("{state}");
+        if !allowed.contains(&state) {
+            Err(DockerTestError::ContainerState {
+                current: *state,
+                tried_to_enter: dest,
+            })
+        } else {
+            *state = dest;
+            Ok(())
+        }
+    }
 }
 
 impl From<PendingContainer> for OperationalContainer {
@@ -182,6 +239,7 @@ impl From<PendingContainer> for OperationalContainer {
             ports: HostPortMappings::default(),
             is_static: container.is_static,
             log_options: container.log_options,
+            assumed_state: Arc::new(Mutex::new(container.expected_state)),
         }
     }
 }

@@ -2,10 +2,17 @@
 
 use thiserror::Error;
 
+use crate::ContainerState;
+
 /// Public library error conditions.
 #[derive(Error, Debug, PartialEq, Clone, Eq)]
 #[allow(missing_docs)]
 pub enum DockerTestError {
+    #[error("tried to enter container state `{current}` from state `{tried_to_enter}`")]
+    ContainerState {
+        current: ContainerState,
+        tried_to_enter: ContainerState,
+    },
     #[error("docker daemon interaction error `{0}`")]
     Daemon(String),
     #[error("recoverable error condition")]

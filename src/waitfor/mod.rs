@@ -2,6 +2,7 @@
 //! and all the default implementations of it.
 
 use crate::container::{OperationalContainer, PendingContainer};
+use crate::docker::ContainerState;
 use crate::DockerTestError;
 
 pub use async_trait::async_trait;
@@ -28,6 +29,14 @@ pub trait WaitFor: Send + Sync + DynClone + std::fmt::Debug {
         &self,
         container: PendingContainer,
     ) -> Result<OperationalContainer, DockerTestError>;
+
+    /// What state the container is expected to be in after completing the `wait_for_ready` method,
+    /// defaulting to the `ContainerState::Running` state.
+    /// NOTE: This is only relevant for the container state api on 'OperationalContainer' (start, stop,
+    /// kill) as we deny certain operations based on the assumed container state.
+    fn expected_state(&self) -> ContainerState {
+        ContainerState::Running
+    }
 }
 
 dyn_clone::clone_trait_object!(WaitFor);
