@@ -4,7 +4,7 @@ use crate::{
     container::{CleanupContainer, HostPortMappings},
     static_container::STATIC_CONTAINERS,
     waitfor::MessageSource,
-    DockerTestError, PendingContainer, RunningContainer,
+    DockerTestError, OperationalContainer, PendingContainer,
 };
 use bollard::{
     container::{
@@ -197,7 +197,7 @@ impl Docker {
     pub async fn start_container(
         &self,
         pending: PendingContainer,
-    ) -> Result<RunningContainer, DockerTestError> {
+    ) -> Result<OperationalContainer, DockerTestError> {
         if pending.is_static {
             STATIC_CONTAINERS.start(&pending).await
         } else {
@@ -210,7 +210,7 @@ impl Docker {
     pub async fn start_container_inner(
         &self,
         mut pending: PendingContainer,
-    ) -> Result<RunningContainer, DockerTestError> {
+    ) -> Result<OperationalContainer, DockerTestError> {
         self.client
             .start_container(&pending.name, None::<StartContainerOptions<String>>)
             .await
@@ -313,9 +313,9 @@ impl Docker {
         &self,
         composition: Composition,
         container_details: ContainerInspectResponse,
-    ) -> Result<RunningContainer, DockerTestError> {
+    ) -> Result<OperationalContainer, DockerTestError> {
         if let Some(id) = container_details.id {
-            Ok(RunningContainer {
+            Ok(OperationalContainer {
                 client: self.clone(),
                 id,
                 name: composition.container_name.clone(),

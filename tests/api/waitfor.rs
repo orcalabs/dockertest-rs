@@ -3,7 +3,7 @@ use dockertest::waitfor::{
     async_trait, ExitedWait, MessageSource, MessageWait, RunningWait, WaitFor,
 };
 use dockertest::{
-    DockerTest, DockerTestError, PendingContainer, RunningContainer, Source, StartPolicy,
+    DockerTest, DockerTestError, OperationalContainer, PendingContainer, Source, StartPolicy,
     TestBodySpecification,
 };
 
@@ -19,7 +19,7 @@ impl WaitFor for FailWait {
     async fn wait_for_ready(
         &self,
         _container: PendingContainer,
-    ) -> Result<RunningContainer, DockerTestError> {
+    ) -> Result<OperationalContainer, DockerTestError> {
         Err(DockerTestError::Processing(
             "this FailWait shall fail".to_string(),
         ))

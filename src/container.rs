@@ -1,13 +1,13 @@
 //! Represents the multiple phases and variants a docker container exists in dockertest.
 
 mod cleanup;
+mod operational;
 mod pending;
-mod running;
 
 pub(crate) use cleanup::CleanupContainer;
+pub(crate) use operational::HostPortMappings;
+pub use operational::OperationalContainer;
 pub use pending::PendingContainer;
-pub(crate) use running::HostPortMappings;
-pub use running::RunningContainer;
 
 /// Represents an exisiting static external container.
 ///
@@ -25,7 +25,7 @@ pub enum CreatedContainer {
 
 #[cfg(test)]
 mod tests {
-    use crate::container::{CreatedContainer, PendingContainer, RunningContainer};
+    use crate::container::{CreatedContainer, OperationalContainer, PendingContainer};
     use crate::docker::Docker;
     use crate::image::Source;
     use crate::waitfor::{async_trait, WaitFor};
@@ -43,7 +43,7 @@ mod tests {
         async fn wait_for_ready(
             &self,
             container: PendingContainer,
-        ) -> Result<RunningContainer, DockerTestError> {
+        ) -> Result<OperationalContainer, DockerTestError> {
             let mut invoked = self.invoked.write().expect("failed to take invoked lock");
             *invoked = true;
             Ok(container.into())

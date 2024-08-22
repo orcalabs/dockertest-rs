@@ -2,7 +2,7 @@ use crate::{
     composition::Composition,
     container::{CreatedContainer, StaticExternalContainer},
     docker::Docker,
-    DockerTestError, Network, PendingContainer, RunningContainer,
+    DockerTestError, Network, OperationalContainer, PendingContainer,
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -22,7 +22,7 @@ pub struct DynamicContainer {
 
 #[derive(Clone)]
 pub enum CreateDynamicContainer {
-    RunningPrior(RunningContainer),
+    RunningPrior(OperationalContainer),
     Pending(PendingContainer),
 }
 
@@ -30,9 +30,9 @@ pub enum CreateDynamicContainer {
 enum DynamicStatus {
     /// The container was running prior to test invocation.
     /// For all these containers we essentially handle them the way we handle external containers.
-    RunningPrior(RunningContainer),
+    RunningPrior(OperationalContainer),
     /// The container is in a running state and was not running prior to test invocation
-    Running(RunningContainer, PendingContainer),
+    Running(OperationalContainer, PendingContainer),
     Pending(PendingContainer),
     Failed(DockerTestError),
 }
@@ -109,7 +109,7 @@ impl DynamicContainers {
     pub async fn start(
         &self,
         container: &PendingContainer,
-    ) -> Result<RunningContainer, DockerTestError> {
+    ) -> Result<OperationalContainer, DockerTestError> {
         let mut map = self.inner.write().await;
 
         if let Some(existing) = map.get_mut(&container.name) {
@@ -138,7 +138,7 @@ impl DynamicContainers {
         }
     }
 
-    pub async fn prior_running_containers(&self) -> Vec<RunningContainer> {
+    pub async fn prior_running_containers(&self) -> Vec<OperationalContainer> {
         self.inner
             .read()
             .await

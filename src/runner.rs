@@ -1,6 +1,6 @@
 //! The main library structures.
 
-use crate::container::RunningContainer;
+use crate::container::OperationalContainer;
 use crate::docker::Docker;
 use crate::dockertest::Network;
 use crate::engine::{bootstrap, Debris, Engine, Orbiting};
@@ -80,7 +80,10 @@ enum PruneStrategy {
 
 impl DockerOperations {
     /// Non-panicking version of [DockerOperations::handle].
-    fn try_handle<'a>(&'a self, handle: &'a str) -> Result<&'a RunningContainer, DockerTestError> {
+    fn try_handle<'a>(
+        &'a self,
+        handle: &'a str,
+    ) -> Result<&'a OperationalContainer, DockerTestError> {
         if self.engine.handle_collision(handle) {
             return Err(DockerTestError::TestBody(format!(
                 "handle '{}' defined multiple times",
@@ -93,7 +96,7 @@ impl DockerOperations {
         })
     }
 
-    /// Retrieve the `RunningContainer` identified by this handle.
+    /// Retrieve the `OperationalContainer` identified by this handle.
     ///
     /// A container is identified within dockertest by its assigned or derived handler.
     /// If no explictly set through `set_handle`, the value will be equal to the
@@ -103,7 +106,7 @@ impl DockerOperations {
     /// This function panics if the requested handle does not exist, or there
     /// are conflicting containers with the same repository name is present without custom
     /// configured container names.
-    pub fn handle<'a>(&'a self, handle: &'a str) -> &'a RunningContainer {
+    pub fn handle<'a>(&'a self, handle: &'a str) -> &'a OperationalContainer {
         event!(Level::DEBUG, "requesting handle '{}", handle);
         match self.try_handle(handle) {
             Ok(h) => h,

@@ -1,7 +1,7 @@
 //! Contains `WaitFor` trait used to determine when a PendingContainer has started
 //! and all the default implementations of it.
 
-use crate::container::{PendingContainer, RunningContainer};
+use crate::container::{OperationalContainer, PendingContainer};
 use crate::DockerTestError;
 
 pub use async_trait::async_trait;
@@ -27,7 +27,7 @@ pub trait WaitFor: Send + Sync + DynClone + std::fmt::Debug {
     async fn wait_for_ready(
         &self,
         container: PendingContainer,
-    ) -> Result<RunningContainer, DockerTestError>;
+    ) -> Result<OperationalContainer, DockerTestError>;
 }
 
 dyn_clone::clone_trait_object!(WaitFor);

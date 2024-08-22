@@ -43,37 +43,37 @@ macro_rules! impl_specify_container {
                 }
             }
 
-            /// Assign the full set of environment variables into the [RunningContainer].
+            /// Assign the full set of environment variables into the [OperationalContainer].
             ///
             /// Each key in the map should be the environmental variable name
             /// and its corresponding value will be set as its value.
             ///
             /// This method replaces all existing environment variables previously provided.
             ///
-            /// [RunningContainer]: crate::container::RunningContainer
+            /// [OperationalContainer]: crate::container::OperationalContainer
             pub fn replace_env(self, env: HashMap<String, String>) -> Self {
                 Self {
                     composition: self.composition.with_env(env),
                 }
             }
 
-            /// Modify a single environment variable available for the [RunningContainer].
+            /// Modify a single environment variable available for the [OperationalContainer].
             ///
             /// A [replace_env] call will undo what has been configured individually with this
             /// method.
             ///
-            /// [RunningContainer]: crate::container::RunningContainer
+            /// [OperationalContainer]: crate::container::OperationalContainer
             /// [replace_env]: Self::replace_env
             pub fn modify_env<T: ToString, S: ToString>(&mut self, name: T, value: S) -> &mut Self {
                 self.composition.env(name, value);
                 self
             }
 
-            /// Assign the full set of command vector entries for the [RunningContainer].
+            /// Assign the full set of command vector entries for the [OperationalContainer].
             ///
             /// This method replaces all existing command vector entries previously provided.
             ///
-            /// [RunningContainer]: crate::container::RunningContainer
+            /// [OperationalContainer]: crate::container::OperationalContainer
             pub fn replace_cmd(self, cmd: Vec<String>) -> Self {
                 Self {
                     composition: self.composition.with_cmd(cmd),
@@ -93,9 +93,9 @@ macro_rules! impl_specify_container {
 
             /// Allocate an ephemeral host port for all exposed ports specified in the container.
             ///
-            /// Mapped host ports can be found via [RunningContainer::host_port] method.
+            /// Mapped host ports can be found via [OperationalContainer::host_port] method.
             ///
-            /// [RunningContainer::host_port]: crate::container::RunningContainer::host_port
+            /// [OperationalContainer::host_port]: crate::container::OperationalContainer::host_port
             pub fn set_publish_all_ports(mut self, publish: bool) -> Self {
                 self.composition.publish_all_ports(publish);
                 self
@@ -144,13 +144,13 @@ macro_rules! impl_specify_container {
                 self
             }
 
-            /// Specify a string handle used to retrieve a reference to the [RunningContainer]
+            /// Specify a string handle used to retrieve a reference to the [OperationalContainer]
             /// within the test body.
             ///
             /// This value defaults to the repository name of the image used when constructing
             /// this container specification.
             ///
-            /// [RunningContainer]: crate::container::RunningContainer
+            /// [OperationalContainer]: crate::container::OperationalContainer
             pub fn set_handle<T: ToString>(self, handle: T) -> Self {
                 Self {
                     composition: self.composition.with_container_name(handle),
