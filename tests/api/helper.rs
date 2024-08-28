@@ -1,4 +1,4 @@
-use bollard::Docker;
+use bollard::{secret::ContainerStateStatusEnum, Docker};
 use dockertest::{utils::connect_with_local_or_tls_defaults, OperationalContainer};
 
 pub struct TestHelper {
@@ -33,5 +33,34 @@ impl TestHelper {
             .config
             .unwrap()
             .cmd
+    }
+    pub async fn has_tmpfs_mount_point(
+        &self,
+        handle: &OperationalContainer,
+        mount_point: &str,
+    ) -> bool {
+        self.client
+            .inspect_container(handle.name(), None)
+            .await
+            .unwrap()
+            .host_config
+            .unwrap()
+            .tmpfs
+            .unwrap()
+            .contains_key(mount_point)
+    }
+
+    pub async fn container_status(
+        &self,
+        handle: &OperationalContainer,
+    ) -> ContainerStateStatusEnum {
+        self.client
+            .inspect_container(handle.name(), None)
+            .await
+            .unwrap()
+            .state
+            .unwrap()
+            .status
+            .unwrap()
     }
 }
