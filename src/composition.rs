@@ -203,6 +203,14 @@ pub struct Composition {
     /// Logging options for this specific container.
     pub(crate) log_options: Option<LogOptions>,
 
+    /// Tmpfs mount paths to create.
+    ///
+    /// These are destination paths within the container to create tmpfs filesystems for,
+    /// they require no source paths.
+    ///
+    /// tmpfs details: <https://docs.docker.com/engine/storage/tmpfs/>
+    pub(crate) tmpfs: Vec<String>,
+
     /// Whether this composition should be started in privileged mode.
     /// Privileged mode is required for some images, such as the `docker:dind` image.
     /// See https://docs.docker.com/engine/reference/run/#runtime-privilege-and-linux-capabilities
@@ -243,6 +251,7 @@ impl Composition {
             management: None,
             log_options: Some(LogOptions::default()),
             privileged: false,
+            tmpfs: Vec::new(),
         }
     }
 
@@ -269,6 +278,20 @@ impl Composition {
             management: None,
             log_options: Some(LogOptions::default()),
             privileged: false,
+            tmpfs: Vec::new(),
+        }
+    }
+
+    /// Adds the given tmpfs mount paths to this [Composition]
+    ///
+    /// See [tmpfs] for details.
+    ///
+    /// [tmpfs]: Composition::tmpfs
+    #[cfg(target_os = "linux")]
+    pub fn with_tmpfs(self, paths: Vec<String>) -> Composition {
+        Composition {
+            tmpfs: paths,
+            ..self
         }
     }
 
@@ -405,6 +428,24 @@ impl Composition {
     /// [with_cmd]: Composition::with_cmd
     pub fn cmd<T: ToString>(&mut self, cmd: T) -> &mut Composition {
         self.cmd.push(cmd.to_string());
+        self
+    }
+
+    /// Appends the tmpfs mount path to the current set of tmpfs mount paths.
+    ///
+    /// NOTE: if [with_tmpfs] is called after a call to [tmpfs], all entries to the tmpfs vector
+    /// added with [with_tmpfs] will be overwritten.
+    ///
+    /// Details:
+    ///   - Only available on linux.
+    ///   - Size of the tmpfs mount defaults to 50% of the hosts total RAM.
+    ///   - Defaults to file mode '1777' (world-writable).
+    ///
+    /// [tmpfs]: Composition::tmpfs
+    /// [with_tmpfs]: Composition::with_tmpfs
+    #[cfg(target_os = "linux")]
+    pub fn tmpfs<T: ToString>(&mut self, path: T) -> &mut Composition {
+        self.tmpfs.push(path.to_string());
         self
     }
 

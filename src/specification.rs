@@ -80,6 +80,36 @@ macro_rules! impl_specify_container {
                 }
             }
 
+            /// Appends the tmpfs mount path to the current set of tmpfs mount paths.
+            ///
+            /// Details:
+            ///   - Only available on linux.
+            ///   - Size of the tmpfs mount defaults to 50% of the hosts total RAM.
+            ///   - Defaults to file mode '1777' (world-writable).
+            ///
+            /// [tmpfs]: Self::tmpfs
+            /// [replace_tmpfs]: Self::replace_tmpfs
+            #[cfg(target_os = "linux")]
+            pub fn tmpfs<T: ToString>(&mut self, path: T) -> &mut Self {
+                self.composition.tmpfs(path.to_string());
+                self
+            }
+
+            /// Replaces all the tmpfs mount paths for the [OperationalContainer]
+            ///
+            /// This method replaces all existing tmpfs mount paths previously provided.
+            ///
+            /// See [tmpfs] for details.
+            ///
+            /// [tmpfs]: Self::tmpfs
+            /// [OperationalContainer]: crate::container::OperationalContainer
+            #[cfg(target_os = "linux")]
+            pub fn replace_tmpfs(self, paths: Vec<String>) -> Self {
+                Self {
+                    composition: self.composition.with_tmpfs(paths),
+                }
+            }
+
             /// Append a command entry into the command vector.
             ///
             /// A [replace_cmd] call will undo what has been configured individually with this

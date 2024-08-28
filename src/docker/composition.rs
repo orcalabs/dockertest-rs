@@ -117,13 +117,32 @@ impl Docker {
         let network_aliases = composition.network_aliases.as_ref();
         let mut net_config = None;
 
+        let static_management_policy = composition.static_management_policy().clone();
+        let handle = composition.handle();
+
+        #[cfg(target_os = "linux")]
+        let tmpfs: Option<HashMap<String, String>> = Some(
+            composition
+                .tmpfs
+                .into_iter()
+                .map(|v| (v, "".into()))
+                .collect::<HashMap<String, String>>(),
+        );
+
+        #[cfg(not(target_os = "linux"))]
+        let tmpfs = None;
+
+        let publish_all_ports = composition.publish_all_ports;
+        let privileged = composition.privileged;
+
         // Construct host config
         let host_config = network.map(|n| HostConfig {
             network_mode: Some(n.to_string()),
             binds: Some(volumes),
             port_bindings: Some(port_map),
-            publish_all_ports: Some(composition.publish_all_ports),
-            privileged: Some(composition.privileged),
+            publish_all_ports: Some(publish_all_ports),
+            privileged: Some(privileged),
+            tmpfs,
             ..Default::default()
         });
 
@@ -167,11 +186,10 @@ impl Docker {
             .await
             .map_err(|e| DockerTestError::Daemon(format!("failed to create container: {}", e)))?;
 
-        let static_management_policy = composition.static_management_policy().clone();
         Ok(PendingContainer::new(
             &container_name_clone,
             container_info.id,
-            composition.handle(),
+            handle,
             start_policy_clone,
             composition.wait,
             self.clone(),
