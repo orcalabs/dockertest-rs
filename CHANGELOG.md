@@ -4,11 +4,21 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.5.0]
+
+### Added
+
+- Added support for pausing and stopping containers within the test body.
+- Added support for tmpfs mounts.
+
 ### Changed
 
 - Make `Image` `Send` + `Sync`.
 - Upgrade all dependencies, notable:
   - bollard from 0.15 to 0.17
+- Added `expected_state` method to the `WaitFor` trait with a default
+  implementation returning a `Running` state.
+- BREAKING Renamed `RunningContainer` to `OperationalContainer`
 
 ## [0.4.0]
 
