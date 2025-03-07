@@ -464,10 +464,7 @@ impl Engine<Orbiting> {
     }
 
     pub fn resolve_handle(&self, handle: &str) -> Option<&OperationalContainer> {
-        let index = match self.keeper.lookup_handlers.get(handle) {
-            None => return None,
-            Some(i) => i,
-        };
+        let index = self.keeper.lookup_handlers.get(handle)?;
 
         match &self.phase.kept[*index] {
             Transitional::Running(r) => Some(r),
