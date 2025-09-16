@@ -9,11 +9,11 @@ use tracing::{event, Level};
 /// Specifies the starting policy of a container specification.
 ///
 /// - [StartPolicy::Strict] policy will enforce that the container is started in the order
-///     it was added to [DockerTest].
+///   it was added to [DockerTest].
 /// - [StartPolicy::Relaxed] policy will not enforce any ordering,
-///     all container specifications with a relaxed policy will be started concurrently.
-///     These are all started asynchrously started before the strict policy containers
-///     are started sequentially.
+///   all container specifications with a relaxed policy will be started concurrently.
+///   These are all started asynchrously started before the strict policy containers
+///   are started sequentially.
 ///
 /// [DockerTest]: crate::DockerTest
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -27,22 +27,22 @@ pub enum StartPolicy {
 /// Specifies who is responsible for managing a static container.
 ///
 /// - [StaticManagementPolicy::External] indicates that the user is responsible for managing the
-///     container, DockerTest will never start or remove/stop the container. The container will
-///     be available through its handle in [DockerOperations]. If no external network is
-///     supplied, the test-scoped network will be added to the external network, and subsequently
-///     removed once the test terminates.
-///     The externally managed container is assumed to be in a running state when the test starts.
-///     If DockerTest cannot locate the the container, the test will fail.
+///   container, DockerTest will never start or remove/stop the container. The container will
+///   be available through its handle in [DockerOperations]. If no external network is
+///   supplied, the test-scoped network will be added to the external network, and subsequently
+///   removed once the test terminates.
+///   The externally managed container is assumed to be in a running state when the test starts.
+///   If DockerTest cannot locate the the container, the test will fail.
 /// - [StaticManagementPolicy::Internal] indicates that DockerTest will handle the lifecycle of
-///     the container between all DockerTest instances within the test binary.
+///   the container between all DockerTest instances within the test binary.
 /// - [StaticManagementPolicy::Dynamic] indicates that DockerTest will start the
-///     container if it does not already exists and will not clean it up. This way the same
-///     container can be re-used across multiple `cargo test` invocations.
-///     If the `DOCKERTEST_DYNAMIC` environment variable is set to `INTERNAL` or `EXTERNAL`, the management policy
-///     will instead be set accordingly (either [StaticManagementPolicy::Internal] or [StaticManagementPolicy::External].
-///     The purpose of this is to facilitate running tests locally and in CI/CD pipelines without having to alter management policies.
-///     If a container already exists in a non-running state with the same name as a container with this policy, the startup
-///     procedure will fail.
+///   container if it does not already exists and will not clean it up. This way the same
+///   container can be re-used across multiple `cargo test` invocations.
+///   If the `DOCKERTEST_DYNAMIC` environment variable is set to `INTERNAL` or `EXTERNAL`, the management policy
+///   will instead be set accordingly (either [StaticManagementPolicy::Internal] or [StaticManagementPolicy::External].
+///   The purpose of this is to facilitate running tests locally and in CI/CD pipelines without having to alter management policies.
+///   If a container already exists in a non-running state with the same name as a container with this policy, the startup
+///   procedure will fail.
 ///
 /// [DockerOperations]: crate::DockerOperations
 #[derive(Clone, Debug, PartialEq, Eq)]
