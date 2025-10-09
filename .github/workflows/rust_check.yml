@@ -10,53 +10,36 @@ on:
       - master
 
 jobs:
-  fmt:
-    runs-on: ubuntu-latest
+  platforms:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ["ubuntu-latest", "macos-15", "windows-2022"]
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v5
       - name: Install rustup toolchain
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
-      - name: cargo fmt
-        run: |
-          cd src
-          cargo fmt -- --check
-  clippy:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - name: Install rustup toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-      - name: cargo clippy
-        run: |
-          cd src
-          cargo clippy
-  doc:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - name: Install rustup toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-      - name: cargo doc
-        run: |
-          cd src
-          cargo doc --no-deps
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - name: Install rustup toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-      - name: cargo test
-        run: |
-          cd src
-          export DOCKERTEST_DYNAMIC=INTERNAL
-          export DOCKERTEST_BUILD_TEST_IMAGES=1
-          cargo test
+          components: rustfmt, clippy
+
+      - name: Check cargo fmt
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy
+
+      - name: Doc
+        run: cargo doc --no-deps
+
+      - name: Tests
+        if: runner.os == 'linux'
+        env:
+          DOCKERTEST_DYNAMIC: INTERNAL
+          DOCKERTEST_BUILD_TEST_IMAGES: 1
+        run: cargo test
+
+      - name: Build tests
+        if: runner.os != 'linux'
+        run: cargo test build
