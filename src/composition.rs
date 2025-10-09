@@ -206,9 +206,10 @@ pub struct Composition {
     /// Tmpfs mount paths to create.
     ///
     /// These are destination paths within the container to create tmpfs filesystems for,
-    /// they require no source paths.
+    /// they require no source paths. Only available on linux.
     ///
     /// tmpfs details: <https://docs.docker.com/engine/storage/tmpfs/>
+    #[cfg(target_os = "linux")]
     pub(crate) tmpfs: Vec<String>,
 
     /// Whether this composition should be started in privileged mode.
@@ -251,6 +252,7 @@ impl Composition {
             management: None,
             log_options: Some(LogOptions::default()),
             privileged: false,
+            #[cfg(target_os = "linux")]
             tmpfs: Vec::new(),
         }
     }
@@ -278,6 +280,7 @@ impl Composition {
             management: None,
             log_options: Some(LogOptions::default()),
             privileged: false,
+            #[cfg(target_os = "linux")]
             tmpfs: Vec::new(),
         }
     }

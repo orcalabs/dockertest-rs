@@ -11,3 +11,6 @@ mod privileged_container;
 mod readme;
 mod static_containers;
 mod waitfor;
+
+#[cfg(target_os = "linux")]
+mod tmpfs;

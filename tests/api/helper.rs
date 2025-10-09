@@ -1,4 +1,4 @@
-use bollard::{container::InspectContainerOptions, secret::ContainerStateStatusEnum, Docker};
+use bollard::{container::InspectContainerOptions, Docker};
 use dockertest::{utils::connect_with_local_or_tls_defaults, ContainerState, OperationalContainer};
 
 pub struct TestHelper {
@@ -47,6 +47,8 @@ impl TestHelper {
             .unwrap()
             .cmd
     }
+
+    #[cfg(target_os = "linux")]
     pub async fn has_tmpfs_mount_point(
         &self,
         handle: &OperationalContainer,
@@ -63,10 +65,12 @@ impl TestHelper {
             .contains_key(mount_point)
     }
 
+    // Currently limited to linux as its only used in `tmpfs` tests.
+    #[cfg(target_os = "linux")]
     pub async fn container_status(
         &self,
         handle: &OperationalContainer,
-    ) -> ContainerStateStatusEnum {
+    ) -> bollard::secret::ContainerStateStatusEnum {
         self.client
             .inspect_container(handle.name(), None)
             .await
