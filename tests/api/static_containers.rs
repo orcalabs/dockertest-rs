@@ -6,7 +6,10 @@ use dockertest::{
     TestBodySpecification, TestSuiteSpecification,
 };
 
-use bollard::container::{Config, CreateContainerOptions, StartContainerOptions};
+use bollard::{
+    models::ContainerCreateBody,
+    query_parameters::{CreateContainerOptions, StartContainerOptions},
+};
 
 use std::sync::{Arc, LazyLock, Mutex};
 
@@ -49,7 +52,7 @@ async fn test_external_static_container_handle_resolves_correctly_mixed_with_oth
 
     // Run the external container
     let client = connect_with_local_or_tls_defaults().expect("connect to docker engine");
-    let config = Config::<String> {
+    let config = ContainerCreateBody {
         image: Some(
             client
                 .inspect_image(&format!("{}:{}", "dockertest-rs/hello", "latest"))
@@ -60,8 +63,8 @@ async fn test_external_static_container_handle_resolves_correctly_mixed_with_oth
         ..Default::default()
     };
     let options = Some(CreateContainerOptions {
-        name: &s1_name,
-        platform: None,
+        name: Some(s1_name.to_string()),
+        platform: "".to_string(),
     });
     let id = client
         .create_container(options, config)
@@ -69,7 +72,7 @@ async fn test_external_static_container_handle_resolves_correctly_mixed_with_oth
         .expect("create external container")
         .id;
     client
-        .start_container(&id, None::<StartContainerOptions<String>>)
+        .start_container(&id, None::<StartContainerOptions>)
         .await
         .expect("start external container");
 

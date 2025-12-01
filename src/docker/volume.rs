@@ -1,4 +1,4 @@
-use bollard::volume::RemoveVolumeOptions;
+use bollard::query_parameters::RemoveVolumeOptions;
 use futures::future::join_all;
 use tracing::{event, Level};
 

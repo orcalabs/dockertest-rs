@@ -1,7 +1,8 @@
 use super::Docker;
 use crate::{DockerTestError, Image, Source};
 use bollard::{
-    auth::DockerCredentials, errors::Error, image::CreateImageOptions, secret::CreateImageInfo,
+    auth::DockerCredentials, errors::Error, query_parameters::CreateImageOptions,
+    secret::CreateImageInfo,
 };
 use futures::StreamExt;
 use tracing::{debug, event, Level};
@@ -71,9 +72,9 @@ impl Docker {
         auth: Option<DockerCredentials>,
     ) -> Result<(), DockerTestError> {
         debug!("pulling image: {}:{}", image.repository, image.tag);
-        let options = Some(CreateImageOptions::<&str> {
-            from_image: &image.repository,
-            tag: &image.tag,
+        let options = Some(CreateImageOptions {
+            from_image: Some(image.repository.to_string()),
+            tag: Some(image.tag.to_string()),
             ..Default::default()
         });
 

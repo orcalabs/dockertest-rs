@@ -40,9 +40,9 @@ pub fn connect_with_local_or_tls_defaults() -> Result<Docker, DockerTestError> {
 #[doc(hidden)]
 pub fn generate_random_string(len: i32) -> String {
     let mut random_string = String::new();
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     for _i in 0..len {
-        let letter: char = rng.gen_range(b'a'..=b'z') as char;
+        let letter: char = rng.random_range(b'a'..=b'z') as char;
         random_string.push(letter);
     }
 

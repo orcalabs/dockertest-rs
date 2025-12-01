@@ -1,4 +1,4 @@
-use bollard::{container::InspectContainerOptions, Docker};
+use bollard::{query_parameters::InspectContainerOptions, Docker};
 use dockertest::{utils::connect_with_local_or_tls_defaults, ContainerState, OperationalContainer};
 
 pub struct TestHelper {
@@ -26,7 +26,7 @@ impl TestHelper {
 
     pub async fn env_value(&self, handle: &OperationalContainer, env: &str) -> Option<String> {
         self.client
-            .inspect_container(handle.name(), None)
+            .inspect_container(handle.name(), None::<InspectContainerOptions>)
             .await
             .unwrap()
             .config
@@ -40,7 +40,7 @@ impl TestHelper {
 
     pub async fn cmd(&self, handle: &OperationalContainer) -> Option<Vec<String>> {
         self.client
-            .inspect_container(handle.name(), None)
+            .inspect_container(handle.name(), None::<InspectContainerOptions>)
             .await
             .unwrap()
             .config
@@ -55,7 +55,7 @@ impl TestHelper {
         mount_point: &str,
     ) -> bool {
         self.client
-            .inspect_container(handle.name(), None)
+            .inspect_container(handle.name(), None::<InspectContainerOptions>)
             .await
             .unwrap()
             .host_config
@@ -72,7 +72,7 @@ impl TestHelper {
         handle: &OperationalContainer,
     ) -> bollard::secret::ContainerStateStatusEnum {
         self.client
-            .inspect_container(handle.name(), None)
+            .inspect_container(handle.name(), None::<InspectContainerOptions>)
             .await
             .unwrap()
             .state

@@ -7,12 +7,13 @@ use crate::{
     DockerTestError, OperationalContainer, PendingContainer,
 };
 use bollard::{
-    container::{
-        InspectContainerOptions, KillContainerOptions, LogOutput, RemoveContainerOptions,
+    container::LogOutput,
+    errors::Error,
+    models::NetworkDisconnectRequest,
+    query_parameters::{
+        InspectContainerOptions, KillContainerOptions, RemoveContainerOptions,
         StartContainerOptions, StopContainerOptions,
     },
-    errors::Error,
-    network::DisconnectNetworkOptions,
     secret::ContainerInspectResponse,
 };
 use bytes::Bytes;
@@ -96,7 +97,9 @@ impl Docker {
         self.client
             .kill_container(
                 container_name,
-                Some(KillContainerOptions { signal: "SIGKILL" }),
+                Some(KillContainerOptions {
+                    signal: "SIGKILL".to_string(),
+                }),
             )
             .await
             .map_err(|e| DockerTestError::Daemon(format!("failed to kill container: {e:?}")))
@@ -133,7 +136,7 @@ impl Docker {
         container_id: &str,
         source: ContainerLogSource,
     ) -> impl Stream<Item = Result<LogEntry, DockerTestError>> {
-        let mut log_options = bollard::container::LogsOptions::<String> {
+        let mut log_options = bollard::query_parameters::LogsOptions {
             follow: true,
             ..Default::default()
         };
@@ -244,7 +247,7 @@ impl Docker {
         mut pending: PendingContainer,
     ) -> Result<OperationalContainer, DockerTestError> {
         self.client
-            .start_container(&pending.name, None::<StartContainerOptions<String>>)
+            .start_container(&pending.name, None::<StartContainerOptions>)
             .await
             .map_err(|e| match e {
                 Error::DockerResponseServerError {
@@ -323,9 +326,9 @@ impl Docker {
 
     // TODO: isolate to static mod only
     pub async fn disconnect_container(&self, container_id: &str, network: &str) {
-        let opts = DisconnectNetworkOptions::<&str> {
-            container: container_id,
-            force: true,
+        let opts = NetworkDisconnectRequest {
+            container: Some(container_id.to_string()),
+            force: Some(true),
         };
         if let Err(e) = self.client.disconnect_network(network, opts).await {
             event!(
