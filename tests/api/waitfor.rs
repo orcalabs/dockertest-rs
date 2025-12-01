@@ -7,7 +7,7 @@ use dockertest::{
     TestBodySpecification,
 };
 
-use bollard::container::InspectContainerOptions;
+use bollard::query_parameters::InspectContainerOptions;
 use futures::future::TryFutureExt;
 use test_log::test;
 

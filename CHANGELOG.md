@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- Upgrade all dependencies, notable:
+  - bollard from 0.17 to 0.19
+
 ## [0.5.0]
 
 ### Added

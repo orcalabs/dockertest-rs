@@ -3,7 +3,7 @@
 use crate::DockerTestError;
 use base64::{engine::general_purpose, Engine};
 use bollard::auth::DockerCredentials;
-use secrecy::{ExposeSecret, Secret};
+use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
 use std::sync::{Arc, RwLock};
 use tracing::{debug, trace};
@@ -50,7 +50,7 @@ pub struct RegistryCredentials {
     /// Username of the credentials against the registry.
     pub username: String,
     /// Password of the credentials against the registry.
-    pub password: Secret<String>,
+    pub password: SecretString,
 }
 
 /// The policy for pulling from remote locations.
@@ -200,7 +200,7 @@ impl Image {
             Source::RegistryWithCredentials(r) => {
                 let credentials = DockerCredentials {
                     username: Some(r.username.clone()),
-                    password: Some(r.password.expose_secret().clone()),
+                    password: Some(r.password.expose_secret().to_string()),
                     serveraddress: Some(r.address.clone()),
                     ..Default::default()
                 };
@@ -318,7 +318,7 @@ fn resolve_docker_login_auth(address: &str) -> Result<DockerCredentials, String>
 
 impl RegistryCredentials {
     /// Creates a new [RegistryCredentials]
-    pub fn new(address: String, username: String, password: Secret<String>) -> RegistryCredentials {
+    pub fn new(address: String, username: String, password: SecretString) -> RegistryCredentials {
         RegistryCredentials {
             address,
             username,

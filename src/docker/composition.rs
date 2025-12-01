@@ -4,11 +4,9 @@ use crate::{
     DockerTestError, Network, PendingContainer,
 };
 use bollard::{
-    container::{
-        Config, CreateContainerOptions, InspectContainerOptions, NetworkingConfig,
-        RemoveContainerOptions,
-    },
     models::HostConfig,
+    models::NetworkingConfig,
+    query_parameters::{CreateContainerOptions, InspectContainerOptions, RemoveContainerOptions},
     service::{EndpointSettings, PortBinding},
 };
 use std::collections::HashMap;
@@ -78,8 +76,7 @@ impl Docker {
             .iter()
             .map(|(key, value)| format!("{}={}", key, value))
             .collect();
-        let envs = envs.iter().map(|s| s.as_ref()).collect();
-        let cmds = composition.cmd.iter().map(|s| s.as_ref()).collect();
+        let cmds = composition.cmd.to_vec();
 
         let mut volumes: Vec<String> = Vec::new();
         for v in composition.bind_mounts.iter() {
@@ -103,7 +100,7 @@ impl Docker {
         }
 
         let mut port_map: HashMap<String, Option<Vec<PortBinding>>> = HashMap::new();
-        let mut exposed_ports: HashMap<&str, HashMap<(), ()>> = HashMap::new();
+        let mut exposed_ports: HashMap<String, HashMap<(), ()>> = HashMap::new();
 
         for (exposed, host) in &composition.port {
             let dest_port: Vec<PortBinding> = vec![PortBinding {
@@ -111,7 +108,7 @@ impl Docker {
                 host_port: Some(host.clone()),
             }];
             port_map.insert(exposed.to_string(), Some(dest_port));
-            exposed_ports.insert(exposed, HashMap::new());
+            exposed_ports.insert(exposed.to_string(), HashMap::new());
         }
 
         let network_aliases = composition.network_aliases.as_ref();
@@ -153,23 +150,24 @@ impl Docker {
                     aliases: Some(a.to_vec()),
                     ..Default::default()
                 };
-                endpoints.insert(n, settings);
+                endpoints.insert(n.to_string(), settings);
                 NetworkingConfig {
-                    endpoints_config: endpoints,
+                    endpoints_config: Some(endpoints),
                 }
             });
         }
 
         // Construct options for create container
         let options = Some(CreateContainerOptions {
-            name: &composition.container_name,
+            name: Some(composition.container_name),
             // Sets the platform of the server if its multi-platform capable, we might support user
             // provided values here at a later time.
-            platform: None,
+            // If not set uses the native OS/Arch to lookup images
+            platform: "".to_string(),
         });
 
-        let config = Config::<&str> {
-            image: Some(&image_id),
+        let config = bollard::models::ContainerCreateBody {
+            image: Some(image_id),
             cmd: Some(cmds),
             env: Some(envs),
             networking_config: net_config,

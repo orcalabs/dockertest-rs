@@ -3,7 +3,7 @@ use crate::{
     OperationalContainer,
 };
 use bollard::{
-    container::{InspectContainerOptions, RemoveContainerOptions},
+    query_parameters::{InspectContainerOptions, RemoveContainerOptions},
     secret::ContainerStateStatusEnum,
 };
 

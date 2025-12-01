@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 
-use bollard::network::{CreateNetworkOptions, DisconnectNetworkOptions, ListNetworksOptions};
+use bollard::{
+    models::{NetworkConnectRequest, NetworkCreateRequest, NetworkDisconnectRequest},
+    query_parameters::ListNetworksOptions,
+};
 use tracing::{event, Level};
 
 use crate::DockerTestError;
@@ -12,20 +15,15 @@ impl Docker {
         &self,
         network_name: String,
     ) -> Result<String, DockerTestError> {
-        let config = CreateNetworkOptions {
-            name: network_name.as_str(),
+        let config = NetworkCreateRequest {
+            name: network_name.clone(),
             ..Default::default()
         };
 
         event!(Level::TRACE, "creating singular network");
 
         match self.client.create_network(config).await {
-            Ok(resp) => match resp.id {
-                Some(id) => Ok(id),
-                None => Err(DockerTestError::Startup(
-                    "failed to get id of singular network".to_string(),
-                )),
-            },
+            Ok(resp) => Ok(resp.id),
             Err(e) => {
                 match e {
                     bollard::errors::Error::DockerResponseServerError {
@@ -59,9 +57,11 @@ impl Docker {
         network_name: &str,
     ) -> Result<Option<String>, DockerTestError> {
         let mut filter = HashMap::with_capacity(1);
-        filter.insert("name", vec![network_name]);
+        filter.insert("name".to_string(), vec![network_name.to_string()]);
 
-        let opts = ListNetworksOptions { filters: filter };
+        let opts = ListNetworksOptions {
+            filters: Some(filter),
+        };
         let networks = self
             .client
             .list_networks(Some(opts))
@@ -98,8 +98,8 @@ impl Docker {
         network_name: &str,
         self_container: Option<&str>,
     ) -> Result<(), DockerTestError> {
-        let config = CreateNetworkOptions {
-            name: network_name,
+        let config = NetworkCreateRequest {
+            name: network_name.to_string(),
             ..Default::default()
         };
 
@@ -139,9 +139,9 @@ impl Docker {
     /// Make sure we remove the network we have previously created.
     pub(crate) async fn delete_network(&self, network_name: &str, self_container: Option<&str>) {
         if let Some(id) = self_container {
-            let opts = DisconnectNetworkOptions::<&str> {
-                container: id,
-                force: true,
+            let opts = NetworkDisconnectRequest {
+                container: Some(id.to_string()),
+                force: Some(true),
             };
             if let Err(e) = self.client.disconnect_network(network_name, opts).await {
                 event!(
@@ -173,9 +173,9 @@ impl Docker {
             container_id,
             network_name,
         );
-        let opts = bollard::network::ConnectNetworkOptions {
-            container: container_id,
-            endpoint_config: bollard::models::EndpointSettings::default(),
+        let opts = NetworkConnectRequest {
+            container: Some(container_id.to_string()),
+            endpoint_config: Some(bollard::models::EndpointSettings::default()),
         };
 
         self.client
@@ -195,9 +195,9 @@ impl Docker {
         container_id: &str,
         network: &str,
     ) -> Result<(), DockerTestError> {
-        let opts = bollard::network::ConnectNetworkOptions {
-            container: container_id,
-            endpoint_config: bollard::models::EndpointSettings::default(),
+        let opts = NetworkConnectRequest {
+            container: Some(container_id.to_string()),
+            endpoint_config: Some(bollard::models::EndpointSettings::default()),
         };
 
         event!(
