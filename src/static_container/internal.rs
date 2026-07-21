@@ -217,7 +217,7 @@ impl InternalContainers {
 
     async fn disconnect(&self, client: &Docker, network: &str, to_cleanup: &HashSet<&str>) {
         let map = self.inner.read().await;
-        for (_, container) in map.iter() {
+        for container in map.values() {
             if let InternalStatus::Operational(r, _) = &container.status {
                 if to_cleanup.contains(r.id()) {
                     client.disconnect_container(r.id(), network).await;
@@ -234,7 +234,7 @@ impl InternalContainers {
         // We assume that if the container failed to be started the container id will be
         // present on the Failure enum variant.
         // This should be set by the start method.
-        for (_, container) in containers.iter_mut() {
+        for container in containers.values_mut() {
             if let Some(container_id) = container.status.container_id() {
                 if to_cleanup.contains(container_id) {
                     container.completion_counter -= 1;

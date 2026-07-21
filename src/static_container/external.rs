@@ -77,7 +77,7 @@ impl ExternalContainers {
 
     async fn disconnect_impl(&self, client: &Docker, network: &str, to_cleanup: &HashSet<&str>) {
         let map = self.inner.read().await;
-        for (_, container) in map.iter() {
+        for container in map.values() {
             if to_cleanup.contains(container.id()) {
                 client.disconnect_container(container.id(), network).await;
             }

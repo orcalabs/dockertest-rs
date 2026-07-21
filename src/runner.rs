@@ -407,12 +407,12 @@ impl Runner {
 
             c.named_volumes.iter().for_each(|(id, path)| {
                 if let Some(suffixed_name) = volume_name_map.get(id) {
-                    volume_names_with_path.push(format!("{}:{}", &suffixed_name, &path));
+                    volume_names_with_path.push(format!("{}:{}", suffixed_name, path));
                 } else {
-                    let volume_name_with_path = format!("{}-{}:{}", id, &suffix, path);
+                    let volume_name_with_path = format!("{}-{}:{}", id, suffix, path);
                     volume_names_with_path.push(volume_name_with_path);
 
-                    let suffixed_volume_name = format!("{}-{}", id, &suffix);
+                    let suffixed_volume_name = format!("{}-{}", id, suffix);
                     volume_name_map.insert(id.to_string(), suffixed_volume_name);
                 }
             });
