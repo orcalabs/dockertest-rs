@@ -163,7 +163,7 @@ impl DynamicContainers {
             Network::External(_) | Network::Singular => (),
             Network::Isolated => {
                 let containers = self.inner.read().await;
-                for (id, _) in containers.iter() {
+                for id in containers.keys() {
                     if to_cleanup.contains(id.as_str()) {
                         client.disconnect_container(id, network).await;
                     }

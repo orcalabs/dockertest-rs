@@ -273,9 +273,9 @@ impl Engine<Igniting> {
         let relaxed_success = Self::wait_for_relaxed_containers(starting_relaxed).await?;
 
         let mut containers = Vec::new();
-        containers.extend(strict_success.into_iter());
-        containers.extend(relaxed_success.into_iter());
-        containers.extend(STATIC_CONTAINERS.external_containers().await.into_iter());
+        containers.extend(strict_success);
+        containers.extend(relaxed_success);
+        containers.extend(STATIC_CONTAINERS.external_containers().await);
 
         // An important consideration herein is to maintain the same insertion order
         // of the original vector, when updating our Transitional::* variants.
